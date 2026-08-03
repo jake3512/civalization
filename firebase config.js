@@ -7,5 +7,5 @@ export const FIREBASE_CONFIG = {
   messagingSenderId: "1079160891199",
   appId: "1:1079160891199:web:e069e5b44404a9f0ac558a",
 };
-export const FIREBASE_ENABLED = FIREBASE_CONFIG.apiKey !== "G-5QFT2Q6Q8G";
+export const FIREBASE_ENABLED = FIREBASE_CONFIG.apiKey !== "AIzaSyCS8xDTdQU2aYytOihvjVc9G9LqZ1CC5M8";
 
