@@ -26,6 +26,8 @@ export const RESOURCES = {
 
   electricity: { name: '전력',   icon: '⚡', color: '#f5d94e' },
   military:    { name: '군사력', icon: '⚔️', color: '#b5433c' },
+
+  steel: { name: '강철 부품', icon: '⚙️', color: '#9fb0b8' }, // 공장 산출물 (벨트 투입 전용)
 };
 
 // ---- 지형 위 자원 노드 (필드에 균일 분포로 생성됨) ----
@@ -68,9 +70,12 @@ export const STRUCTURES = {
   },
   factory: {
     id: 4, name: '공장', volume: 6, footprint: [2, 3],
-    desc: '컨베이어 벨트로 투입된 자원으로 선택한 아이템을 제작합니다.',
+    desc: '컨베이어 벨트로 투입된 자원으로 선택한 아이템을 제작합니다. (창고 자원은 직접 사용 불가 — 반드시 벨트로 투입해야 함)',
     baseCost: { wood: 60, iron_ingot: 20, stone: 30 }, maxLevel: 5, upgradeCostMul: 1.7,
     category: 'production',
+    recipes: {
+      steel: { in: { iron_ingot: 3, coal: 2 }, out: 1, time: 6, requiresBelt: true },
+    },
   },
   smelter: {
     id: 5, name: '제련소', volume: 4, footprint: [2, 2],
@@ -159,6 +164,48 @@ export const STRUCTURES = {
     baseCost: { iron_ingot: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
     category: 'utility',
   },
+};
+
+// ---- 기본으로 해금된 구조물 (연구소 없이도 지을 수 있는 최소 세트) ----
+export const BASE_UNLOCKED = ['capital', 'hub', 'mine', 'belt', 'wall', 'lab'];
+
+// ---- 전력이 필요한 카테고리 ----
+// 발전소 공급 범위 밖이면 아래 카테고리의 구조물은 가동을 멈춘다 (idle).
+// core/utility(발전소 자신, 중심지, 수도, 연구소, 벨트)는 전력 없이도 동작.
+export const POWER_REQUIRED_CATEGORIES = new Set(['extraction', 'production', 'military']);
+
+// ---- 컨베이어 벨트 ----
+// 방향: 0=동(E) 1=남(S) 2=서(W) 3=북(N)
+export const DIR_VECT = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+export const DIR_ARROW = ['→', '↓', '←', '↑'];
+export function beltThroughput(level) { return 10 * level; }
+
+// ---- 연구소 기술 트리 ----
+// requires: 선행 연구(구조물 key) 배열. cost: 연구 자원 소모. time: 필요 틱 수.
+export const TECH_TREE = {
+  smelter:        { cost: { wood: 30, stone: 20 },          time: 3, requires: [] },
+  oil_well:       { cost: { stone: 30, iron_ingot: 10 },     time: 3, requires: ['smelter'] },
+  farm:           { cost: { wood: 30 },                      time: 2, requires: [] },
+  barn:           { cost: { wood: 30, food: 10 },             time: 3, requires: ['farm'] },
+  slaughterhouse: { cost: { wood: 20, iron_ingot: 10 },      time: 3, requires: ['barn'] },
+  power_plant:    { cost: { stone: 40, iron_ingot: 20 },     time: 4, requires: ['smelter'] },
+  factory:        { cost: { wood: 50, iron_ingot: 20 },      time: 5, requires: ['smelter', 'power_plant'] },
+  refinery:       { cost: { stone: 40, iron_ingot: 20 },     time: 4, requires: ['oil_well'] },
+  extractor:      { cost: { stone: 30, copper_ingot: 15 },   time: 4, requires: ['smelter'] },
+  turret:         { cost: { iron_ingot: 20 },                time: 3, requires: ['smelter', 'power_plant'] },
+  outpost:        { cost: { wood: 40, iron_ingot: 20 },      time: 4, requires: ['turret'] },
+};
+
+// ---- 습격(레이더) 밸런스 상수 ----
+export const RAIDER = {
+  spawnChance: 0.12,     // 틱마다 새 습격자가 등장할 확률
+  maxActive: 3,          // 국가당 동시 활성 습격자 수 상한
+  baseHp: 30,
+  hpPerTick: 1,          // 게임 경과에 따른 체력 소폭 증가(간이 스케일링)
+  moveSpeed: 1,          // 틱당 이동 타일 수
+  capitalDamage: 8,      // 수도 도달 시 피해량
+  capitalMaxHp: 100,
+  capitalRegen: 2,       // 틱당 자연 회복량
 };
 
 // 레벨에 따른 업그레이드 비용 계산
