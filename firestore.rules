@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 국가 상태는 Cloud Functions(Admin SDK)만 쓸 수 있다.
+    // Admin SDK는 보안 규칙을 우회하므로, 여기서는 "읽기만 공개 허용,
+    // 클라이언트 쓰기는 전면 금지"로 서버 권위를 강제한다.
+    match /nations/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 전투 로그도 서버(Cloud Functions)만 기록한다.
+    match /battles/{battleId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
