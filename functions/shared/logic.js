@@ -8,7 +8,7 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED } from './data.js';
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -76,6 +76,7 @@ export function build(nation, structKey, x, y, dir = 0) {
     id: nation.nextStructId++, key: structKey, x, y, level: 1,
     recipe: null, dir: structKey === 'belt' ? dir : undefined,
     inputBuffer: {}, idle: false,
+    recruitQueue: structKey === 'outpost' ? [] : undefined,
   };
   nation.structures.push(structure);
 
@@ -109,6 +110,23 @@ export function setRecipe(nation, structId, recipeKey) {
   return { ok: true, structure: s };
 }
 
+/**
+ * 전초기지에서 병력을 모집한다. 국고 골드를 즉시 지불하고 대기열에 넣으며,
+ * 실제 병력이 되려면 벨트로 필요한 장비 아이템이 투입되어야 한다 (simulate.js에서 처리).
+ */
+export function recruitUnit(nation, structId, unitKey, isDefense) {
+  const s = nation.structures.find(s => s.id === structId);
+  if (!s || s.key !== 'outpost') return { ok: false, error: '전초기지를 찾을 수 없습니다' };
+  const unit = isDefense ? UNITS.defense[unitKey] : UNITS.attack[unitKey];
+  if (!unit) return { ok: false, error: '알 수 없는 병종입니다' };
+  if ((nation.resources.gold || 0) < unit.gold) return { ok: false, error: '국고 골드가 부족합니다' };
+
+  nation.resources.gold -= unit.gold;
+  s.recruitQueue = s.recruitQueue || [];
+  s.recruitQueue.push({ unitKey, isDefense: !!isDefense, need: { ...unit.equip } });
+  return { ok: true };
+}
+
 /** 연구소 연구 시작 (동시에 하나만 진행 — 단순화된 규칙) */
 export function startResearch(nation, structKey) {
   if (nation.unlocked.has(structKey)) return { ok: false, error: '이미 해금된 구조물입니다' };
@@ -127,23 +145,109 @@ export function startResearch(nation, structKey) {
 
 /**
  * 전투 판정 (프로토타입: 군사 구조물 총합 비교).
- * 승자는 패자 자원의 일부를 약탈한다.
+ * 승자는 패자 자원의 일부를 약탈하고, 트로피(COC 스타일)를 교환한다.
  */
-export function resolveBattle(attackerPower, defenderPower, defenderResources) {
+export function resolveBattle(attackerPower, defenderPower, defenderResources, attackerTrophies = 0, defenderTrophies = 0) {
   const win = attackerPower >= defenderPower;
   const loot = {};
   if (win) {
     for (const [res, amt] of Object.entries(defenderResources || {})) {
-      loot[res] = Math.floor(amt * 0.1); // 10% 약탈
+      loot[res] = Math.floor(amt * 0.1); // 10% 약탈 (COC의 창고 보호 비율과 비슷한 상한)
     }
   }
-  return { win, loot };
+
+  // 트로피 교환: 상대가 나보다 트로피가 높을수록 승리 시 더 많이 얻고,
+  // 패배 시에는 고정 페널티만 잃는다 (COC의 비대칭 트레이드를 단순화한 버전)
+  let attackerTrophyDelta, defenderTrophyDelta;
+  if (win) {
+    const diff = defenderTrophies - attackerTrophies;
+    const trade = Math.round(WAR.baseTrophyTrade + diff * 0.08);
+    const clamped = Math.max(WAR.minTrophyTrade, Math.min(WAR.maxTrophyTrade, trade));
+    attackerTrophyDelta = clamped;
+    defenderTrophyDelta = -clamped;
+  } else {
+    attackerTrophyDelta = -WAR.lossTrophyPenalty;
+    defenderTrophyDelta = 0; // 방어 성공 시 방어자는 트로피 변동 없음 (COC와 동일)
+  }
+
+  return { win, loot, attackerTrophyDelta, defenderTrophyDelta };
 }
 
-export function militaryPower(nation) {
-  return nation.structures.reduce((sum, s) => {
+/** 공격력: 보유한 공격 유닛들의 전투력 합 (수비 유닛/터렛/방벽은 포함되지 않음) */
+export function getAttackPower(nation) {
+  const units = (nation.units && nation.units.attack) || {};
+  return Object.entries(units).reduce((sum, [key, count]) => sum + (UNITS.attack[key]?.power || 0) * count, 0);
+}
+
+/** 방어력: 수비 유닛 + 터렛(레벨 비례, 유휴 상태면 제외) + 방벽(레벨 비례)의 합 */
+export function getDefensePower(nation) {
+  const units = (nation.units && nation.units.defense) || {};
+  let power = Object.entries(units).reduce((sum, [key, count]) => sum + (UNITS.defense[key]?.power || 0) * count, 0);
+  for (const s of nation.structures) {
     const def = STRUCTURES[s.key];
-    if (def.category === 'military') return sum + (def.attack || def.defense || def.baseProduction || 1) * s.level;
-    return sum;
-  }, 0);
+    if (!def) continue;
+    if (def.category === 'turret' && !s.idle) power += (def.attack || 0) * s.level;
+    if (s.key === 'wall') power += (def.defense || 0) * s.level;
+  }
+  return power;
+}
+
+// ---------------- 실드(보호막) · 매치메이킹 ----------------
+
+export function isShielded(nation, now = Date.now()) {
+  return (nation.shieldUntil || 0) > now;
+}
+
+/**
+ * 공격 가능 여부 확인. 불가하면 이유 문자열을 반환한다.
+ */
+export function canAttack(attacker, defender, now = Date.now()) {
+  if (attacker.id === defender.id) return '자기 자신은 공격할 수 없습니다';
+  if (isShielded(defender, now)) return '상대가 보호막(실드)으로 보호받고 있습니다';
+  return null;
+}
+
+/**
+ * 공격 실행 결과를 양측 국가 상태에 반영한다 (자원 약탈, 트로피, 실드 갱신).
+ * attacker는 공격을 시작하는 순간 자신의 실드를 소모한다 (COC와 동일한 규칙).
+ */
+export function applyAttackResult(attacker, defender, now = Date.now()) {
+  const attackPower = getAttackPower(attacker);
+  const defenderPower = getDefensePower(defender);
+  const { win, loot, attackerTrophyDelta, defenderTrophyDelta } = resolveBattle(
+    attackPower, defenderPower, defender.resources, attacker.trophies || 0, defender.trophies || 0
+  );
+
+  if (win) {
+    for (const [res, amt] of Object.entries(loot)) {
+      defender.resources[res] = Math.max(0, (defender.resources[res] || 0) - amt);
+      attacker.resources[res] = (attacker.resources[res] || 0) + amt;
+    }
+  }
+
+  attacker.trophies = Math.max(0, (attacker.trophies || 0) + attackerTrophyDelta);
+  defender.trophies = Math.max(0, (defender.trophies || 0) + defenderTrophyDelta);
+
+  attacker.shieldUntil = 0;                          // 공격하면 자신의 실드는 즉시 해제
+  defender.shieldUntil = now + WAR.postAttackShieldMs; // 공격당한 쪽은 새 실드를 얻는다 (연쇄 공격 방지)
+
+  return { win, loot, attackPower, defenderPower, attackerTrophyDelta, defenderTrophyDelta };
+}
+
+/**
+ * 후보 목록에서 트로피가 비슷하고, 실드가 없고, 내가 아닌 국가를 하나 찾는다.
+ * (진짜 COC처럼 트로피 차이가 작을수록 우선순위를 높게 준다)
+ */
+export function findMatch(myNation, candidates, now = Date.now()) {
+  const myTrophies = myNation.trophies || 0;
+  const pool = candidates.filter(c =>
+    c.id !== myNation.id &&
+    !isShielded(c, now) &&
+    Math.abs((c.trophies || 0) - myTrophies) <= WAR.matchTrophyRange
+  );
+  if (!pool.length) return null;
+  pool.sort((a, b) => Math.abs((a.trophies || 0) - myTrophies) - Math.abs((b.trophies || 0) - myTrophies));
+  // 가장 비슷한 후보 몇 명 중 무작위로 하나 선택 (매번 같은 상대만 나오지 않도록)
+  const topPool = pool.slice(0, Math.min(5, pool.length));
+  return topPool[Math.floor(Math.random() * topPool.length)];
 }

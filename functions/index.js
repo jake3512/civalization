@@ -18,7 +18,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2';
 
 import { Nation, createNation } from './shared/game.js';
-import { militaryPower, resolveBattle } from './shared/logic.js';
+import { canAttack, applyAttackResult } from './shared/logic.js';
 import { regionKeyOf } from './shared/regionUtil.js';
 
 setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
@@ -107,37 +107,43 @@ export const submitStartResearch = onCall(async (request) => {
   return { ok: true };
 });
 
-// ---------------- 전투 ----------------
+export const submitRecruitUnit = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { structId, unitKey, isDefense } = request.data || {};
+  const err = nation.recruitUnit(structId, unitKey, !!isDefense);
+  if (err) return { error: err };
+  await saveNation(uid, nation);
+  return { ok: true };
+});
+
+// ---------------- 전투 (실드 검사 + 트로피/보호막 갱신 포함) ----------------
 export const submitAttack = onCall(async (request) => {
   const uid = requireAuth(request);
   const { defenderId } = request.data || {};
   if (!defenderId) throw new HttpsError('invalid-argument', '공격 대상이 필요합니다');
-  if (defenderId === uid) throw new HttpsError('invalid-argument', '자기 자신은 공격할 수 없습니다');
 
   const attacker = await loadNation(uid);
   const defender = await loadNation(defenderId);
   if (!attacker || !defender) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
 
-  const attackPower = militaryPower(attacker);
-  const defenderPower = militaryPower(defender);
-  const { win, loot } = resolveBattle(attackPower, defenderPower, defender.resources);
+  const blockReason = canAttack(attacker, defender);
+  if (blockReason) return { error: blockReason };
 
-  if (win) {
-    for (const [res, amt] of Object.entries(loot)) {
-      defender.resources[res] = Math.max(0, (defender.resources[res] || 0) - amt);
-      attacker.resources[res] = (attacker.resources[res] || 0) + amt;
-    }
-  }
+  const result = applyAttackResult(attacker, defender);
 
   await saveNation(uid, attacker);
   await saveNation(defenderId, defender);
   await db.collection('battles').add({
     attackerId: uid, attackerName: attacker.name,
     defenderId, defenderName: defender.name,
-    attackPower, defenderPower, win, timestamp: Date.now(),
+    attackPower: result.attackPower, defenderPower: result.defenderPower,
+    win: result.win, trophyDelta: result.attackerTrophyDelta,
+    timestamp: Date.now(),
   });
 
-  return { win };
+  return { win: result.win, trophyDelta: result.attackerTrophyDelta };
 });
 
 // ---------------- 주기적 생산 틱 (서버 권위) ----------------
