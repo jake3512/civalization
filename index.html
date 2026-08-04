@@ -22,7 +22,8 @@
       <label>국기 색상
         <input id="nation-color" type="color" value="#d98e34" />
       </label>
-      <button id="start-btn">건국하기</button>
+      <button id="start-btn">다음: 수도 위치 선택</button>
+      <p class="hint">다음 화면에서 지도를 움직여 수도를 세울 위치를 직접 골라주세요.</p>
     </div>
   </div>
 
@@ -44,6 +45,20 @@
       <section id="field-wrap">
         <canvas id="field"></canvas>
         <div id="flash" class="flash"></div>
+
+        <!-- 수도 위치 선택 오버레이 (지도가 보이는 상태에서 탭으로 위치 지정) -->
+        <div id="placement-bar" class="placement-bar hidden">
+          <span id="placement-text">지도를 움직여 수도를 세울 칸을 탭하세요</span>
+          <button id="placement-confirm" disabled>이 위치에 수도 건설</button>
+        </div>
+
+        <!-- 터치 전용 툴바: 키보드 없이도 회전/전력범위/줌 조작 -->
+        <div id="touch-toolbar" class="touch-toolbar hidden">
+          <button id="rotate-btn" class="toolbar-btn" title="벨트 방향 회전" disabled>⟳ 회전</button>
+          <button id="power-btn" class="toolbar-btn" title="전력 공급 범위 표시">⚡ 전력범위</button>
+          <button id="zoom-in-btn" class="toolbar-btn" title="확대">＋</button>
+          <button id="zoom-out-btn" class="toolbar-btn" title="축소">－</button>
+        </div>
       </section>
 
       <aside id="right-panel">
