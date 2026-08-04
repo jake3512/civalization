@@ -59,7 +59,6 @@ export class Nation {
     const res = logic.recruitUnit(this, structId, unitKey, isDefense);
     return res.ok ? null : res.error;
   }
-  getAttackPower() { return logic.getAttackPower(this); }
   getDefensePower() { return logic.getDefensePower(this); }
   isShielded(now) { return logic.isShielded(this, now); }
 

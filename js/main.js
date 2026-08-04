@@ -8,17 +8,22 @@
 import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
+import { BattleRenderer } from './battleRender.js';
+import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
-  callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callAttack,
+  callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
 } from './multiplayer.js';
 
 const game = new Game();
 const canvas = document.getElementById('field');
 const renderer = new Renderer(canvas, game);
+
+const battleCanvas = document.getElementById('battle-field');
+const battleRenderer = new BattleRenderer(battleCanvas);
 
 // 자원/상태 아이콘을 <img> 태그로 뽑아주는 헬퍼 (이모지 대신 assets/icons/*.svg 사용)
 const resIcon = (key) => `<img class="ic" src="${RESOURCES[key]?.icon || ''}" alt="${RESOURCES[key]?.name || key}">`;
@@ -436,11 +441,8 @@ function renderMatchCard() {
     return;
   }
   const n = currentMatch;
-  const estLoot = Object.entries(n.resources || {})
-    .filter(([, v]) => v > 0)
-    .slice(0, 4)
-    .map(([r, v]) => `${resIcon(r)}${Math.floor(v * 0.1)}`)
-    .join(' ');
+  const myAttackUnits = Object.entries((game.myNation.units && game.myNation.units.attack) || {}).filter(([, c]) => c > 0);
+  const hasArmy = myAttackUnits.length > 0;
   el.innerHTML = `
     <div class="match-card">
       <div class="match-head">
@@ -448,18 +450,15 @@ function renderMatchCard() {
         <span class="nm">${n.name}</span>
         <span class="trophy">${statusIcon('trophy')} ${n.trophies || 0}</span>
       </div>
-      <div class="pd">예상 방어력 ${getDefensePower(n)} · 약탈 예상 ${estLoot || '없음'}</div>
+      <div class="pd">예상 방어력 ${getDefensePower(n)} · 약탈량은 실제 파괴율에 비례합니다</div>
       <div class="match-actions">
-        <button id="attack-match-btn" class="atk-btn">공격</button>
+        <button id="attack-match-btn" class="atk-btn" ${hasArmy ? '' : 'disabled title="전초기지에서 공격 유닛을 먼저 모집하세요"'}>공격</button>
         <button id="skip-match-btn" class="skip-btn">다른 상대</button>
       </div>
     </div>`;
-  document.getElementById('attack-match-btn').addEventListener('click', async () => {
-    const res = await callAttack(currentMatch.id);
-    if (res.error) { flashMessage(res.error, true); return; }
-    flashMessage(res.win ? `승리! 트로피 +${res.trophyDelta}` : `패배... 트로피 ${res.trophyDelta}`, !res.win);
-    currentMatch = null;
-    renderMatchCard();
+  document.getElementById('attack-match-btn').addEventListener('click', () => {
+    if (!hasArmy) return;
+    openBattleScreen(currentMatch);
   });
   document.getElementById('skip-match-btn').addEventListener('click', () => {
     currentMatch = findMatch(game.myNation, knownNations, Date.now());
@@ -475,6 +474,199 @@ function renderBattleLog(list) {
     const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (${statusIcon('trophy')}${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
     return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
   }).join('') || '<div class="pd">전투 기록 없음</div>';
+}
+
+// ---------------- 실시간 습격 전투 화면 ----------------
+// 실시간 소켓 서버가 없는 프로토타입이라, 방어자의 스냅샷(구조물·영토·병력
+// 로스터·자원)을 그대로 가져와 공격자 브라우저에서 전투 전체를 시뮬레이션한다
+// (battle.js). 서버에는 최종 결과(파괴율·약탈량)만 제출해 검증 후 반영된다.
+let battleSession = null;
+let battleDeployKey = null;      // 배치 모드로 선택된 유닛 key
+let battleRafId = null;
+let battleLastTs = null;
+let battleDragging = false, battleLastX = 0, battleLastY = 0, battleDragged = false;
+let battlePinching = false, battlePinchStartDist = 0;
+
+function openBattleScreen(defenderSnapshot) {
+  const deck = { ...((game.myNation.units && game.myNation.units.attack) || {}) };
+  battleSession = createBattleSession(defenderSnapshot, deck);
+  battleDeployKey = null;
+  battleLastTs = null;
+
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('battle-screen').classList.remove('hidden');
+  document.getElementById('battle-defender-name').textContent = defenderSnapshot.name;
+  document.getElementById('battle-result').classList.add('hidden');
+  document.getElementById('battle-hint').classList.remove('hidden');
+
+  battleRenderer.resize();
+  const capital = battleSession.structures.find(s => s.key === 'capital');
+  battleRenderer.centerOn(capital ? capital.cx : 0, capital ? capital.cy : 0);
+
+  renderDeckTray();
+  if (battleRafId) cancelAnimationFrame(battleRafId);
+  battleRafId = requestAnimationFrame(battleLoop);
+}
+
+function battleLoop(ts) {
+  if (!battleSession) return;
+  if (battleLastTs == null) battleLastTs = ts;
+  const dt = Math.min(0.1, Math.max(0, (ts - battleLastTs) / 1000)); // 탭 비활성 등으로 인한 큰 시간 점프 방지
+  battleLastTs = ts;
+
+  if (!battleSession.ended) stepBattle(battleSession, dt);
+
+  battleRenderer.resize();
+  battleRenderer.draw(battleSession);
+  updateBattleHud();
+
+  if (battleSession.ended) {
+    finishBattle();
+    return;
+  }
+  battleRafId = requestAnimationFrame(battleLoop);
+}
+
+function updateBattleHud() {
+  const t = Math.ceil(battleSession.timeLeft);
+  const m = Math.floor(t / 60), s = t % 60;
+  const timerEl = document.getElementById('battle-timer');
+  timerEl.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  timerEl.classList.toggle('low', t <= 20);
+  document.getElementById('battle-destruction').textContent = `파괴율 ${Math.round(getDestructionPercent(battleSession) * 100)}%`;
+  // 덱 트레이(하단 유닛 버튼)는 여기서 매 프레임 다시 그리지 않는다 — 배치 성공/실패 시에만
+  // renderDeckTray()를 호출한다. 매 프레임 innerHTML을 새로 그리면 버튼 DOM이 계속
+  // 교체되어 탭 입력이 유실될 수 있다.
+}
+
+function renderDeckTray() {
+  const tray = document.getElementById('battle-deck-tray');
+  const entries = Object.entries(battleSession.deck);
+  tray.innerHTML = entries.length ? entries.map(([key, count]) => {
+    const unit = UNITS.attack[key];
+    if (!unit) return '';
+    const active = battleDeployKey === key;
+    return `<button class="deck-unit-btn${active ? ' active' : ''}" data-unit="${key}" ${count <= 0 ? 'disabled' : ''}>
+      <span class="nm">${unit.name}</span><span class="cnt">${count}기 남음</span>
+    </button>`;
+  }).join('') : '<div class="pd">배치할 공격 유닛이 없습니다</div>';
+  tray.querySelectorAll('.deck-unit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      battleDeployKey = battleDeployKey === btn.dataset.unit ? null : btn.dataset.unit;
+      renderDeckTray();
+    });
+  });
+}
+
+function battlePointerDown(x, y) { battleDragging = true; battleDragged = false; battleLastX = x; battleLastY = y; }
+function battlePointerMove(x, y) {
+  const rect = battleCanvas.getBoundingClientRect();
+  battleRenderer.hover = battleRenderer.screenToWorld(x - rect.left, y - rect.top);
+  if (battleDragging) {
+    const dx = x - battleLastX, dy = y - battleLastY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) battleDragged = true;
+    battleRenderer.pan(dx, dy);
+    battleLastX = x; battleLastY = y;
+  }
+}
+function battlePointerUp() { battleDragging = false; }
+
+function battleHandleTap(clientX, clientY) {
+  if (!battleSession || battleSession.ended) return;
+  if (!battleDeployKey) { flashMessage('먼저 하단에서 소환할 유닛을 고르세요', true); return; }
+  const rect = battleCanvas.getBoundingClientRect();
+  const { x, y } = battleRenderer.screenToWorld(clientX - rect.left, clientY - rect.top);
+  const res = deployUnit(battleSession, battleDeployKey, x, y);
+  if (!res.ok) { flashMessage(res.error, true); return; }
+  renderDeckTray();
+}
+
+battleCanvas.addEventListener('mousedown', (e) => battlePointerDown(e.clientX, e.clientY));
+window.addEventListener('mouseup', battlePointerUp);
+battleCanvas.addEventListener('mousemove', (e) => battlePointerMove(e.clientX, e.clientY));
+battleCanvas.addEventListener('click', (e) => { if (!battleDragged) battleHandleTap(e.clientX, e.clientY); });
+
+battleCanvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 2) {
+    battlePinching = true; battleDragging = false;
+    const [t1, t2] = e.touches;
+    battlePinchStartDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+  } else if (e.touches.length === 1) {
+    battlePinching = false;
+    battlePointerDown(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
+battleCanvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (battlePinching && e.touches.length === 2) {
+    const [t1, t2] = e.touches;
+    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    const rect = battleCanvas.getBoundingClientRect();
+    const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+    const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+    battleRenderer.zoomAt(midX, midY, (dist - battlePinchStartDist) * 0.15);
+    battlePinchStartDist = dist;
+  } else if (e.touches.length === 1) {
+    battlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
+battleCanvas.addEventListener('touchend', (e) => {
+  if (battlePinching) { battlePinching = false; battleDragged = true; return; }
+  if (!battleDragged && e.changedTouches.length === 1) {
+    battleHandleTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+  }
+  battleDragging = false;
+});
+
+document.getElementById('battle-zoom-in-btn').addEventListener('click', () => {
+  battleRenderer.zoomAt(battleCanvas.width / 2, battleCanvas.height / 2, 4);
+});
+document.getElementById('battle-zoom-out-btn').addEventListener('click', () => {
+  battleRenderer.zoomAt(battleCanvas.width / 2, battleCanvas.height / 2, -4);
+});
+document.getElementById('battle-retreat-btn').addEventListener('click', () => {
+  if (!battleSession || battleSession.ended) return;
+  retreatBattle(battleSession);
+});
+
+async function finishBattle() {
+  const result = battleSession.result;
+  const defenderId = battleSession.defenderId;
+  document.getElementById('battle-hint').classList.add('hidden');
+
+  const title = document.getElementById('battle-result-title');
+  const body = document.getElementById('battle-result-body');
+  title.textContent = result.win ? (result.perfectVictory ? '완벽한 승리!' : '승리') : '패배';
+  title.className = `battle-result-title ${result.win ? 'win' : 'lose'}`;
+  const lootTxt = Object.entries(result.loot).map(([r, a]) => `${resIcon(r)}${a}`).join(' ') || '없음';
+  body.innerHTML = `
+    파괴율 <b>${Math.round(result.destructionPercent * 100)}%</b><br>
+    약탈(예상) ${lootTxt}<br>
+    서버에 결과를 제출하는 중...`;
+  document.getElementById('battle-result').classList.remove('hidden');
+
+  const res = await callRaidResult(defenderId, result);
+  if (res.error) {
+    body.innerHTML = `
+      파괴율 <b>${Math.round(result.destructionPercent * 100)}%</b><br>
+      약탈(예상) ${lootTxt}<br>
+      <span style="color:var(--danger)">서버 반영 실패: ${res.error}</span>`;
+  } else {
+    const trophyTxt = typeof res.trophyDelta === 'number' ? `${statusIcon('trophy')}${res.trophyDelta >= 0 ? '+' : ''}${res.trophyDelta}` : '';
+    body.innerHTML = `
+      파괴율 <b>${Math.round((res.destructionPercent ?? result.destructionPercent) * 100)}%</b><br>
+      약탈 ${lootTxt}<br>
+      트로피 ${trophyTxt}`;
+  }
+
+  document.getElementById('battle-result-close').onclick = () => {
+    document.getElementById('battle-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    battleSession = null;
+    currentMatch = null;
+    renderMatchCard();
+  };
 }
 
 // ---------- 자원 패널 ----------

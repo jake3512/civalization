@@ -18,7 +18,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2';
 
 import { Nation, createNation } from './shared/game.js';
-import { canAttack, applyAttackResult } from './shared/logic.js';
+import { canAttack, applyRaidResult } from './shared/logic.js';
 import { regionKeyOf } from './shared/regionUtil.js';
 
 setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
@@ -118,11 +118,12 @@ export const submitRecruitUnit = onCall(async (request) => {
   return { ok: true };
 });
 
-// ---------------- 전투 (실드 검사 + 트로피/보호막 갱신 포함) ----------------
-export const submitAttack = onCall(async (request) => {
+// ---------------- 전투 (실시간 습격은 공격자 클라이언트가 로컬로 시뮬레이션하고,
+// 여기서는 그 결과(파괴율·약탈량)만 검증 후 반영한다 — js/battle.js 참고) ----------------
+export const submitRaidResult = onCall(async (request) => {
   const uid = requireAuth(request);
-  const { defenderId } = request.data || {};
-  if (!defenderId) throw new HttpsError('invalid-argument', '공격 대상이 필요합니다');
+  const { defenderId, raidResult } = request.data || {};
+  if (!defenderId || !raidResult) throw new HttpsError('invalid-argument', '공격 대상과 전투 결과가 필요합니다');
 
   const attacker = await loadNation(uid);
   const defender = await loadNation(defenderId);
@@ -131,19 +132,19 @@ export const submitAttack = onCall(async (request) => {
   const blockReason = canAttack(attacker, defender);
   if (blockReason) return { error: blockReason };
 
-  const result = applyAttackResult(attacker, defender);
+  const result = applyRaidResult(attacker, defender, raidResult);
 
   await saveNation(uid, attacker);
   await saveNation(defenderId, defender);
   await db.collection('battles').add({
     attackerId: uid, attackerName: attacker.name,
     defenderId, defenderName: defender.name,
-    attackPower: result.attackPower, defenderPower: result.defenderPower,
+    destructionPercent: result.destructionPercent,
     win: result.win, trophyDelta: result.attackerTrophyDelta,
     timestamp: Date.now(),
   });
 
-  return { win: result.win, trophyDelta: result.attackerTrophyDelta };
+  return { win: result.win, destructionPercent: result.destructionPercent, trophyDelta: result.attackerTrophyDelta };
 });
 
 // ---------------- 주기적 생산 틱 (서버 권위) ----------------
