@@ -32,15 +32,16 @@ export const RESOURCES = {
 
 // ---- 지형 위 자원 노드 (필드에 균일 분포로 생성됨) ----
 // key 는 world.js 의 지형 생성기에서 사용
+// (밀도를 낮게 잡아 필드 전체에서 자원이 희소하게 분포하도록 함)
 export const TERRAIN_NODES = {
-  forest:     { name: '나무 숲',     yields: 'wood',       icon: '🌲', density: 0.05 },
-  quarry:     { name: '채석장',      yields: 'stone',      icon: '⛰️', density: 0.04 },
-  coal_mine:  { name: '석탄광산',    yields: 'coal',       icon: '⚫', density: 0.03 },
-  iron_mine:  { name: '철광석광산',  yields: 'iron_ore',   icon: '🔶', density: 0.03 },
-  gold_mine:  { name: '금광산',      yields: 'gold_ore',   icon: '🟡', density: 0.015 },
-  copper_mine:{ name: '구리광산',    yields: 'copper_ore', icon: '🟠', density: 0.03 },
-  oil_vent:   { name: '원유 분출구', yields: 'crude_oil',  icon: '🛢️', density: 0.02 },
-  mana_mine:  { name: '마석광산',    yields: 'mana_stone', icon: '🔮', density: 0.01 },
+  forest:     { name: '나무 숲',     yields: 'wood',       icon: '🌲', density: 0.008 },
+  quarry:     { name: '채석장',      yields: 'stone',      icon: '⛰️', density: 0.006 },
+  coal_mine:  { name: '석탄광산',    yields: 'coal',       icon: '⚫', density: 0.005 },
+  iron_mine:  { name: '철광석광산',  yields: 'iron_ore',   icon: '🔶', density: 0.005 },
+  gold_mine:  { name: '금광산',      yields: 'gold_ore',   icon: '🟡', density: 0.0025 },
+  copper_mine:{ name: '구리광산',    yields: 'copper_ore', icon: '🟠', density: 0.005 },
+  oil_vent:   { name: '원유 분출구', yields: 'crude_oil',  icon: '🛢️', density: 0.003 },
+  mana_mine:  { name: '마석광산',    yields: 'mana_stone', icon: '🔮', density: 0.0015 },
 };
 export const WATER = { name: '강/호수', icon: '💧', density: 0.06 };
 
@@ -206,6 +207,17 @@ export const RAIDER = {
   capitalDamage: 8,      // 수도 도달 시 피해량
   capitalMaxHp: 100,
   capitalRegen: 2,       // 틱당 자연 회복량
+};
+
+// ---- 클래시오브클랜식 대전 운영 상수 (트로피 · 실드 · 매치메이킹) ----
+export const WAR = {
+  starterShieldMs: 2 * 60 * 60 * 1000,      // 건국 직후 보호막 (2시간)
+  postAttackShieldMs: 4 * 60 * 60 * 1000,   // 공격당한 뒤 부여되는 보호막 (4시간)
+  matchTrophyRange: 150,                     // 매치메이킹 시 허용하는 트로피 격차
+  baseTrophyTrade: 24,                       // 기본 트로피 교환량
+  minTrophyTrade: 6,
+  maxTrophyTrade: 40,
+  lossTrophyPenalty: 8,                      // 공격 실패 시 공격자가 잃는 고정 트로피
 };
 
 // 레벨에 따른 업그레이드 비용 계산
