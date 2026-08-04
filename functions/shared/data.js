@@ -65,7 +65,9 @@ export const WATER = { name: '강/호수', icon: '💧', density: 0.06 };
 
 // ---- 구조물 정의 ----
 // footprint: [가로, 세로] 격자 칸 수 (부피값에서 파생)
-// upgradeGroup: 레벨업 시 어떤 LEVEL_COSTS 표를 쓸지 (없으면 baseCost*upgradeCostMul 기본식 사용)
+// 레벨업 비용은 구조물마다 baseCost * upgradeCostMul^레벨 로 개별 산정된다
+// (getUpgradeCost 참고) — 같은 카테고리라도 baseCost·upgradeCostMul이 다르면
+// 레벨업 비용도 서로 다르게 갈린다 (예: 공장은 제련소보다, TR-06은 TR-01보다 비쌈).
 export const STRUCTURES = {
   capital: {
     id: 1, name: '수도', volume: 9, footprint: [3, 3],
@@ -83,7 +85,7 @@ export const STRUCTURES = {
     id: 3, name: '광산', volume: 1, footprint: [1, 1],
     desc: '광물 자원 노드(채석장/석탄·철·금·구리광산) 위에 설치하면 해당 광석을 생산합니다.',
     baseCost: { wood: 15, stone: 10 }, maxLevel: 5, upgradeCostMul: 1.5,
-    category: 'extraction', upgradeGroup: 'extraction',
+    category: 'extraction',
     requiresNode: ['quarry', 'coal_mine', 'iron_mine', 'gold_mine', 'copper_mine'],
     baseProduction: 2,
   },
@@ -91,14 +93,14 @@ export const STRUCTURES = {
     id: 18, name: '벌목소', volume: 1, footprint: [1, 1],
     desc: '나무 숲 위에 설치하면 목재를 생산합니다.',
     baseCost: { stone: 15 }, maxLevel: 5, upgradeCostMul: 1.5,
-    category: 'extraction', upgradeGroup: 'extraction',
+    category: 'extraction',
     requiresNode: ['forest'], baseProduction: 3,
   },
   factory: {
     id: 4, name: '공장', volume: 6, footprint: [2, 3],
     desc: '컨베이어 벨트로 투입된 자원으로 선택한 아이템을 제작합니다. (창고 자원은 직접 사용 불가 — 반드시 벨트로 투입해야 함)',
     baseCost: { wood: 60, iron_ingot: 20, stone: 30 }, maxLevel: 5, upgradeCostMul: 1.7,
-    category: 'production', upgradeGroup: 'production',
+    category: 'production',
     recipes: {
       // ---- 1단계: 기초 자원 가공 ----
       plank: { in: { wood: 1 }, out: 1, time: 2, requiresBelt: true },
@@ -122,7 +124,7 @@ export const STRUCTURES = {
     id: 5, name: '제련소', volume: 4, footprint: [2, 2],
     desc: '광석을 제련하여 주괴로 만듭니다.',
     baseCost: { wood: 30, stone: 40 }, maxLevel: 5, upgradeCostMul: 1.6,
-    category: 'production', upgradeGroup: 'production',
+    category: 'production',
     recipes: {
       iron_ingot:   { in: { iron_ore: 1 }, out: 1, time: 3 },
       gold_ingot:   { in: { gold_ore: 1 }, out: 1, time: 4 },
@@ -133,14 +135,14 @@ export const STRUCTURES = {
     id: 6, name: '유전', volume: 1, footprint: [1, 1],
     desc: '분출구 위에 설치하면 원유를 생산합니다.',
     baseCost: { stone: 20, iron_ingot: 10 }, maxLevel: 5, upgradeCostMul: 1.5,
-    category: 'extraction', upgradeGroup: 'extraction',
+    category: 'extraction',
     requiresNode: ['oil_vent'], baseProduction: 2,
   },
   refinery: {
     id: 7, name: '정제소', volume: 4, footprint: [2, 2],
     desc: '원유를 석유와 나프타로 정제합니다.',
     baseCost: { stone: 40, iron_ingot: 25 }, maxLevel: 5, upgradeCostMul: 1.7,
-    category: 'production', upgradeGroup: 'production',
+    category: 'production',
     recipes: {
       refine: { in: { crude_oil: 1 }, out: { petroleum: 1, naphtha: 1 }, time: 4 },
     },
@@ -149,7 +151,7 @@ export const STRUCTURES = {
     id: 8, name: '추출기', volume: 1, footprint: [1, 1],
     desc: '마석광산에 설치하여 마석을 생산합니다.',
     baseCost: { stone: 30, copper_ingot: 15 }, maxLevel: 5, upgradeCostMul: 1.6,
-    category: 'extraction', upgradeGroup: 'extraction',
+    category: 'extraction',
     requiresNode: ['mana_mine'], baseProduction: 1,
   },
   farm: {
@@ -175,14 +177,14 @@ export const STRUCTURES = {
     id: 12, name: '발전소', volume: 4, footprint: [2, 2],
     desc: '나무나 석유로 전력을 생산해 일정 범위에 공급합니다.',
     baseCost: { stone: 50, iron_ingot: 20 }, maxLevel: 5, upgradeCostMul: 1.7,
-    category: 'utility', upgradeGroup: 'power',
+    category: 'utility',
     powerRadius: 6, baseProduction: 10,
   },
   wall: {
     id: 13, name: '방벽', volume: 1, footprint: [1, 1],
     desc: '주변 국가의 침입을 막는 방어 구조물.',
     baseCost: { stone: 20 }, maxLevel: 5, upgradeCostMul: 1.4,
-    category: 'defense', upgradeGroup: 'defense', defense: 10,
+    category: 'defense', defense: 10,
   },
 
   // ---- 터렛 6종 (TR-01 ~ TR-06) ----
@@ -190,50 +192,50 @@ export const STRUCTURES = {
     id: 14, code: 'TR-01', name: 'TR-01 기관총 터렛', volume: 1, footprint: [1, 1],
     desc: '기초 수비 시설. 지속적인 전력 공급이 필요합니다.',
     baseCost: { gold: 100, iron_ingot: 5 }, maxLevel: 5, upgradeCostMul: 1.5,
-    category: 'turret', upgradeGroup: 'defense', attack: 8, range: 3, powerDraw: 10,
+    category: 'turret', attack: 8, range: 3, powerDraw: 10,
   },
   turret_02: {
     id: 14, code: 'TR-02', name: 'TR-02 화염 투사 터렛', volume: 1, footprint: [1, 1],
     desc: '근거리 범위 공격을 담당하는 터렛.',
     baseCost: { gold: 200, petroleum: 10 }, maxLevel: 5, upgradeCostMul: 1.5,
-    category: 'turret', upgradeGroup: 'defense', attack: 14, range: 2, powerDraw: 15,
+    category: 'turret', attack: 14, range: 2, powerDraw: 15,
   },
   turret_03: {
     id: 14, code: 'TR-03', name: 'TR-03 대공 미사일 포탑', volume: 1, footprint: [1, 1],
     desc: '적 공중 유닛을 격추하는 포탑.',
     baseCost: { gold: 300, circuit_board: 2 }, maxLevel: 5, upgradeCostMul: 1.6,
-    category: 'turret', upgradeGroup: 'defense', attack: 20, range: 5, powerDraw: 25,
+    category: 'turret', attack: 20, range: 5, powerDraw: 25,
   },
   turret_04: {
     id: 14, code: 'TR-04', name: 'TR-04 전자기 감속 포탑', volume: 1, footprint: [1, 1],
     desc: '적의 이동을 방해하는 포탑.',
     baseCost: { gold: 350, copper_wire: 10 }, maxLevel: 5, upgradeCostMul: 1.6,
-    category: 'turret', upgradeGroup: 'defense', attack: 6, range: 4, powerDraw: 40,
+    category: 'turret', attack: 6, range: 4, powerDraw: 40,
   },
   turret_05: {
     id: 14, code: 'TR-05', name: 'TR-05 대포 공성 터렛', volume: 1, footprint: [1, 1],
     desc: '중형 공성 화력을 갖춘 터렛.',
     baseCost: { gold: 450, rebar: 5 }, maxLevel: 5, upgradeCostMul: 1.6,
-    category: 'turret', upgradeGroup: 'defense', attack: 28, range: 6, powerDraw: 30,
+    category: 'turret', attack: 28, range: 6, powerDraw: 30,
   },
   turret_06: {
     id: 14, code: 'TR-06', name: 'TR-06 마도 빔 레이저', volume: 1, footprint: [1, 1],
     desc: '최고의 화력을 가진 최상위 터렛.',
     baseCost: { gold: 800, mana_stone: 5 }, maxLevel: 5, upgradeCostMul: 1.7,
-    category: 'turret', upgradeGroup: 'defense', attack: 50, range: 7, powerDraw: 80,
+    category: 'turret', attack: 50, range: 7, powerDraw: 80,
   },
 
   outpost: {
     id: 15, name: '전초기지', volume: 4, footprint: [2, 2],
     desc: '국고 골드로 병력을 모집한 뒤, 컨베이어 벨트로 장비를 투입해 무장시켜야 실제 병력이 됩니다.',
     baseCost: { wood: 50, iron_ingot: 30 }, maxLevel: 5, upgradeCostMul: 1.7,
-    category: 'military_base', upgradeGroup: 'military_base',
+    category: 'military_base',
   },
   lab: {
     id: 16, name: '연구소', volume: 4, footprint: [2, 2],
     desc: '새로운 구조물을 해금할 수 있게 합니다.',
     baseCost: { wood: 40, gold_ingot: 10 }, maxLevel: 5, upgradeCostMul: 1.8,
-    category: 'utility', upgradeGroup: 'lab',
+    category: 'utility',
   },
   belt: {
     id: 17, name: '컨베이어 벨트', volume: 1, footprint: [1, 1],
@@ -325,57 +327,12 @@ export const WAR = {
   lossTrophyPenalty: 8,                      // 공격 실패 시 공격자가 잃는 고정 트로피
 };
 
-// ---- 구조물 그룹별 레벨업(Lv.1→2 ~ Lv.4→5) 요구 자원 ----
-// 배열 인덱스 0 = 1→2강화, 1 = 2→3강화, 2 = 3→4강화, 3 = 4→5강화
-export const LEVEL_COSTS = {
-  extraction: [
-    { brick: 10, iron_ingot: 5 },
-    { brick: 20, iron_ingot: 10 },
-    { brick: 35, iron_ingot: 20 },
-    { brick: 55, iron_ingot: 35 },
-  ],
-  production: [
-    { rebar: 5, circuit_board: 3 },
-    { rebar: 10, circuit_board: 6 },
-    { rebar: 18, circuit_board: 10 },
-    { rebar: 30, circuit_board: 16 },
-  ],
-  power: [
-    { coal: 15 },
-    { coal: 30 },
-    { petroleum: 20 },
-    { mana_stone: 10 },
-  ],
-  defense: [
-    { brick: 15 },
-    { brick: 30 },
-    { rebar: 15 },
-    { plastic: 12 },
-  ],
-  military_base: [
-    { iron_spear: 3, circuit_board: 2 },
-    { iron_spear: 6, circuit_board: 5 },
-    { gun: 4, circuit_board: 8 },
-    { gun: 8, circuit_board: 14 },
-  ],
-  lab: [
-    { circuit_board: 5, mana_stone: 2 },
-    { circuit_board: 10, mana_stone: 4 },
-    { circuit_board: 18, mana_stone: 8 },
-    { circuit_board: 30, mana_stone: 14 },
-  ],
-};
-
-// 레벨에 따른 업그레이드 비용 계산
+// 레벨에 따른 업그레이드 비용 계산 (baseCost * upgradeCostMul^레벨, 구조물마다 개별 산정)
 export function getUpgradeCost(structKey, currentLevel) {
   const def = STRUCTURES[structKey];
   if (!def) return null;
   if (currentLevel >= def.maxLevel) return null;
 
-  if (def.upgradeGroup && LEVEL_COSTS[def.upgradeGroup]) {
-    return { ...LEVEL_COSTS[def.upgradeGroup][currentLevel - 1] };
-  }
-  // 폴백: 그룹이 지정되지 않은 구조물(수도/중심지/벨트/농지/축사/도축장)은 기존 방식 사용
   const mul = Math.pow(def.upgradeCostMul, currentLevel);
   const cost = {};
   for (const [res, amt] of Object.entries(def.baseCost)) {
