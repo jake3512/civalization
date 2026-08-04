@@ -3,15 +3,27 @@
 //
 // 순서: ① 전력 공급 범위 계산 → ② 채굴/생산(전력 필요 시 범위 내인지 검사,
 // 산출물은 벨트가 연결돼 있으면 벨트를 타고 이동, 아니면 창고로 직행) →
-// ③ 벨트 물류 해석 → ④ 연구 진행 → ⑤ 습격자 스폰/이동/터렛 교전
+// ③ 벨트 물류 해석 → ④ 연구 진행
 // ============================================================
-import { STRUCTURES, RESOURCES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, RAIDER } from './data.js';
+import { STRUCTURES, RESOURCES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput } from './data.js';
 import { getTile } from './world.js';
-import { footprintTiles, tileKey, structureAt } from './logic.js';
+import { footprintTiles, tileKey, structureAt, getTerritoryRadius } from './logic.js';
 
 // ---------------- 전력 ----------------
 function computePoweredCircles(nation) {
   const circles = [];
+
+  // 수도는 자신의 영토 범위(레벨에 비례해 넓어짐) 안에는 항상 전력을 공급한다.
+  const capital = nation.structures.find(s => s.key === 'capital');
+  if (capital) {
+    const def = STRUCTURES.capital;
+    const [w, h] = def.footprint;
+    circles.push({
+      cx: capital.x + w / 2, cy: capital.y + h / 2,
+      r: getTerritoryRadius('capital', capital.level),
+    });
+  }
+
   for (const s of nation.structures) {
     if (s.key !== 'power_plant') continue;
     const def = STRUCTURES.power_plant;
@@ -200,61 +212,4 @@ export function tickNation(nation) {
       nation.research = null;
     }
   }
-
-  // 4) 습격(레이더) — 스폰, 이동, 터렛 교전, 수도 도달 피해
-  tickRaiders(nation);
-}
-
-function tickRaiders(nation) {
-  nation.raiders = nation.raiders || [];
-  nation.capitalHp = nation.capitalHp ?? RAIDER.capitalMaxHp;
-  nation.capitalHp = Math.min(RAIDER.capitalMaxHp, nation.capitalHp + RAIDER.capitalRegen);
-
-  if (nation.raiders.length < RAIDER.maxActive && Math.random() < RAIDER.spawnChance) {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 18 + Math.random() * 10;
-    nation.raiders.push({
-      id: 'r' + Math.random().toString(36).slice(2, 8),
-      x: nation.capital.x + Math.cos(angle) * dist,
-      y: nation.capital.y + Math.sin(angle) * dist,
-      hp: RAIDER.baseHp,
-    });
-  }
-
-  // 이동
-  for (const r of nation.raiders) {
-    const dx = nation.capital.x - r.x, dy = nation.capital.y - r.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > 0.5) {
-      r.x += (dx / dist) * RAIDER.moveSpeed;
-      r.y += (dy / dist) * RAIDER.moveSpeed;
-    }
-  }
-
-  // 터렛 교전 (사거리 내 가장 가까운 습격자 공격). 이번 틱에 전력이 없어 idle 상태인
-  // 터렛은 발사하지 않는다 (위 tickNation 2단계에서 이미 idle 여부가 결정됨).
-  for (const s of nation.structures) {
-    const def = STRUCTURES[s.key];
-    if (!def || def.category !== 'turret' || s.idle) continue;
-    const range = def.range + (s.level - 1);
-    let target = null, best = Infinity;
-    for (const r of nation.raiders) {
-      const d = Math.hypot(r.x - s.x, r.y - s.y);
-      if (d <= range && d < best) { best = d; target = r; }
-    }
-    if (target) target.hp -= def.attack * s.level;
-  }
-
-  // 수도 도달 판정 + 사망 처리
-  const survivors = [];
-  for (const r of nation.raiders) {
-    if (r.hp <= 0) continue; // 터렛에 격파됨
-    const distToCapital = Math.hypot(r.x - nation.capital.x, r.y - nation.capital.y);
-    if (distToCapital <= 0.6) {
-      nation.capitalHp = Math.max(0, nation.capitalHp - RAIDER.capitalDamage);
-      continue; // 피해를 입히고 소멸
-    }
-    survivors.push(r);
-  }
-  nation.raiders = survivors;
 }

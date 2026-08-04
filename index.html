@@ -32,7 +32,7 @@
     <header id="topbar">
       <div class="brand">NATION<span>BLUEPRINT</span></div>
       <div id="resource-bar" class="resource-bar"></div>
-      <div id="mp-status" class="mp-status">⚪ 연결 대기중</div>
+      <div id="mp-status" class="mp-status"><span class="dot off"></span> 연결 대기중</div>
     </header>
 
     <main id="layout">
@@ -55,7 +55,7 @@
         <!-- 터치 전용 툴바: 키보드 없이도 회전/전력범위/줌 조작 -->
         <div id="touch-toolbar" class="touch-toolbar hidden">
           <button id="rotate-btn" class="toolbar-btn" title="벨트 방향 회전" disabled>⟳ 회전</button>
-          <button id="power-btn" class="toolbar-btn" title="전력 공급 범위 표시">⚡ 전력범위</button>
+          <button id="power-btn" class="toolbar-btn" title="전력 공급 범위 표시"><img class="ic" src="assets/icons/electricity.svg" alt=""> 전력범위</button>
           <button id="zoom-in-btn" class="toolbar-btn" title="확대">＋</button>
           <button id="zoom-out-btn" class="toolbar-btn" title="축소">－</button>
         </div>
@@ -78,6 +78,35 @@
         </div>
       </aside>
     </main>
+  </div>
+
+  <!-- 실시간 습격 전투 화면 -->
+  <div id="battle-screen" class="battle-screen hidden">
+    <header class="battle-topbar">
+      <div class="battle-title">습격 중: <span id="battle-defender-name"></span></div>
+      <div class="battle-stats">
+        <span id="battle-timer" class="battle-timer">02:30</span>
+        <span id="battle-destruction" class="battle-destruction">파괴율 0%</span>
+      </div>
+      <button id="battle-retreat-btn" class="battle-retreat-btn">퇴각</button>
+    </header>
+    <div id="battle-field-wrap" class="battle-field-wrap">
+      <canvas id="battle-field"></canvas>
+      <div id="battle-hint" class="battle-hint">유닛을 고른 뒤 초록색으로 표시되는 적 영토 밖을 탭해 소환하세요</div>
+      <div id="battle-toolbar" class="touch-toolbar">
+        <button id="battle-zoom-in-btn" class="toolbar-btn" title="확대">＋</button>
+        <button id="battle-zoom-out-btn" class="toolbar-btn" title="축소">－</button>
+      </div>
+    </div>
+    <div id="battle-deck-tray" class="battle-deck-tray"></div>
+
+    <div id="battle-result" class="battle-result hidden">
+      <div class="battle-result-card">
+        <div id="battle-result-title" class="battle-result-title"></div>
+        <div id="battle-result-body" class="battle-result-body"></div>
+        <button id="battle-result-close" class="battle-result-close">확인</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="js/main.js"></script>

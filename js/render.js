@@ -9,6 +9,21 @@ const TERRAIN_COLORS = {
   water: '#1c3b45',
 };
 
+// ---- 아이콘 이미지 캐시 ----
+// data.js의 아이콘은 이제 이모지 문자가 아니라 assets/icons/*.svg 경로다.
+// 캔버스에는 fillText 대신 미리 로드해 둔 Image를 drawImage로 그린다
+// (로드 전 프레임엔 그냥 건너뛰고, 로드가 끝나면 다음 프레임부터 자동으로 그려짐).
+const iconImageCache = new Map();
+function getIconImage(src) {
+  let img = iconImageCache.get(src);
+  if (!img) {
+    img = new Image();
+    img.src = src;
+    iconImageCache.set(src, img);
+  }
+  return img;
+}
+
 export class Renderer {
   constructor(canvas, game) {
     this.canvas = canvas;
@@ -83,9 +98,11 @@ export class Renderer {
       }
 
       if (t.node) {
-        ctx.font = `${tile * 0.62}px sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(t.node.icon, sx + tile / 2, sy + tile / 2);
+        const img = getIconImage(t.node.icon);
+        if (img.complete && img.naturalWidth > 0) {
+          const pad = tile * 0.1;
+          ctx.drawImage(img, sx + pad, sy + pad, tile - pad * 2, tile - pad * 2);
+        }
       }
 
       if (tile >= 14) {
@@ -100,9 +117,6 @@ export class Renderer {
     // 구조물 그리기
     if (nation) this._drawStructures(nation, '#d98e34');
     for (const other of this.game.otherNations.values()) this._drawStructures(other, '#c1443c');
-
-    // 습격자(레이더) 그리기
-    if (nation) this._drawRaiders(nation);
 
     // 호버 하이라이트
     if (this.hover) {
@@ -184,21 +198,4 @@ export class Renderer {
     }
   }
 
-  _drawRaiders(nation) {
-    const { ctx, tile } = this;
-    for (const r of nation.raiders || []) {
-      const sx = (r.x - this.originX) * tile;
-      const sy = (r.y - this.originY) * tile;
-      ctx.beginPath();
-      ctx.fillStyle = '#c1443c';
-      ctx.arc(sx, sy, Math.max(3, tile * 0.22), 0, Math.PI * 2);
-      ctx.fill();
-      // 체력바
-      const hpRatio = Math.max(0, r.hp / 30);
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(sx - 10, sy - tile * 0.4, 20, 3);
-      ctx.fillStyle = '#e8544a';
-      ctx.fillRect(sx - 10, sy - tile * 0.4, 20 * hpRatio, 3);
-    }
-  }
 }

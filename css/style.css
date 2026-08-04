@@ -95,12 +95,28 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 .brand span { color: var(--accent); font-size: 12px; letter-spacing: 2px; }
 .resource-bar {
-  flex: 1; display: flex; gap: 16px; overflow-x: auto;
+  flex: 1; display: flex; gap: 18px; overflow-x: auto;
   font-family: var(--font-mono); font-size: 13px;
 }
-.resource-bar .res { display: flex; gap: 4px; align-items: center; color: var(--text-dim); white-space: nowrap; }
-.resource-bar .res .ic { font-size: 14px; }
-.mp-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.resource-bar .res { display: flex; gap: 5px; align-items: center; color: var(--text); white-space: nowrap; font-weight: 500; }
+.resource-bar .res.teal { color: var(--teal); }
+.mp-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+
+/* ---- 아이콘 이미지 (assets/icons/*.svg) ---- */
+.ic {
+  width: 18px; height: 18px; flex: none;
+  vertical-align: -4px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+}
+.recipe-btn .ic, .pd .ic, .cost-preview .ic { width: 14px; height: 14px; vertical-align: -3px; }
+.trophy .ic, .match-head .ic { width: 15px; height: 15px; vertical-align: -3px; }
+
+/* ---- 연결 상태 점 (로컬/온라인) ---- */
+.dot.off, .dot.on {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+}
+.dot.off { background: var(--text-dim); }
+.dot.on { background: var(--teal); box-shadow: 0 0 6px rgba(74,157,143,0.8); }
 
 #layout { flex: 1; display: flex; min-height: 0; }
 
@@ -231,4 +247,70 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 
 @media (max-width: 900px) {
   #left-panel, #right-panel { width: 200px; }
+}
+
+/* ---------------- 실시간 습격 전투 화면 ---------------- */
+.battle-screen {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+
+.battle-topbar {
+  height: 52px; flex: none; display: flex; align-items: center; gap: 18px;
+  padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--danger);
+}
+.battle-title { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.5px; }
+.battle-title span { color: var(--danger); }
+.battle-stats { flex: 1; display: flex; gap: 16px; font-family: var(--font-mono); font-size: 14px; }
+.battle-timer { color: var(--text); font-weight: 600; }
+.battle-timer.low { color: var(--danger); }
+.battle-destruction { color: var(--accent); }
+.battle-retreat-btn {
+  background: var(--panel-2); border: 1px solid var(--danger); color: var(--danger);
+  border-radius: 3px; padding: 8px 14px; font-size: 12px; font-family: var(--font-display);
+}
+
+.battle-field-wrap { flex: 1; position: relative; min-height: 0; }
+#battle-field { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.battle-hint {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(27,35,41,0.9); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px 14px; font-size: 12px; color: var(--text-dim); max-width: 90%; text-align: center;
+  pointer-events: none;
+}
+#battle-toolbar { position: absolute; right: 12px; bottom: 12px; }
+
+.battle-deck-tray {
+  flex: none; display: flex; gap: 8px; padding: 10px 12px; overflow-x: auto;
+  background: var(--panel); border-top: 1px solid var(--line);
+}
+.deck-unit-btn {
+  flex: none; min-width: 84px; background: var(--panel-2); border: 1px solid var(--line);
+  color: var(--text); border-radius: 4px; padding: 8px 10px; text-align: center;
+  font-size: 11px; line-height: 1.4;
+}
+.deck-unit-btn .nm { display: block; font-family: var(--font-display); font-size: 12px; margin-bottom: 2px; }
+.deck-unit-btn .cnt { display: block; font-family: var(--font-mono); color: var(--accent); }
+.deck-unit-btn.active { border-color: var(--teal); background: rgba(74,157,143,0.14); }
+.deck-unit-btn:disabled { opacity: 0.35; }
+
+.battle-result {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10,12,10,0.82);
+}
+.battle-result-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 28px 30px; width: 340px; max-width: 90%; text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.battle-result-title { font-family: var(--font-display); font-size: 24px; margin-bottom: 14px; letter-spacing: 0.5px; }
+.battle-result-title.win { color: var(--teal); }
+.battle-result-title.lose { color: var(--danger); }
+.battle-result-body { font-size: 13px; color: var(--text-dim); line-height: 1.8; margin-bottom: 22px; }
+.battle-result-body b { color: var(--text); }
+.battle-result-close {
+  width: 100%; padding: 12px; background: var(--accent); color: #14100a; border: none;
+  border-radius: 4px; font-family: var(--font-display); font-size: 14px; letter-spacing: 0.5px;
 }

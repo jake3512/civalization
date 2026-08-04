@@ -8,7 +8,7 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS } from './data.js';
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -55,8 +55,13 @@ function pay(nation, cost) {
 }
 
 function addTerritory(nation, cx, cy, radius) {
-  for (let y = cy - radius; y <= cy + radius; y++) {
-    for (let x = cx - radius; x <= cx + radius; x++) {
+  // cx/cy는 짝수 발판(중심지 등)의 경우 x.5 같은 소수일 수 있으므로, 정수 타일
+  // 좌표만 순회하도록 항상 정수 경계로 반올림한다 (그렇지 않으면 반경 내 어떤
+  // 정수 타일도 순회에 걸리지 않아 영토가 하나도 편입되지 않는다).
+  const y0 = Math.floor(cy - radius), y1 = Math.ceil(cy + radius);
+  const x0 = Math.floor(cx - radius), x1 = Math.ceil(cx + radius);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
       if (Math.hypot(x - cx, y - cy) <= radius) nation.territory.add(tileKey(x, y));
     }
   }
@@ -171,42 +176,63 @@ export function startResearch(nation, structKey) {
 }
 
 /**
- * 전투 판정 (프로토타입: 군사 구조물 총합 비교).
- * 승자는 패자 자원의 일부를 약탈하고, 트로피(COC 스타일)를 교환한다.
+ * 상대와의 트로피 차이에 따른 COC식 트로피 교환량 계산.
+ * 승리 시 상대가 나보다 트로피가 높을수록 더 많이 얻고, 패배 시엔 고정 페널티만 잃는다.
  */
-export function resolveBattle(attackerPower, defenderPower, defenderResources, attackerTrophies = 0, defenderTrophies = 0) {
-  const win = attackerPower >= defenderPower;
-  const loot = {};
-  if (win) {
-    for (const [res, amt] of Object.entries(defenderResources || {})) {
-      loot[res] = Math.floor(amt * 0.1); // 10% 약탈 (COC의 창고 보호 비율과 비슷한 상한)
-    }
-  }
-
-  // 트로피 교환: 상대가 나보다 트로피가 높을수록 승리 시 더 많이 얻고,
-  // 패배 시에는 고정 페널티만 잃는다 (COC의 비대칭 트레이드를 단순화한 버전)
-  let attackerTrophyDelta, defenderTrophyDelta;
-  if (win) {
-    const diff = defenderTrophies - attackerTrophies;
-    const trade = Math.round(WAR.baseTrophyTrade + diff * 0.08);
-    const clamped = Math.max(WAR.minTrophyTrade, Math.min(WAR.maxTrophyTrade, trade));
-    attackerTrophyDelta = clamped;
-    defenderTrophyDelta = -clamped;
-  } else {
-    attackerTrophyDelta = -WAR.lossTrophyPenalty;
-    defenderTrophyDelta = 0; // 방어 성공 시 방어자는 트로피 변동 없음 (COC와 동일)
-  }
-
-  return { win, loot, attackerTrophyDelta, defenderTrophyDelta };
+function tradeTrophies(win, attackerTrophies, defenderTrophies) {
+  if (!win) return { attackerTrophyDelta: -WAR.lossTrophyPenalty, defenderTrophyDelta: 0 };
+  const diff = defenderTrophies - attackerTrophies;
+  const trade = Math.round(WAR.baseTrophyTrade + diff * 0.08);
+  const clamped = Math.max(WAR.minTrophyTrade, Math.min(WAR.maxTrophyTrade, trade));
+  return { attackerTrophyDelta: clamped, defenderTrophyDelta: -clamped };
 }
 
-/** 공격력: 보유한 공격 유닛들의 전투력 합 (수비 유닛/터렛/방벽은 포함되지 않음) */
-export function getAttackPower(nation) {
-  const units = (nation.units && nation.units.attack) || {};
-  return Object.entries(units).reduce((sum, [key, count]) => sum + (UNITS.attack[key]?.power || 0) * count, 0);
+/**
+ * 실시간 습격 전투(battle.js, 공격자 클라이언트에서 로컬로 시뮬레이션됨)의
+ * 결과를 양측 국가 상태에 반영한다. 방어자의 구조물은 전투로 영구 파괴되지
+ * 않는다(다음 전투에서도 항상 원래 체력으로 시작) — 오직 자원만 영구 약탈되고,
+ * 공격자가 배치했던 유닛은 생존 여부와 무관하게 로스터에서 소모된다.
+ *
+ * raidResult: { win, destructionPercent, loot, deployedUnits } — battle.js의 endBattle() 결과.
+ * 클라이언트가 계산한 loot는 신뢰하지 않고, 방어자가 "현재" 보유한 자원 한도로 다시 클램프한다.
+ */
+export function applyRaidResult(attacker, defender, raidResult, now = Date.now()) {
+  // win은 클라이언트 값을 그대로 믿지 않고 destructionPercent로부터 다시 계산한다
+  // (신뢰 경계 — 조작된 win:true를 걸러낸다).
+  const destructionPercent = Math.max(0, Math.min(1, Number(raidResult.destructionPercent) || 0));
+  const win = !!raidResult.perfectVictory || destructionPercent >= BATTLE.winDestructionPct;
+  const { loot } = raidResult;
+
+  const appliedLoot = {};
+  for (const [res, amt] of Object.entries(loot || {})) {
+    const have = defender.resources[res] || 0;
+    const take = Math.max(0, Math.min(have, Math.floor(amt)));
+    if (take > 0) appliedLoot[res] = take;
+  }
+  for (const [res, amt] of Object.entries(appliedLoot)) {
+    defender.resources[res] = Math.max(0, (defender.resources[res] || 0) - amt);
+    attacker.resources[res] = (attacker.resources[res] || 0) + amt;
+  }
+
+  const { attackerTrophyDelta, defenderTrophyDelta } = tradeTrophies(win, attacker.trophies || 0, defender.trophies || 0);
+  attacker.trophies = Math.max(0, (attacker.trophies || 0) + attackerTrophyDelta);
+  defender.trophies = Math.max(0, (defender.trophies || 0) + defenderTrophyDelta);
+
+  // 배치했던 공격 유닛은 생존 여부와 무관하게 소모된다 (다시 모집해야 함)
+  attacker.units = attacker.units || { attack: {}, defense: {} };
+  for (const [key, rawCount] of Object.entries(raidResult.deployedUnits || {})) {
+    if (!UNITS.attack[key]) continue;
+    const count = Math.max(0, Math.floor(Number(rawCount) || 0));
+    attacker.units.attack[key] = Math.max(0, (attacker.units.attack[key] || 0) - count);
+  }
+
+  attacker.shieldUntil = 0;                          // 공격하면 자신의 실드는 즉시 해제
+  defender.shieldUntil = now + WAR.postAttackShieldMs; // 공격당한 쪽은 새 실드를 얻는다 (연쇄 공격 방지)
+
+  return { win, destructionPercent, loot: appliedLoot, attackerTrophyDelta, defenderTrophyDelta };
 }
 
-/** 방어력: 수비 유닛 + 터렛(레벨 비례, 유휴 상태면 제외) + 방벽(레벨 비례)의 합 */
+/** 방어력: 수비 유닛 + 터렛(레벨 비례, 유휴 상태면 제외) + 방벽(레벨 비례)의 합 (전투 전 미리보기용) */
 export function getDefensePower(nation) {
   const units = (nation.units && nation.units.defense) || {};
   let power = Object.entries(units).reduce((sum, [key, count]) => sum + (UNITS.defense[key]?.power || 0) * count, 0);
@@ -232,33 +258,6 @@ export function canAttack(attacker, defender, now = Date.now()) {
   if (attacker.id === defender.id) return '자기 자신은 공격할 수 없습니다';
   if (isShielded(defender, now)) return '상대가 보호막(실드)으로 보호받고 있습니다';
   return null;
-}
-
-/**
- * 공격 실행 결과를 양측 국가 상태에 반영한다 (자원 약탈, 트로피, 실드 갱신).
- * attacker는 공격을 시작하는 순간 자신의 실드를 소모한다 (COC와 동일한 규칙).
- */
-export function applyAttackResult(attacker, defender, now = Date.now()) {
-  const attackPower = getAttackPower(attacker);
-  const defenderPower = getDefensePower(defender);
-  const { win, loot, attackerTrophyDelta, defenderTrophyDelta } = resolveBattle(
-    attackPower, defenderPower, defender.resources, attacker.trophies || 0, defender.trophies || 0
-  );
-
-  if (win) {
-    for (const [res, amt] of Object.entries(loot)) {
-      defender.resources[res] = Math.max(0, (defender.resources[res] || 0) - amt);
-      attacker.resources[res] = (attacker.resources[res] || 0) + amt;
-    }
-  }
-
-  attacker.trophies = Math.max(0, (attacker.trophies || 0) + attackerTrophyDelta);
-  defender.trophies = Math.max(0, (defender.trophies || 0) + defenderTrophyDelta);
-
-  attacker.shieldUntil = 0;                          // 공격하면 자신의 실드는 즉시 해제
-  defender.shieldUntil = now + WAR.postAttackShieldMs; // 공격당한 쪽은 새 실드를 얻는다 (연쇄 공격 방지)
-
-  return { win, loot, attackPower, defenderPower, attackerTrophyDelta, defenderTrophyDelta };
 }
 
 /**

@@ -83,7 +83,7 @@ export const callUpgrade = (structId) => callFn('submitUpgrade', { structId });
 export const callSetRecipe = (structId, recipeKey) => callFn('submitSetRecipe', { structId, recipeKey });
 export const callStartResearch = (structKey) => callFn('submitStartResearch', { structKey });
 export const callRecruitUnit = (structId, unitKey, isDefense) => callFn('submitRecruitUnit', { structId, unitKey, isDefense });
-export const callAttack = (defenderId) => callFn('submitAttack', { defenderId });
+export const callRaidResult = (defenderId, raidResult) => callFn('submitRaidResult', { defenderId, raidResult });
 
 // ---------------- Firestore 구독 ----------------
 
