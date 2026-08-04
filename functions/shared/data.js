@@ -9,6 +9,10 @@
 const ICON_DIR = 'assets/icons';
 const iconPath = (key) => `${ICON_DIR}/${key}.svg`;
 
+// 구조물 아이콘은 assets/icons/struct/<구조물 key>.svg 로 1:1 대응된다
+// (STRUCTURES 항목마다 경로를 적지 않고 key로 바로 유도한다).
+export const structureIcon = (structKey) => `${ICON_DIR}/struct/${structKey}.svg`;
+
 // ---- 원자재 / 가공자원 / 부품 / 화폐 정의 ----
 export const RESOURCES = {
   wood:        { name: '목재',     icon: iconPath('wood'), color: '#4a7c3f' },
@@ -75,6 +79,12 @@ export const TERRAIN_NODES = {
   mana_mine:  { name: '마석광산',    yields: 'mana_stone', icon: iconPath('mana_stone'), density: 0.0015 },
 };
 export const WATER = { name: '강/호수', icon: iconPath('water'), density: 0.06 };
+
+// ---- 수도 건설 요건 ----
+// 수도는 아무 데나 세울 수 없고, 수도가 만들어낼 초기 영토(반경) 안에
+// 아래 자원 노드가 최소 1개씩 들어와야 한다 — 건국 직후 목재/석재 생산을
+// 시작할 수 있는 자리에서만 나라를 세우도록 강제하는 규칙.
+export const CAPITAL_REQUIRED_NODES = ['forest', 'quarry'];
 
 // ---- 구조물 정의 ----
 // footprint: [가로, 세로] 격자 칸 수 (부피값에서 파생)

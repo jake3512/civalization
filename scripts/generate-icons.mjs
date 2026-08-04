@@ -196,4 +196,100 @@ for (const [key, { bg, glyph: [fn, ...args] }] of Object.entries(SPEC)) {
   writeFileSync(path.join(OUT_DIR, `${key}.svg`), svg, 'utf-8');
 }
 
-console.log(`Generated ${Object.keys(SPEC).length} icons in ${OUT_DIR}`);
+// ============================================================
+// 구조물 아이콘 (assets/icons/struct/*.svg)
+//
+// 필드 위 구조물은 지금까지 "이름 첫 글자 + 레벨" 텍스트로만 그려져서 서로
+// 구분이 어려웠다. 구조물마다 상징 도형을 가진 아이콘을 만들어 캔버스와
+// 건설 카탈로그 양쪽에서 쓴다. 자원 아이콘과 달리 배지(둥근 사각 배경)를
+// 씌우지 않고 글리프만 그린다 — 구조물 타일 자체가 이미 배경 역할을 하므로.
+// ============================================================
+const STRUCT_DIR = path.join(OUT_DIR, 'struct');
+mkdirSync(STRUCT_DIR, { recursive: true });
+
+// 구조물 글리프는 배경 없이 단색(currentColor 대신 고정색)으로 그린다.
+const S = '#f2ede0';   // 밝은 글리프 색
+const SD = '#0f0d0b';  // 어두운 디테일 색
+
+const structGlyphs = {
+  castle: `<path d="M10 54 V26 h8 v-8 h8 v8 h12 v-8 h8 v8 h8 v28 Z" fill="${S}"/>
+    <rect x="26" y="38" width="12" height="16" fill="${SD}"/>`,
+  hubRings: `<circle cx="32" cy="32" r="20" fill="none" stroke="${S}" stroke-width="4"/>
+    <circle cx="32" cy="32" r="10" fill="${S}"/>`,
+  pickaxe: `<path d="M12 22 Q32 8 52 22" fill="none" stroke="${S}" stroke-width="6" stroke-linecap="round"/>
+    <rect x="29" y="20" width="6" height="34" rx="2" fill="${S}"/>`,
+  sawLog: `<circle cx="32" cy="32" r="17" fill="none" stroke="${S}" stroke-width="5"/>
+    <path d="M32 15 L37 24 L27 24 Z M49 32 L40 37 L40 27 Z M32 49 L27 40 L37 40 Z M15 32 L24 27 L24 37 Z" fill="${S}"/>
+    <circle cx="32" cy="32" r="5" fill="${S}"/>`,
+  factoryShape: `<path d="M10 54 V32 l14 8 V32 l14 8 V22 h16 v32 Z" fill="${S}"/>
+    <rect x="44" y="12" width="6" height="12" fill="${S}"/>`,
+  furnace: `<path d="M14 54 V24 q18 -12 36 0 v30 Z" fill="${S}"/>
+    <path d="M24 54 V40 q8 -6 16 0 v14 Z" fill="${SD}"/>`,
+  derrick: `<path d="M20 54 L32 14 L44 54" fill="none" stroke="${S}" stroke-width="5"/>
+    <path d="M24 40 H40 M27 30 H37" stroke="${S}" stroke-width="4"/>
+    <rect x="14" y="52" width="36" height="6" rx="2" fill="${S}"/>`,
+  refineryTower: `<rect x="14" y="20" width="14" height="34" rx="3" fill="${S}"/>
+    <rect x="36" y="28" width="14" height="26" rx="3" fill="${S}"/>
+    <path d="M28 34 H36" stroke="${S}" stroke-width="4"/>
+    <rect x="17" y="12" width="8" height="8" fill="${S}"/>`,
+  drill: `<path d="M22 12 h20 v18 l-10 24 l-10 -24 Z" fill="${S}"/>
+    <path d="M22 24 H42 M25 34 H39" stroke="${SD}" stroke-width="3"/>`,
+  fieldRows: `<rect x="8" y="30" width="48" height="26" rx="3" fill="${S}"/>
+    <path d="M8 38 H56 M8 46 H56" stroke="${SD}" stroke-width="3"/>
+    <path d="M32 28 q-9 -6 -9 -14 q9 2 9 14 Z M32 28 q9 -6 9 -14 q-9 2 -9 14 Z" fill="${S}"/>
+    <rect x="30" y="14" width="4" height="14" rx="1.5" fill="${S}"/>`,
+  barnShape: `<path d="M12 54 V28 L32 14 L52 28 v26 Z" fill="${S}"/>
+    <path d="M32 54 V34 M22 54 V40 h20 v14" stroke="${SD}" stroke-width="3" fill="none"/>`,
+  cleaver: `<path d="M14 16 h30 a6 6 0 0 1 6 6 v14 h-36 Z" fill="${S}"/>
+    <rect x="26" y="36" width="6" height="18" rx="2" fill="${S}"/>`,
+  plantBolt: `<path d="M10 56 V36 q9 -7 18 0 v20 Z" fill="${S}"/>
+    <path d="M36 56 V30 q9 -7 18 0 v26 Z" fill="${S}"/>
+    <path d="M34 6 L18 30 h10 l-4 20 L44 24 H33 l5 -18 Z" fill="${S}" stroke="${SD}" stroke-width="2" stroke-linejoin="round"/>`,
+  wallBricks: `<rect x="8" y="18" width="48" height="30" rx="2" fill="${S}"/>
+    <path d="M8 28 H56 M8 38 H56 M24 18 V28 M40 18 V28 M16 28 V38 M32 28 V38 M48 28 V38 M24 38 V48 M40 38 V48" stroke="${SD}" stroke-width="2.5"/>`,
+  turretBase: (barrel) => `<rect x="16" y="42" width="32" height="12" rx="3" fill="${S}"/>
+    <circle cx="32" cy="38" r="10" fill="${S}"/>${barrel}`,
+  tent: `<path d="M32 10 L54 54 H10 Z" fill="${S}"/>
+    <path d="M32 26 L42 54 H22 Z" fill="${SD}"/>`,
+  flask: `<path d="M26 10 h12 v16 l12 24 a4 4 0 0 1 -4 6 H18 a4 4 0 0 1 -4 -6 l12 -24 Z" fill="${S}"/>
+    <path d="M22 40 H42" stroke="${SD}" stroke-width="3"/>`,
+  beltArrow: `<rect x="8" y="24" width="48" height="16" rx="4" fill="${S}"/>
+    <path d="M26 28 L38 32 L26 36 Z" fill="${SD}"/>`,
+};
+
+function turret(barrel) { return structGlyphs.turretBase(barrel); }
+
+const STRUCT_SPEC = {
+  capital:        structGlyphs.castle,
+  hub:            structGlyphs.hubRings,
+  mine:           structGlyphs.pickaxe,
+  lumber_mill:    structGlyphs.sawLog,
+  factory:        structGlyphs.factoryShape,
+  smelter:        structGlyphs.furnace,
+  oil_well:       structGlyphs.derrick,
+  refinery:       structGlyphs.refineryTower,
+  extractor:      structGlyphs.drill,
+  farm:           structGlyphs.fieldRows,
+  barn:           structGlyphs.barnShape,
+  slaughterhouse: structGlyphs.cleaver,
+  power_plant:    structGlyphs.plantBolt,
+  wall:           structGlyphs.wallBricks,
+  // 터렛 6종 — 포신 모양으로 구분
+  turret_01: turret(`<rect x="30" y="12" width="5" height="22" fill="${S}"/>`),
+  turret_02: turret(`<path d="M32 34 q-8 -14 0 -24 q8 10 0 24 Z" fill="${S}"/>`),
+  turret_03: turret(`<path d="M32 8 l6 12 h-12 Z" fill="${S}"/><rect x="29" y="18" width="6" height="16" fill="${S}"/>`),
+  turret_04: turret(`<path d="M24 26 q8 -16 16 0" fill="none" stroke="${S}" stroke-width="4"/><circle cx="32" cy="14" r="5" fill="${S}"/>`),
+  turret_05: turret(`<rect x="27" y="10" width="10" height="24" rx="3" fill="${S}"/>`),
+  turret_06: turret(`<path d="M32 6 L38 22 H26 Z" fill="${S}"/><rect x="30" y="20" width="4" height="14" fill="${S}"/><path d="M20 16 L26 20 M44 16 L38 20" stroke="${S}" stroke-width="3"/>`),
+  outpost:        structGlyphs.tent,
+  lab:            structGlyphs.flask,
+  belt:           structGlyphs.beltArrow,
+};
+
+for (const [key, glyph] of Object.entries(STRUCT_SPEC)) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}">\n  ${glyph}\n</svg>`;
+  writeFileSync(path.join(STRUCT_DIR, `${key}.svg`), svg, 'utf-8');
+}
+
+console.log(`Generated ${Object.keys(SPEC).length} resource icons in ${OUT_DIR}`);
+console.log(`Generated ${Object.keys(STRUCT_SPEC).length} structure icons in ${STRUCT_DIR}`);

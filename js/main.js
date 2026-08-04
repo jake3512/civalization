@@ -5,13 +5,13 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS } from './data.js';
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
-import { findMatch, isShielded, getDefensePower } from './logic.js';
+import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
@@ -43,6 +43,7 @@ document.getElementById('start-btn').addEventListener('click', () => {
 
   startScreen.classList.add('hidden');
   document.getElementById('placement-bar').classList.remove('hidden');
+  updatePlacementBar(); // 입지 요건 안내를 처음부터 보여준다
   renderer.centerOn(0, 0);
   requestAnimationFrame(loop); // 국가 생성 전이라도 지도는 바로 보여준다
 });
@@ -52,18 +53,43 @@ function updatePlacementBar() {
   const bar = document.getElementById('placement-text');
   const confirmBtn = document.getElementById('placement-confirm');
   if (!selectedCapital) {
-    bar.textContent = '지도를 움직여 수도를 세울 칸을 탭하세요';
+    bar.innerHTML = `지도를 움직여 수도를 세울 칸을 탭하세요 — 주변 영토에 ${CAPITAL_REQUIRED_NODES.map(k => TERRAIN_NODES[k].name).join('·')}이 있어야 합니다`;
     confirmBtn.disabled = true;
-  } else {
-    bar.textContent = `선택한 위치 (${selectedCapital.x}, ${selectedCapital.y}) — 다른 곳을 탭하면 위치를 바꿀 수 있어요`;
+    return;
+  }
+  const site = capitalSiteReport(selectedCapital.x, selectedCapital.y);
+  if (site.ok) {
+    bar.innerHTML = `<b style="color:var(--teal)">건설 가능</b> (${selectedCapital.x}, ${selectedCapital.y}) — ${CAPITAL_REQUIRED_NODES.map(k => `${resIcon(TERRAIN_NODES[k].yields)}${TERRAIN_NODES[k].name}`).join(' ')} 확보`;
     confirmBtn.disabled = false;
+  } else {
+    const names = site.missing.map(k => TERRAIN_NODES[k].name).join(', ');
+    bar.innerHTML = `<b style="color:var(--danger)">${names} 없음</b> — 다른 곳을 탭해 ${names}이(가) 영토에 들어오는 자리를 찾아보세요`;
+    confirmBtn.disabled = true;
   }
 }
+
+// 조건을 만족하는 칸이 전체의 7% 정도라 직접 찾기 번거로우므로,
+// 현재 화면 중앙에서 가장 가까운 유효 자리로 카메라를 옮겨주고 바로 선택해준다.
+document.getElementById('placement-suggest').addEventListener('click', () => {
+  const cx = Math.round(renderer.originX + canvas.width / renderer.tile / 2);
+  const cy = Math.round(renderer.originY + canvas.height / renderer.tile / 2);
+  const site = findNearestCapitalSite(cx, cy);
+  if (!site) { flashMessage('주변에서 조건을 만족하는 자리를 찾지 못했습니다', true); return; }
+  renderer.centerOn(site.x + 1, site.y + 1);
+  selectedCapital = { x: site.x, y: site.y };
+  const report = capitalSiteReport(site.x, site.y);
+  renderer.placementMarker = { x: site.x, y: site.y, ok: report.ok, radius: report.radius };
+  updatePlacementBar();
+});
 
 document.getElementById('placement-confirm').addEventListener('click', () => {
   if (!selectedCapital || !pendingNation) return;
   const { x, y } = selectedCapital;
   const { name, color } = pendingNation;
+
+  // 버튼이 비활성화돼 있어 정상 흐름에선 실패하지 않지만, 만에 하나 요건을
+  // 만족하지 않으면 수도 없는 국가가 만들어지므로 여기서도 막는다.
+  if (!capitalSiteReport(x, y).ok) { updatePlacementBar(); return; }
 
   game.startNation(name, color, x, y);
   renderer.placementMarker = null;
@@ -116,7 +142,7 @@ function buildBuildMenu() {
     const btn = document.createElement('button');
     btn.className = 'build-item';
     btn.disabled = !game.myNation.unlocked.has(key);
-    btn.innerHTML = `<span class="idx">${def.code || def.id}</span><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
+    btn.innerHTML = `<img class="sic" src="${structureIcon(key)}" alt=""><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
     btn.title = def.desc;
     btn.addEventListener('click', () => {
       document.querySelectorAll('.build-item.active').forEach(b => b.classList.remove('active'));
@@ -195,7 +221,8 @@ async function handleTap(clientX, clientY) {
   // 수도 위치 선택 단계
   if (pendingNation && !game.myNation) {
     selectedCapital = { x, y };
-    renderer.placementMarker = { x, y };
+    const site = capitalSiteReport(x, y);
+    renderer.placementMarker = { x, y, ok: site.ok, radius: site.radius };
     updatePlacementBar();
     return;
   }
@@ -685,9 +712,56 @@ function renderResourcePanel() {
   el.innerHTML = html;
 }
 
+// ---------- 건국 단계: 화면에 보이는 수도 후보 칸 갱신 ----------
+// 매 프레임 다시 계산하면 낭비라, 보이는 타일 범위가 실제로 바뀌었을 때만 다시 찾는다.
+let lastCapitalViewKey = null;
+function updateCapitalSites() {
+  if (!pendingNation || game.myNation) {
+    renderer.capitalSites = null;
+    lastCapitalViewKey = null;
+    return;
+  }
+  const x0 = Math.floor(renderer.originX), y0 = Math.floor(renderer.originY);
+  const x1 = x0 + Math.ceil(canvas.width / renderer.tile);
+  const y1 = y0 + Math.ceil(canvas.height / renderer.tile);
+  const key = `${x0},${y0},${x1},${y1}`;
+  if (key === lastCapitalViewKey) return;
+  lastCapitalViewKey = key;
+  renderer.capitalSites = findCapitalSites(x0, y0, x1, y1);
+}
+
+// ---------- 건설 미리보기(고스트) ----------
+// 커서/마지막 터치 지점에 배치 결과를 매 프레임 다시 계산해 보여준다.
+// (자원이 틱마다 변해 "자원 부족" 여부가 바뀌므로 매 프레임 재검증한다)
+function updateBuildPreview() {
+  if (!game.myNation || !selectedStruct || !renderer.hover) {
+    renderer.buildPreview = null;
+    const hintEl = document.getElementById('preview-hint');
+    if (hintEl) { hintEl.textContent = ''; hintEl.className = 'preview-hint'; }
+    return;
+  }
+  const { x, y } = renderer.hover;
+  const def = STRUCTURES[selectedStruct];
+  const check = validatePlacement(game.myNation, selectedStruct, x, y);
+  renderer.buildPreview = {
+    key: selectedStruct, x, y, dir: beltDir,
+    ok: check.ok, error: check.error,
+    territoryRadius: def.territoryRadius || 0,
+    powerRadius: def.powerRadius || 0,
+  };
+  // 좌측 패널 비용 줄에 현재 위치 기준 사유를 함께 보여준다
+  const hint = document.getElementById('preview-hint');
+  if (hint) {
+    hint.textContent = check.ok ? `(${x}, ${y}) 건설 가능` : `(${x}, ${y}) ${check.error}`;
+    hint.className = `preview-hint ${check.ok ? 'ok' : 'err'}`;
+  }
+}
+
 // ---------- 메인 루프 ----------
 function loop() {
   renderer.resize();
+  updateCapitalSites();
+  updateBuildPreview();
   renderer.draw();
   renderResourcePanel();
   requestAnimationFrame(loop);

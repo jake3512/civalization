@@ -8,7 +8,7 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE } from './data.js';
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -68,10 +68,84 @@ function addTerritory(nation, cx, cy, radius) {
 }
 
 /**
- * 구조물 건설. dir(0~3)은 벨트 전용 방향.
- * 성공 시 { ok:true, structure }, 실패 시 { ok:false, error }.
+ * 수도 후보 자리를 평가한다. 수도가 만들어낼 초기 영토(반경) 안에
+ * CAPITAL_REQUIRED_NODES의 자원 노드가 각각 최소 1개씩 있어야 한다.
+ * 건국 화면에서 실시간 미리보기로도 쓰이므로 nation 없이 좌표만으로 판정한다.
+ * returns { ok, found:Set, missing:string[], radius, center:[cx,cy] }
  */
-export function build(nation, structKey, x, y, dir = 0) {
+export function capitalSiteReport(x, y) {
+  const def = STRUCTURES.capital;
+  const [cx, cy] = footprintCenter(x, y, def.footprint);
+  const radius = getTerritoryRadius('capital', 1);
+  const found = new Set();
+
+  const y0 = Math.floor(cy - radius), y1 = Math.ceil(cy + radius);
+  const x0 = Math.floor(cx - radius), x1 = Math.ceil(cx + radius);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (Math.hypot(tx - cx, ty - cy) > radius) continue;
+      const terrain = getTile(tx, ty).terrain;
+      if (CAPITAL_REQUIRED_NODES.includes(terrain)) found.add(terrain);
+    }
+  }
+  const missing = CAPITAL_REQUIRED_NODES.filter(k => !found.has(k));
+  return { ok: missing.length === 0, found, missing, radius, center: [cx, cy] };
+}
+
+/**
+ * 사각 영역 안에서 수도를 세울 수 있는 칸들을 찾는다 (건국 화면의 후보지 표시용).
+ * 칸마다 capitalSiteReport를 돌리면 (칸 수 × 반경 원) 만큼 지형을 다시 계산해 느리므로,
+ * 필요한 자원 노드 위치만 한 번 모아두고 각 후보와의 거리만 비교한다.
+ */
+export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
+  const def = STRUCTURES.capital;
+  const radius = getTerritoryRadius('capital', 1);
+  const pad = Math.ceil(radius) + 2; // 화면 밖 노드도 후보의 영토에 들어올 수 있다
+
+  const nodes = {};
+  for (const k of CAPITAL_REQUIRED_NODES) nodes[k] = [];
+  for (let y = y0 - pad; y <= y1 + pad; y++) {
+    for (let x = x0 - pad; x <= x1 + pad; x++) {
+      const t = getTile(x, y).terrain;
+      if (nodes[t]) nodes[t].push([x, y]);
+    }
+  }
+
+  const sites = [];
+  for (let y = y0; y <= y1 && sites.length < limit; y++) {
+    for (let x = x0; x <= x1 && sites.length < limit; x++) {
+      const [cx, cy] = footprintCenter(x, y, def.footprint);
+      const all = CAPITAL_REQUIRED_NODES.every(k =>
+        nodes[k].some(([nx, ny]) => Math.hypot(nx - cx, ny - cy) <= radius));
+      if (all) sites.push([x, y]);
+    }
+  }
+  return sites;
+}
+
+/**
+ * 시작 지점에서 바깥으로 나선형으로 훑어 가장 가까운 유효 수도 자리를 찾는다.
+ * ("추천 위치" 버튼 — 조건을 만족하는 칸이 7% 정도뿐이라 맨손 탐색은 번거롭다)
+ */
+export function findNearestCapitalSite(startX, startY, maxRadius = 60) {
+  for (let r = 0; r <= maxRadius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // 링의 테두리만
+        const x = startX + dx, y = startY + dy;
+        if (capitalSiteReport(x, y).ok) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 건설 가능 여부만 검사하는 순수 함수 (상태를 바꾸지 않는다).
+ * build()와 건설 미리보기(고스트) 양쪽에서 같은 규칙을 공유하기 위해 분리했다.
+ * 성공 시 { ok:true }, 실패 시 { ok:false, error }.
+ */
+export function validatePlacement(nation, structKey, x, y) {
   const def = STRUCTURES[structKey];
   if (!def) return { ok: false, error: '알 수 없는 구조물' };
   if (!nation.unlocked.has(structKey)) return { ok: false, error: '연구소에서 아직 해금되지 않았습니다' };
@@ -84,6 +158,11 @@ export function build(nation, structKey, x, y, dir = 0) {
     // 수도는 스스로 영토를 만들어내는 시작점이라, 기존 영토 안에 있을 필요가 없다.
     const clear = footprintTiles(x, y, def.footprint).every(([tx, ty]) => !structureAt(nation, tx, ty));
     if (!clear) return { ok: false, error: '이 위치에는 건설할 수 없습니다 (이미 점유됨)' };
+    const site = capitalSiteReport(x, y);
+    if (!site.ok) {
+      const names = site.missing.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+      return { ok: false, error: `수도 주변 영토에 ${names}이(가) 없습니다` };
+    }
   } else if (!isAreaFree(nation, x, y, def.footprint)) {
     return { ok: false, error: '이 위치에는 건설할 수 없습니다 (영토 밖이거나 이미 점유됨)' };
   }
@@ -91,7 +170,8 @@ export function build(nation, structKey, x, y, dir = 0) {
   if (def.requiresNode) {
     const t = getTile(x, y);
     if (!def.requiresNode.includes(t.terrain)) {
-      return { ok: false, error: `이 구조물은 [${def.requiresNode.join(', ')}] 지형 위에만 설치할 수 있습니다` };
+      const names = def.requiresNode.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+      return { ok: false, error: `이 구조물은 [${names}] 지형 위에만 설치할 수 있습니다` };
     }
   }
   if (def.requiresAdjacent === 'water') {
@@ -99,6 +179,17 @@ export function build(nation, structKey, x, y, dir = 0) {
     if (!isAdjacentToWater(x, y, w, h)) return { ok: false, error: '농지는 물(강/호수) 옆에만 설치할 수 있습니다' };
   }
   if (!canAfford(nation, def.baseCost)) return { ok: false, error: '자원이 부족합니다' };
+  return { ok: true };
+}
+
+/**
+ * 구조물 건설. dir(0~3)은 벨트 전용 방향.
+ * 성공 시 { ok:true, structure }, 실패 시 { ok:false, error }.
+ */
+export function build(nation, structKey, x, y, dir = 0) {
+  const check = validatePlacement(nation, structKey, x, y);
+  if (!check.ok) return check;
+  const def = STRUCTURES[structKey];
 
   pay(nation, def.baseCost);
   const structure = {

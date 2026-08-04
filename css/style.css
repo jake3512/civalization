@@ -135,8 +135,15 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 .cost-preview {
   font-family: var(--font-mono); font-size: 11px; color: var(--accent);
-  min-height: 16px; margin-bottom: 12px;
+  min-height: 16px; margin-bottom: 4px;
 }
+/* 건설 미리보기(고스트) 상태 줄 — 커서 위치의 건설 가능 여부/사유 */
+.preview-hint {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  min-height: 15px; margin-bottom: 10px; line-height: 1.35;
+}
+.preview-hint.ok { color: var(--teal); }
+.preview-hint.err { color: var(--danger); }
 .build-menu { display: flex; flex-direction: column; gap: 4px; }
 .build-item {
   display: grid; grid-template-columns: 34px 1fr auto;
@@ -146,6 +153,12 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   transition: border-color 0.12s, background 0.12s;
 }
 .build-item .idx { font-family: var(--font-mono); color: var(--text-dim); font-size: 11px; }
+/* 건설 카탈로그의 구조물 아이콘 (assets/icons/struct/*.svg — 흰 글리프라 어둡게 눌러 표시) */
+.build-item .sic {
+  width: 24px; height: 24px; justify-self: center;
+  filter: brightness(0.72) sepia(0.5) saturate(2.2) hue-rotate(-12deg);
+}
+.build-item.active .sic, .build-item:hover:not(:disabled) .sic { filter: none; }
 .build-item .vol { font-family: var(--font-mono); color: var(--text-dim); font-size: 10px; }
 .build-item:hover:not(:disabled) { border-color: var(--accent-dim); }
 .build-item.active { border-color: var(--accent); background: rgba(217,142,52,0.10); }
@@ -160,13 +173,16 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   background: var(--panel); border: 1px solid var(--accent);
   padding: 10px 14px; border-radius: 6px; font-size: 13px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-  max-width: 92%;
+  max-width: 92%; width: max-content;
 }
 .placement-bar #placement-confirm {
   background: var(--accent); color: #14100a; border: none; border-radius: 4px;
   padding: 10px 14px; font-family: var(--font-display); font-size: 13px; white-space: nowrap;
 }
 .placement-bar #placement-confirm:disabled { background: var(--line); color: var(--text-dim); }
+.placement-bar #placement-suggest { white-space: nowrap; flex: none; padding: 10px 12px; }
+/* flex-basis를 auto로 둬야 안내 문구의 실제 폭이 바에 반영된다 (flex:1은 basis 0%라 글자가 좁게 접힘) */
+.placement-bar #placement-text { flex: 1 1 auto; }
 
 .touch-toolbar {
   position: absolute; right: 12px; bottom: 18px;

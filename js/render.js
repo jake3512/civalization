@@ -2,7 +2,7 @@
 // render.js — 캔버스에 격자 필드, 지형, 영토, 구조물을 그린다
 // ============================================================
 import { getTileRange } from './world.js';
-import { STRUCTURES, TERRAIN_NODES, DIR_ARROW } from './data.js';
+import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, structureIcon } from './data.js';
 
 const TERRAIN_COLORS = {
   plain: '#232a24',
@@ -34,7 +34,9 @@ export class Renderer {
     this.originY = 0;
     this.hover = null;
     this.showPower = false;      // 전력 공급 범위 오버레이 토글
-    this.placementMarker = null; // 수도 위치 선택 중 표시할 마커 { x, y }
+    this.placementMarker = null; // 수도 위치 선택 중 표시할 마커 { x, y, ok, radius }
+    this.buildPreview = null;    // 건설 미리보기(고스트) { key, x, y, dir, ok, error }
+    this.capitalSites = null;    // 건국 단계에서 표시할 수도 후보 칸 [[x,y], ...]
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -118,8 +120,9 @@ export class Renderer {
     if (nation) this._drawStructures(nation, '#d98e34');
     for (const other of this.game.otherNations.values()) this._drawStructures(other, '#c1443c');
 
-    // 호버 하이라이트
-    if (this.hover) {
+    // 건설 미리보기(고스트) — 건설 모드일 때는 단순 호버 테두리 대신 이걸 그린다
+    if (this.buildPreview) this._drawBuildPreview();
+    else if (this.hover) {
       const sx = (this.hover.x - this.originX) * tile;
       const sy = (this.hover.y - this.originY) * tile;
       ctx.strokeStyle = '#f5d94e';
@@ -127,21 +130,97 @@ export class Renderer {
       ctx.strokeRect(sx, sy, tile, tile);
     }
 
-    // 수도 위치 선택 마커 (건국 전 단계)
+    // 건국 단계: 수도를 세울 수 있는 칸을 미리 표시해준다
+    // (요건을 만족하는 칸이 드물어서 맨손으로 찾기 어렵기 때문)
+    if (this.capitalSites && this.capitalSites.length) {
+      ctx.fillStyle = 'rgba(74,157,143,0.22)';
+      ctx.strokeStyle = 'rgba(74,157,143,0.6)';
+      ctx.lineWidth = 1;
+      for (const [tx, ty] of this.capitalSites) {
+        const sx = (tx - this.originX) * tile, sy = (ty - this.originY) * tile;
+        ctx.fillRect(sx + tile * 0.3, sy + tile * 0.3, tile * 0.4, tile * 0.4);
+        ctx.strokeRect(sx + tile * 0.3, sy + tile * 0.3, tile * 0.4, tile * 0.4);
+      }
+    }
+
+    // 수도 위치 선택 마커 (건국 전 단계) — 실제로 편입될 영토 범위와
+    // 입지 요건 충족 여부(초록/빨강)를 함께 보여준다
     if (this.placementMarker) {
-      const cx = (this.placementMarker.x + 1.5 - this.originX) * tile;
-      const cy = (this.placementMarker.y + 1.5 - this.originY) * tile;
-      ctx.strokeStyle = '#d98e34';
+      const m = this.placementMarker;
+      const cx = (m.x + 1 - this.originX) * tile;
+      const cy = (m.y + 1 - this.originY) * tile;
+      const ok = m.ok !== false;
+      const stroke = ok ? '#4a9d8f' : '#c1443c';
+
+      if (m.radius) {
+        ctx.beginPath();
+        ctx.fillStyle = ok ? 'rgba(74,157,143,0.10)' : 'rgba(193,68,60,0.10)';
+        ctx.strokeStyle = ok ? 'rgba(74,157,143,0.55)' : 'rgba(193,68,60,0.55)';
+        ctx.lineWidth = 2;
+        ctx.arc(cx, cy, m.radius * tile, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      }
+
+      // 수도 3x3 발판 고스트
+      const fx = (m.x - this.originX) * tile, fy = (m.y - this.originY) * tile;
+      ctx.fillStyle = ok ? 'rgba(74,157,143,0.28)' : 'rgba(193,68,60,0.28)';
+      ctx.fillRect(fx, fy, 3 * tile, 3 * tile);
+      this._drawStructIcon('capital', fx, fy, 3, 3, 0.9);
+      ctx.strokeStyle = stroke;
       ctx.lineWidth = 3;
+      ctx.strokeRect(fx, fy, 3 * tile, 3 * tile);
+      ctx.lineWidth = 1;
+    }
+  }
+
+  /** 건설 모드에서 커서(또는 마지막 터치 지점) 위치에 배치 결과를 미리 보여준다 */
+  _drawBuildPreview() {
+    const { ctx, tile } = this;
+    const p = this.buildPreview;
+    const def = STRUCTURES[p.key];
+    if (!def) return;
+    const [w, h] = def.footprint;
+    const sx = (p.x - this.originX) * tile;
+    const sy = (p.y - this.originY) * tile;
+
+    // 발판 고스트 (초록=건설 가능, 빨강=불가)
+    ctx.fillStyle = p.ok ? 'rgba(74,157,143,0.30)' : 'rgba(193,68,60,0.30)';
+    ctx.fillRect(sx, sy, w * tile, h * tile);
+    this._drawStructIcon(p.key, sx, sy, w, h, 0.85);
+    ctx.strokeStyle = p.ok ? '#4a9d8f' : '#c1443c';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.strokeRect(sx, sy, w * tile, h * tile);
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
+
+    // 벨트는 흐를 방향을 화살표로 함께 보여준다
+    if (p.key === 'belt') {
+      ctx.fillStyle = '#f0e8de';
+      ctx.font = `${tile * 0.6}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(DIR_ARROW[p.dir ?? 0], sx + tile / 2, sy + tile / 2);
+    }
+
+    // 영토를 넓히는 구조물(수도/중심지)은 편입될 범위를 원으로 미리 보여준다
+    if (p.territoryRadius) {
+      const ccx = sx + (w * tile) / 2, ccy = sy + (h * tile) / 2;
       ctx.beginPath();
-      ctx.arc(cx, cy, tile * 0.9, 0, Math.PI * 2);
+      ctx.strokeStyle = p.ok ? 'rgba(74,157,143,0.5)' : 'rgba(193,68,60,0.5)';
+      ctx.setLineDash([6, 5]);
+      ctx.arc(ccx, ccy, p.territoryRadius * tile, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 전력 공급 범위를 갖는 구조물(발전소)도 공급 범위를 미리 보여준다
+    if (p.powerRadius) {
+      const ccx = sx + (w * tile) / 2, ccy = sy + (h * tile) / 2;
       ctx.beginPath();
-      ctx.moveTo(cx - tile * 0.4, cy);
-      ctx.lineTo(cx + tile * 0.4, cy);
-      ctx.moveTo(cx, cy - tile * 0.4);
-      ctx.lineTo(cx, cy + tile * 0.4);
-      ctx.stroke();
+      ctx.fillStyle = 'rgba(245,217,78,0.07)';
+      ctx.strokeStyle = 'rgba(245,217,78,0.45)';
+      ctx.arc(ccx, ccy, p.powerRadius * tile, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
     }
   }
 
@@ -168,17 +247,35 @@ export class Renderer {
       ctx.globalAlpha = s.idle ? 0.35 : 0.85; // 유휴(가동 정지) 상태는 흐리게 표시
       ctx.fillRect(sx + 1, sy + 1, w * tile - 2, h * tile - 2);
       ctx.globalAlpha = 1;
+      this._drawStructIcon(s.key, sx, sy, w, h, s.idle ? 0.45 : 1);
       ctx.strokeStyle = s.idle ? '#c1443c' : '#0d0d0d';
       ctx.lineWidth = s.idle ? 2 : 1;
       ctx.strokeRect(sx + 1, sy + 1, w * tile - 2, h * tile - 2);
       ctx.lineWidth = 1;
+      // 레벨은 아이콘을 가리지 않도록 우측 하단에 작은 배지로 표시
       if (tile >= 16) {
-        ctx.fillStyle = '#12100c';
-        ctx.font = `bold ${Math.max(9, tile * 0.32)}px 'IBM Plex Mono', monospace`;
+        const bw = Math.max(11, tile * 0.42), bh = Math.max(10, tile * 0.36);
+        const bx = sx + w * tile - bw - 2, by = sy + h * tile - bh - 2;
+        ctx.fillStyle = 'rgba(12,14,12,0.78)';
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = '#f0e8de';
+        ctx.font = `bold ${Math.max(8, tile * 0.26)}px 'IBM Plex Mono', monospace`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(`${def.name[0]}${s.level}`, sx + (w * tile) / 2, sy + (h * tile) / 2);
+        ctx.fillText(String(s.level), bx + bw / 2, by + bh / 2 + 0.5);
       }
     }
+  }
+
+  /** 구조물 발판 중앙에 구조물 아이콘을 그린다 (로드 전이면 조용히 건너뜀) */
+  _drawStructIcon(structKey, sx, sy, w, h, alpha = 1) {
+    const { ctx, tile } = this;
+    const img = getIconImage(structureIcon(structKey));
+    if (!img.complete || img.naturalWidth === 0) return;
+    const box = Math.min(w, h) * tile;
+    const size = box * 0.72;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(img, sx + (w * tile - size) / 2, sy + (h * tile - size) / 2, size, size);
+    ctx.globalAlpha = 1;
   }
 
   _drawPowerOverlay(nation) {
