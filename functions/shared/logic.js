@@ -34,6 +34,19 @@ function isAreaFree(nation, x, y, footprint) {
   });
 }
 
+/** 구조물 발판의 정중앙 좌표 (영토 확장 시 중심점으로 사용) */
+function footprintCenter(x, y, footprint) {
+  const [w, h] = footprint;
+  return [x + (w - 1) / 2, y + (h - 1) / 2];
+}
+
+/** 수도/중심지처럼 레벨에 비례해 영토를 넓히는 구조물의 현재 레벨 기준 반경 */
+export function getTerritoryRadius(structKey, level) {
+  const def = STRUCTURES[structKey];
+  if (!def || !def.territoryRadius) return 0;
+  return def.territoryRadius + (level - 1);
+}
+
 function canAfford(nation, cost) {
   return Object.entries(cost).every(([res, amt]) => (nation.resources[res] || 0) >= amt);
 }
@@ -57,7 +70,18 @@ export function build(nation, structKey, x, y, dir = 0) {
   const def = STRUCTURES[structKey];
   if (!def) return { ok: false, error: '알 수 없는 구조물' };
   if (!nation.unlocked.has(structKey)) return { ok: false, error: '연구소에서 아직 해금되지 않았습니다' };
-  if (!isAreaFree(nation, x, y, def.footprint)) return { ok: false, error: '이 위치에는 건설할 수 없습니다 (영토 밖이거나 이미 점유됨)' };
+
+  const isCapital = structKey === 'capital';
+  if (isCapital && nation.structures.some(s => s.key === 'capital')) {
+    return { ok: false, error: '수도는 국가당 하나만 지을 수 있습니다' };
+  }
+  if (isCapital) {
+    // 수도는 스스로 영토를 만들어내는 시작점이라, 기존 영토 안에 있을 필요가 없다.
+    const clear = footprintTiles(x, y, def.footprint).every(([tx, ty]) => !structureAt(nation, tx, ty));
+    if (!clear) return { ok: false, error: '이 위치에는 건설할 수 없습니다 (이미 점유됨)' };
+  } else if (!isAreaFree(nation, x, y, def.footprint)) {
+    return { ok: false, error: '이 위치에는 건설할 수 없습니다 (영토 밖이거나 이미 점유됨)' };
+  }
 
   if (def.requiresNode) {
     const t = getTile(x, y);
@@ -80,8 +104,10 @@ export function build(nation, structKey, x, y, dir = 0) {
   };
   nation.structures.push(structure);
 
-  if (structKey === 'hub') addTerritory(nation, x, y, def.territoryRadius);
-  if (structKey === 'capital') addTerritory(nation, x, y, 3);
+  if (def.territoryRadius) {
+    const [cx, cy] = footprintCenter(x, y, def.footprint);
+    addTerritory(nation, cx, cy, getTerritoryRadius(structKey, structure.level));
+  }
 
   return { ok: true, structure };
 }
@@ -94,9 +120,10 @@ export function upgrade(nation, structId) {
   if (!canAfford(nation, cost)) return { ok: false, error: '자원이 부족합니다' };
   pay(nation, cost);
   s.level += 1;
-  if (s.key === 'hub') {
-    const def = STRUCTURES.hub;
-    addTerritory(nation, s.x, s.y, def.territoryRadius + s.level - 1);
+  const def = STRUCTURES[s.key];
+  if (def.territoryRadius) {
+    const [cx, cy] = footprintCenter(s.x, s.y, def.footprint);
+    addTerritory(nation, cx, cy, getTerritoryRadius(s.key, s.level));
   }
   return { ok: true, structure: s };
 }

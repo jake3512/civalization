@@ -69,9 +69,9 @@ export const WATER = { name: '강/호수', icon: '💧', density: 0.06 };
 export const STRUCTURES = {
   capital: {
     id: 1, name: '수도', volume: 9, footprint: [3, 3],
-    desc: '국가의 시작 지점. 국가당 1개, 게임 시작 시 자동 배치됩니다. 레벨에 비례해 국고 골드를 생산합니다.',
+    desc: '국가의 시작 지점. 국가당 1개, 게임 시작 시 자동 배치됩니다. 레벨에 비례해 국고 골드를 생산하고, 레벨이 오를수록 주변 영토도 넓어집니다.',
     baseCost: {}, maxLevel: 5, upgradeCostMul: 1.8,
-    category: 'core', goldIncome: 5,
+    category: 'core', goldIncome: 5, territoryRadius: 4,
   },
   hub: {
     id: 2, name: '중심지', volume: 4, footprint: [2, 2],
