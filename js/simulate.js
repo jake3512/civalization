@@ -87,6 +87,25 @@ function emitOutput(nation, s, def, res, amt) {
   else nation.resources[res] = (nation.resources[res] || 0) + amt;
 }
 
+// ---------------- 전초기지: 병력 모집 대기열 처리 ----------------
+// 골드는 모집 신청 시 이미 지불되었다 (logic.js recruitUnit). 여기서는 벨트로
+// 투입된 장비 아이템(inputBuffer)이 요구량을 채웠는지만 확인해 로스터에 편입한다.
+function processRecruitQueue(nation, s) {
+  s.recruitQueue = s.recruitQueue || [];
+  s.inputBuffer = s.inputBuffer || {};
+  nation.units = nation.units || { attack: {}, defense: {} };
+
+  for (let i = s.recruitQueue.length - 1; i >= 0; i--) {
+    const job = s.recruitQueue[i];
+    const ready = Object.entries(job.need).every(([res, amt]) => (s.inputBuffer[res] || 0) >= amt);
+    if (!ready) continue;
+    for (const [res, amt] of Object.entries(job.need)) s.inputBuffer[res] -= amt;
+    const bucket = job.isDefense ? nation.units.defense : nation.units.attack;
+    bucket[job.unitKey] = (bucket[job.unitKey] || 0) + 1;
+    s.recruitQueue.splice(i, 1);
+  }
+}
+
 // ---------------- 메인 틱 ----------------
 export function tickNation(nation) {
   // 0) 초기화
@@ -158,8 +177,18 @@ export function tickNation(nation) {
       } else {
         s.idle = true;
       }
-    } else if (def.category === 'military' && s.key === 'outpost') {
-      nation.resources.military = (nation.resources.military || 0) + def.baseProduction * s.level;
+    } else if (def.category === 'turret') {
+      // 터렛은 사거리 내에 있어도(전력 공급 범위) 매 틱 kW만큼 전력을 계속 소모해야 작동한다.
+      const draw = def.powerDraw * s.level;
+      if ((nation.resources.electricity || 0) >= draw) {
+        nation.resources.electricity -= draw;
+      } else {
+        s.idle = true; // 전력 부족 → 이번 틱은 격파 능력 없음(getDefensePower에서 제외됨)
+      }
+    } else if (def.category === 'core' && s.key === 'capital') {
+      nation.resources.gold = (nation.resources.gold || 0) + (def.goldIncome || 0) * s.level;
+    } else if (def.category === 'military_base' && s.key === 'outpost') {
+      processRecruitQueue(nation, s);
     }
   }
 
@@ -202,10 +231,11 @@ function tickRaiders(nation) {
     }
   }
 
-  // 터렛 교전 (사거리 내 가장 가까운 습격자 공격)
+  // 터렛 교전 (사거리 내 가장 가까운 습격자 공격). 이번 틱에 전력이 없어 idle 상태인
+  // 터렛은 발사하지 않는다 (위 tickNation 2단계에서 이미 idle 여부가 결정됨).
   for (const s of nation.structures) {
-    if (s.key !== 'turret') continue;
-    const def = STRUCTURES.turret;
+    const def = STRUCTURES[s.key];
+    if (!def || def.category !== 'turret' || s.idle) continue;
     const range = def.range + (s.level - 1);
     let target = null, best = Infinity;
     for (const r of nation.raiders) {

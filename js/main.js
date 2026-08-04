@@ -5,15 +5,15 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, TECH_TREE, DIR_ARROW, RAIDER, WAR } from './data.js';
+import { STRUCTURES, RESOURCES, TECH_TREE, DIR_ARROW, RAIDER, WAR, UNITS } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { getTile } from './world.js';
-import { findMatch, isShielded } from './logic.js';
+import { findMatch, isShielded, getDefensePower } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
-  callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callAttack,
+  callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callAttack,
 } from './multiplayer.js';
 
 const game = new Game();
@@ -107,7 +107,7 @@ function buildBuildMenu() {
     const btn = document.createElement('button');
     btn.className = 'build-item';
     btn.disabled = !game.myNation.unlocked.has(key);
-    btn.innerHTML = `<span class="idx">${def.id}</span><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
+    btn.innerHTML = `<span class="idx">${def.code || def.id}</span><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
     btn.title = def.desc;
     btn.addEventListener('click', () => {
       document.querySelectorAll('.build-item.active').forEach(b => b.classList.remove('active'));
@@ -276,6 +276,7 @@ function showStructPanel(struct, x, y) {
   let html = `<div class="ph">${def.name} · Lv.${struct.level}${struct.idle ? ' <span style="color:#c1443c">(정지됨)</span>' : ''}</div><div class="pd">${def.desc}</div>`;
 
   if (struct.key === 'lab') html += renderLabHtml();
+  if (struct.key === 'outpost') html += renderOutpostHtml(struct);
 
   if (def.recipes) {
     html += `<div class="pd">레시피 선택${def.recipes[struct.recipe]?.requiresBelt ? ' (벨트 투입 전용)' : ''}:</div><div class="recipe-list">`;
@@ -325,6 +326,55 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
+  panel.querySelectorAll('.recruit-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const unitKey = btn.dataset.unit;
+      const isDefense = btn.dataset.defense === '1';
+      if (isMultiplayer()) {
+        const res = await callRecruitUnit(struct.id, unitKey, isDefense);
+        if (res.error) flashMessage(res.error, true); else flashMessage('모집 신청 완료 — 벨트로 장비를 투입하세요', false);
+      } else {
+        const err = game.myNation.recruitUnit(struct.id, unitKey, isDefense);
+        if (err) flashMessage(err, true); else { flashMessage('모집 신청 완료 — 벨트로 장비를 투입하세요', false); showStructPanel(struct, x, y); }
+      }
+    });
+  });
+}
+
+function renderOutpostHtml(struct) {
+  const nation = game.myNation;
+  const fmtEquip = (equip) => Object.entries(equip).map(([r, a]) => `${RESOURCES[r]?.icon || ''}${a}`).join(' ');
+
+  let html = `<div class="pd">국고 골드: 💰 ${Math.floor(nation.resources.gold || 0)}</div>`;
+
+  const queue = struct.recruitQueue || [];
+  if (queue.length) {
+    html += `<div class="pd">모집 대기열 (${queue.length}) — 벨트로 장비 투입 대기 중:</div>`;
+    html += queue.map(j => {
+      const unit = j.isDefense ? UNITS.defense[j.unitKey] : UNITS.attack[j.unitKey];
+      const have = struct.inputBuffer || {};
+      const needTxt = Object.entries(j.need).map(([r, a]) => `${RESOURCES[r]?.icon || ''}${have[r] || 0}/${a}`).join(' ');
+      return `<div class="pd">· ${unit?.name || j.unitKey}: ${needTxt}</div>`;
+    }).join('');
+  }
+
+  const roster = nation.units || { attack: {}, defense: {} };
+  const rosterTxt = [
+    ...Object.entries(roster.attack || {}).map(([k, c]) => `${UNITS.attack[k]?.name || k} ×${c}`),
+    ...Object.entries(roster.defense || {}).map(([k, c]) => `${UNITS.defense[k]?.name || k} ×${c}`),
+  ].join(', ');
+  html += `<div class="pd">보유 병력: ${rosterTxt || '없음'}</div>`;
+
+  html += `<div class="pd">공격 유닛 모집:</div><div class="recipe-list">`;
+  for (const [key, unit] of Object.entries(UNITS.attack)) {
+    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="0">${unit.name} · 💰${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
+  }
+  html += `</div><div class="pd">수비 유닛 모집:</div><div class="recipe-list">`;
+  for (const [key, unit] of Object.entries(UNITS.defense)) {
+    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="1">${unit.name} · 💰${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
+  }
+  html += `</div>`;
+  return html;
 }
 
 function renderLabHtml() {
@@ -394,7 +444,7 @@ function renderMatchCard() {
         <span class="nm">${n.name}</span>
         <span class="trophy">🏆 ${n.trophies || 0}</span>
       </div>
-      <div class="pd">예상 전투력 ${militaryPowerOf(n)} · 약탈 예상 ${estLoot || '없음'}</div>
+      <div class="pd">예상 방어력 ${getDefensePower(n)} · 약탈 예상 ${estLoot || '없음'}</div>
       <div class="match-actions">
         <button id="attack-match-btn" class="atk-btn">공격</button>
         <button id="skip-match-btn" class="skip-btn">다른 상대</button>
@@ -413,13 +463,6 @@ function renderMatchCard() {
   });
 }
 
-function militaryPowerOf(nationData) {
-  return (nationData.structures || []).reduce((sum, s) => {
-    const def = STRUCTURES[s.key];
-    if (def && def.category === 'military') return sum + (def.attack || def.defense || 1) * s.level;
-    return sum;
-  }, 0);
-}
 function renderBattleLog(list) {
   const el = document.getElementById('battle-log');
   el.innerHTML = list.map(b => {

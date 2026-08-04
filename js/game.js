@@ -6,7 +6,7 @@
 //  Cloud Functions의 functions/shared/{logic,simulate}.js가 동일한
 //  코드로 같은 역할을 서버에서 수행한다.)
 // ============================================================
-import { STRUCTURES, BASE_UNLOCKED, RAIDER } from './data.js';
+import { STRUCTURES, BASE_UNLOCKED, RAIDER, WAR } from './data.js';
 import * as logic from './logic.js';
 import { tickNation } from './simulate.js';
 
@@ -17,6 +17,7 @@ export function createNation(id, name, color, capitalX, capitalY) {
   const n = new Nation({ id, name, color, capitalX, capitalY });
   n.territory.add(logic.tileKey(capitalX, capitalY));
   logic.build(n, 'capital', capitalX, capitalY); // 비용 없음 → 항상 성공
+  n.shieldUntil = Date.now() + WAR.starterShieldMs; // 건국 직후 보호막 (COC 신규 유저 보호막과 동일한 취지)
   return n;
 }
 
@@ -34,6 +35,9 @@ export class Nation {
     this.research = null;
     this.raiders = [];
     this.capitalHp = RAIDER.capitalMaxHp;
+    this.trophies = 0;
+    this.shieldUntil = 0; // 타임스탬프(ms). 이 값이 현재 시각보다 크면 보호막 활성.
+    this.units = { attack: {}, defense: {} }; // 무장 완료된 병력 로스터 (unitKey -> 보유 수)
   }
 
   isOwned(x, y) { return this.territory.has(logic.tileKey(x, y)); }
@@ -54,7 +58,13 @@ export class Nation {
     const res = logic.startResearch(this, structKey);
     return res.ok ? null : res.error;
   }
-  militaryPower() { return logic.militaryPower(this); }
+  recruitUnit(structId, unitKey, isDefense) {
+    const res = logic.recruitUnit(this, structId, unitKey, isDefense);
+    return res.ok ? null : res.error;
+  }
+  getAttackPower() { return logic.getAttackPower(this); }
+  getDefensePower() { return logic.getDefensePower(this); }
+  isShielded(now) { return logic.isShielded(this, now); }
 
   tick() { tickNation(this); }
 
@@ -64,6 +74,7 @@ export class Nation {
       structures: this.structures, territory: Array.from(this.territory),
       resources: this.resources, unlocked: Array.from(this.unlocked),
       research: this.research, raiders: this.raiders, capitalHp: this.capitalHp,
+      trophies: this.trophies, shieldUntil: this.shieldUntil, units: this.units,
     };
   }
 
@@ -76,6 +87,9 @@ export class Nation {
     n.research = data.research || null;
     n.raiders = data.raiders || [];
     n.capitalHp = data.capitalHp ?? RAIDER.capitalMaxHp;
+    n.trophies = data.trophies || 0;
+    n.shieldUntil = data.shieldUntil || 0;
+    n.units = data.units || { attack: {}, defense: {} };
     n.nextStructId = (n.structures.reduce((m, s) => Math.max(m, s.id), 0)) + 1;
     return n;
   }

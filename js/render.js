@@ -18,19 +18,23 @@ export class Renderer {
     this.originX = 0;        // 카메라 좌상단 월드 좌표
     this.originY = 0;
     this.hover = null;
-    this.showPower = false; // P키로 토글: 발전소 공급 범위 오버레이
+    this.showPower = false;      // 전력 공급 범위 오버레이 토글
+    this.placementMarker = null; // 수도 위치 선택 중 표시할 마커 { x, y }
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const old = this.tile;
-      this.tile = Math.min(48, Math.max(8, this.tile - Math.sign(e.deltaY) * 2));
-      // 마우스 위치 기준 줌
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-      const wx = this.originX + mx / old, wy = this.originY + my / old;
-      this.originX = wx - mx / this.tile;
-      this.originY = wy - my / this.tile;
+      this.zoomAt(e.clientX - rect.left, e.clientY - rect.top, -Math.sign(e.deltaY) * 2);
     }, { passive: false });
+  }
+
+  /** screenX/Y 지점을 고정한 채 tile 크기를 deltaTile만큼 바꾼다 (휠/핀치/버튼 공용) */
+  zoomAt(screenX, screenY, deltaTile) {
+    const old = this.tile;
+    this.tile = Math.min(48, Math.max(6, this.tile + deltaTile));
+    const wx = this.originX + screenX / old, wy = this.originY + screenY / old;
+    this.originX = wx - screenX / this.tile;
+    this.originY = wy - screenY / this.tile;
   }
 
   resize() {
@@ -107,6 +111,23 @@ export class Renderer {
       ctx.strokeStyle = '#f5d94e';
       ctx.lineWidth = 2;
       ctx.strokeRect(sx, sy, tile, tile);
+    }
+
+    // 수도 위치 선택 마커 (건국 전 단계)
+    if (this.placementMarker) {
+      const cx = (this.placementMarker.x + 1.5 - this.originX) * tile;
+      const cy = (this.placementMarker.y + 1.5 - this.originY) * tile;
+      ctx.strokeStyle = '#d98e34';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, tile * 0.9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - tile * 0.4, cy);
+      ctx.lineTo(cx + tile * 0.4, cy);
+      ctx.moveTo(cx, cy - tile * 0.4);
+      ctx.lineTo(cx, cy + tile * 0.4);
+      ctx.stroke();
     }
   }
 

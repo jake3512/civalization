@@ -15,7 +15,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+.hidden { display: none !important; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -56,6 +57,7 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   letter-spacing: 0.5px;
 }
 .start-card p { color: var(--text-dim); line-height: 1.6; margin-bottom: 26px; font-size: 14px; }
+.start-card p.hint { margin: 12px 0 0; font-size: 12px; color: var(--text-dim); }
 .start-card label {
   display: block; font-size: 12px; color: var(--text-dim);
   margin-bottom: 16px; letter-spacing: 0.5px;
@@ -121,7 +123,7 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 .build-menu { display: flex; flex-direction: column; gap: 4px; }
 .build-item {
-  display: grid; grid-template-columns: 20px 1fr auto;
+  display: grid; grid-template-columns: 34px 1fr auto;
   gap: 8px; align-items: center;
   background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
   padding: 9px 10px; border-radius: 3px; text-align: left; font-size: 13px;
@@ -134,7 +136,34 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .build-item:disabled { opacity: 0.35; cursor: not-allowed; }
 
 #field-wrap { flex: 1; position: relative; min-width: 0; }
-#field { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#field { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+
+.placement-bar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--accent);
+  padding: 10px 14px; border-radius: 6px; font-size: 13px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  max-width: 92%;
+}
+.placement-bar #placement-confirm {
+  background: var(--accent); color: #14100a; border: none; border-radius: 4px;
+  padding: 10px 14px; font-family: var(--font-display); font-size: 13px; white-space: nowrap;
+}
+.placement-bar #placement-confirm:disabled { background: var(--line); color: var(--text-dim); }
+
+.touch-toolbar {
+  position: absolute; right: 12px; bottom: 18px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toolbar-btn {
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  padding: 12px 14px; border-radius: 6px; font-size: 13px;
+  min-width: 52px; min-height: 44px; /* 터치하기 충분한 크기 */
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+.toolbar-btn:disabled { opacity: 0.35; }
+.toolbar-btn.active { border-color: var(--accent); color: var(--accent); }
 
 .flash {
   position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
@@ -165,14 +194,31 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 #upgrade-btn:disabled { background: var(--line); color: var(--text-dim); cursor: not-allowed; }
 
-.war-list { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.war-list { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.find-match-btn {
+  width: 100%; padding: 10px; background: var(--accent); color: #14100a; border: none;
+  border-radius: 4px; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.5px;
+}
+.match-card {
+  margin-top: 8px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 4px; padding: 10px;
+}
+.match-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.match-head .nm { flex: 1; font-family: var(--font-display); font-size: 14px; }
+.match-head .trophy { font-family: var(--font-mono); color: var(--accent); font-size: 12px; }
+.match-actions { display: flex; gap: 8px; margin-top: 8px; }
+.match-actions .atk-btn { flex: 1; }
+.skip-btn {
+  flex: 1; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 3px; padding: 8px; font-size: 12px;
+}
 .war-row { display: flex; align-items: center; gap: 8px; }
 .war-row .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .war-row .nm { flex: 1; }
 .war-row .pw { font-family: var(--font-mono); color: var(--text-dim); font-size: 11px; }
 .atk-btn {
   background: var(--danger); color: #fff; border: none; border-radius: 3px;
-  padding: 4px 8px; font-size: 11px;
+  padding: 10px 8px; font-size: 12px; min-height: 40px;
 }
 
 .battle-log { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
