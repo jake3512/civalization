@@ -6,7 +6,7 @@
 //  Cloud Functions의 functions/shared/{logic,simulate}.js가 동일한
 //  코드로 같은 역할을 서버에서 수행한다.)
 // ============================================================
-import { STRUCTURES, BASE_UNLOCKED, RAIDER, WAR } from './data.js';
+import { STRUCTURES, BASE_UNLOCKED, WAR } from './data.js';
 import * as logic from './logic.js';
 import { tickNation } from './simulate.js';
 
@@ -32,8 +32,6 @@ export class Nation {
     this.nextStructId = 1;
     this.unlocked = new Set(BASE_UNLOCKED);
     this.research = null;
-    this.raiders = [];
-    this.capitalHp = RAIDER.capitalMaxHp;
     this.trophies = 0;
     this.shieldUntil = 0; // 타임스탬프(ms). 이 값이 현재 시각보다 크면 보호막 활성.
     this.units = { attack: {}, defense: {} }; // 무장 완료된 병력 로스터 (unitKey -> 보유 수)
@@ -72,7 +70,7 @@ export class Nation {
       id: this.id, name: this.name, color: this.color, capital: this.capital,
       structures: this.structures, territory: Array.from(this.territory),
       resources: this.resources, unlocked: Array.from(this.unlocked),
-      research: this.research, raiders: this.raiders, capitalHp: this.capitalHp,
+      research: this.research,
       trophies: this.trophies, shieldUntil: this.shieldUntil, units: this.units,
     };
   }
@@ -84,8 +82,6 @@ export class Nation {
     n.resources = data.resources || {};
     n.unlocked = new Set(data.unlocked || BASE_UNLOCKED);
     n.research = data.research || null;
-    n.raiders = data.raiders || [];
-    n.capitalHp = data.capitalHp ?? RAIDER.capitalMaxHp;
     n.trophies = data.trophies || 0;
     n.shieldUntil = data.shieldUntil || 0;
     n.units = data.units || { attack: {}, defense: {} };

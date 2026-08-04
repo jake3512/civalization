@@ -5,7 +5,7 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, TECH_TREE, DIR_ARROW, RAIDER, WAR, UNITS } from './data.js';
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { getTile } from './world.js';
@@ -19,6 +19,10 @@ import {
 const game = new Game();
 const canvas = document.getElementById('field');
 const renderer = new Renderer(canvas, game);
+
+// 자원/상태 아이콘을 <img> 태그로 뽑아주는 헬퍼 (이모지 대신 assets/icons/*.svg 사용)
+const resIcon = (key) => `<img class="ic" src="${RESOURCES[key]?.icon || ''}" alt="${RESOURCES[key]?.name || key}">`;
+const statusIcon = (key) => `<img class="ic" src="${STATUS_ICONS[key]}" alt="${key}">`;
 
 let selectedStruct = null;   // 현재 건설 모드로 선택된 구조물 key
 let beltDir = 0;              // 벨트 건설 시 방향 (회전 버튼 / R키)
@@ -73,18 +77,18 @@ async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
 
   if (!FUNCTIONS_DEPLOYED) {
-    statusEl.textContent = '⚪ 로컬 모드 (Cloud Functions 미배포)';
+    statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (Cloud Functions 미배포)';
     return; // Functions 배포 전에는 Firebase 연결 자체를 시도하지 않는다 (안전한 폴백)
   }
 
   const ok = await initFirebase();
-  if (!ok) { statusEl.textContent = '⚪ 로컬 모드 (firebase-config.js 미설정)'; return; }
+  if (!ok) { statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (firebase-config.js 미설정)'; return; }
 
   const res = await callInitNation(name, color, cx, cy);
   if (res.error && !res.existed) { flashMessage('서버 연결 실패: ' + res.error, true); return; }
 
   game.serverAuthoritative = true;
-  statusEl.textContent = '🟢 온라인 (서버 권위 모드)';
+  statusEl.innerHTML = '<span class="dot on"></span> 온라인 (서버 권위 모드)';
 
   watchMyNation((data) => {
     if (!data) return;
@@ -128,10 +132,10 @@ function buildBuildMenu() {
 
 function renderCostPreview(def) {
   const el = document.getElementById('cost-preview');
-  const parts = Object.entries(def.baseCost).map(([r, a]) => `${RESOURCES[r]?.icon || ''} ${RESOURCES[r]?.name || r} ${a}`);
-  let text = parts.length ? `건설 비용: ${parts.join(' · ')}` : '건설 비용 없음';
-  if (def === STRUCTURES.belt) text += `  ·  방향 ${DIR_ARROW[beltDir]} (우측 하단 ⟳ 버튼으로 회전)`;
-  el.textContent = text;
+  const parts = Object.entries(def.baseCost).map(([r, a]) => `${resIcon(r)} ${RESOURCES[r]?.name || r} ${a}`);
+  let html = parts.length ? `건설 비용: ${parts.join(' · ')}` : '건설 비용 없음';
+  if (def === STRUCTURES.belt) html += `  ·  방향 ${DIR_ARROW[beltDir]} (우측 하단 ⟳ 버튼으로 회전)`;
+  el.innerHTML = html;
 }
 
 // ---------- 터치 툴바 버튼 (회전 / 전력범위 / 줌) ----------
@@ -343,9 +347,9 @@ function showStructPanel(struct, x, y) {
 
 function renderOutpostHtml(struct) {
   const nation = game.myNation;
-  const fmtEquip = (equip) => Object.entries(equip).map(([r, a]) => `${RESOURCES[r]?.icon || ''}${a}`).join(' ');
+  const fmtEquip = (equip) => Object.entries(equip).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
 
-  let html = `<div class="pd">국고 골드: 💰 ${Math.floor(nation.resources.gold || 0)}</div>`;
+  let html = `<div class="pd">국고 골드: ${resIcon('gold')} ${Math.floor(nation.resources.gold || 0)}</div>`;
 
   const queue = struct.recruitQueue || [];
   if (queue.length) {
@@ -353,7 +357,7 @@ function renderOutpostHtml(struct) {
     html += queue.map(j => {
       const unit = j.isDefense ? UNITS.defense[j.unitKey] : UNITS.attack[j.unitKey];
       const have = struct.inputBuffer || {};
-      const needTxt = Object.entries(j.need).map(([r, a]) => `${RESOURCES[r]?.icon || ''}${have[r] || 0}/${a}`).join(' ');
+      const needTxt = Object.entries(j.need).map(([r, a]) => `${resIcon(r)}${have[r] || 0}/${a}`).join(' ');
       return `<div class="pd">· ${unit?.name || j.unitKey}: ${needTxt}</div>`;
     }).join('');
   }
@@ -367,11 +371,11 @@ function renderOutpostHtml(struct) {
 
   html += `<div class="pd">공격 유닛 모집:</div><div class="recipe-list">`;
   for (const [key, unit] of Object.entries(UNITS.attack)) {
-    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="0">${unit.name} · 💰${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
+    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="0">${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
   }
   html += `</div><div class="pd">수비 유닛 모집:</div><div class="recipe-list">`;
   for (const [key, unit] of Object.entries(UNITS.defense)) {
-    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="1">${unit.name} · 💰${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
+    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="1">${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
   }
   html += `</div>`;
   return html;
@@ -388,7 +392,7 @@ function renderLabHtml() {
     if (nation.unlocked.has(key)) continue;
     const missing = tech.requires.filter(k => !nation.unlocked.has(k));
     const locked = missing.length > 0;
-    const costTxt = Object.entries(tech.cost).map(([r, a]) => `${RESOURCES[r]?.icon || ''}${a}`).join(' ');
+    const costTxt = Object.entries(tech.cost).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
     html += `<button class="recipe-btn research-btn" data-tech="${key}" ${locked ? 'disabled title="선행 연구 필요: ' + missing.join(',') + '"' : ''}>
       ${STRUCTURES[key].name} (${costTxt}, ${tech.time}틱)
     </button>`;
@@ -435,14 +439,14 @@ function renderMatchCard() {
   const estLoot = Object.entries(n.resources || {})
     .filter(([, v]) => v > 0)
     .slice(0, 4)
-    .map(([r, v]) => `${RESOURCES[r]?.icon || ''}${Math.floor(v * 0.1)}`)
+    .map(([r, v]) => `${resIcon(r)}${Math.floor(v * 0.1)}`)
     .join(' ');
   el.innerHTML = `
     <div class="match-card">
       <div class="match-head">
         <span class="dot" style="background:${n.color}"></span>
         <span class="nm">${n.name}</span>
-        <span class="trophy">🏆 ${n.trophies || 0}</span>
+        <span class="trophy">${statusIcon('trophy')} ${n.trophies || 0}</span>
       </div>
       <div class="pd">예상 방어력 ${getDefensePower(n)} · 약탈 예상 ${estLoot || '없음'}</div>
       <div class="match-actions">
@@ -468,7 +472,7 @@ function renderBattleLog(list) {
   el.innerHTML = list.map(b => {
     const mine = b.attackerId === game.myNation.id;
     const outcome = b.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '승리');
-    const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (🏆${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
+    const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (${statusIcon('trophy')}${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
     return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
   }).join('') || '<div class="pd">전투 기록 없음</div>';
 }
@@ -479,17 +483,13 @@ function renderResourcePanel() {
   if (!game.myNation) { el.innerHTML = ''; return; }
   const res = game.myNation.resources;
   const keys = Object.keys(RESOURCES).filter(k => res[k]);
-  const hp = game.myNation.capitalHp ?? RAIDER.capitalMaxHp;
-  const raiders = (game.myNation.raiders || []).length;
-  let html = keys.map(k => `<span class="res"><span class="ic">${RESOURCES[k].icon}</span>${Math.floor(res[k])}</span>`).join('');
-  html += `<span class="res" title="트로피">🏆 ${game.myNation.trophies || 0}</span>`;
+  let html = keys.map(k => `<span class="res">${resIcon(k)}${Math.floor(res[k])}</span>`).join('');
+  html += `<span class="res" title="트로피">${statusIcon('trophy')} ${game.myNation.trophies || 0}</span>`;
   const shieldMs = (game.myNation.shieldUntil || 0) - Date.now();
   if (shieldMs > 0) {
     const h = Math.floor(shieldMs / 3600000), m = Math.floor((shieldMs % 3600000) / 60000);
-    html += `<span class="res" style="color:#4a9d8f" title="보호막 남은 시간">🛡️ ${h}시간 ${m}분</span>`;
+    html += `<span class="res teal" title="보호막 남은 시간">${statusIcon('shield')} ${h}시간 ${m}분</span>`;
   }
-  html += `<span class="res" title="수도 체력">🏛️ ${Math.round(hp)}/${RAIDER.capitalMaxHp}</span>`;
-  if (raiders > 0) html += `<span class="res" style="color:#c1443c">🚨 습격자 ${raiders}</span>`;
   el.innerHTML = html;
 }
 

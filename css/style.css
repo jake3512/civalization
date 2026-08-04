@@ -95,12 +95,28 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 .brand span { color: var(--accent); font-size: 12px; letter-spacing: 2px; }
 .resource-bar {
-  flex: 1; display: flex; gap: 16px; overflow-x: auto;
+  flex: 1; display: flex; gap: 18px; overflow-x: auto;
   font-family: var(--font-mono); font-size: 13px;
 }
-.resource-bar .res { display: flex; gap: 4px; align-items: center; color: var(--text-dim); white-space: nowrap; }
-.resource-bar .res .ic { font-size: 14px; }
-.mp-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.resource-bar .res { display: flex; gap: 5px; align-items: center; color: var(--text); white-space: nowrap; font-weight: 500; }
+.resource-bar .res.teal { color: var(--teal); }
+.mp-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+
+/* ---- 아이콘 이미지 (assets/icons/*.svg) ---- */
+.ic {
+  width: 18px; height: 18px; flex: none;
+  vertical-align: -4px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+}
+.recipe-btn .ic, .pd .ic, .cost-preview .ic { width: 14px; height: 14px; vertical-align: -3px; }
+.trophy .ic, .match-head .ic { width: 15px; height: 15px; vertical-align: -3px; }
+
+/* ---- 연결 상태 점 (로컬/온라인) ---- */
+.dot.off, .dot.on {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+}
+.dot.off { background: var(--text-dim); }
+.dot.on { background: var(--teal); box-shadow: 0 0 6px rgba(74,157,143,0.8); }
 
 #layout { flex: 1; display: flex; min-height: 0; }
 

@@ -55,8 +55,13 @@ function pay(nation, cost) {
 }
 
 function addTerritory(nation, cx, cy, radius) {
-  for (let y = cy - radius; y <= cy + radius; y++) {
-    for (let x = cx - radius; x <= cx + radius; x++) {
+  // cx/cy는 짝수 발판(중심지 등)의 경우 x.5 같은 소수일 수 있으므로, 정수 타일
+  // 좌표만 순회하도록 항상 정수 경계로 반올림한다 (그렇지 않으면 반경 내 어떤
+  // 정수 타일도 순회에 걸리지 않아 영토가 하나도 편입되지 않는다).
+  const y0 = Math.floor(cy - radius), y1 = Math.ceil(cy + radius);
+  const x0 = Math.floor(cx - radius), x1 = Math.ceil(cx + radius);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
       if (Math.hypot(x - cx, y - cy) <= radius) nation.territory.add(tileKey(x, y));
     }
   }
