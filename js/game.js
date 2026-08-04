@@ -15,8 +15,7 @@ const TICK_MS = 2000; // 자원 생산 주기
 /** 새 국가를 생성하고 수도를 자동 배치한다. (클라이언트 오프라인 모드 / Cloud Functions 양쪽에서 재사용) */
 export function createNation(id, name, color, capitalX, capitalY) {
   const n = new Nation({ id, name, color, capitalX, capitalY });
-  n.territory.add(logic.tileKey(capitalX, capitalY));
-  logic.build(n, 'capital', capitalX, capitalY); // 비용 없음 → 항상 성공
+  logic.build(n, 'capital', capitalX, capitalY); // 비용 없음 → 항상 성공, 영토는 build()가 직접 부여
   n.shieldUntil = Date.now() + WAR.starterShieldMs; // 건국 직후 보호막 (COC 신규 유저 보호막과 동일한 취지)
   return n;
 }
