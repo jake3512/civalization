@@ -1,10 +1,16 @@
 // ============================================================
-// main.js — UI 배선 (건설 메뉴, 캔버스 조작, 자원 패널, 연구소, 전쟁 패널)
+// main.js — UI 배선. 키보드 없는 터치 기기를 기본으로 가정하고 만들었다:
+//   - 지도 이동: 한 손가락 드래그 (마우스 드래그도 동일하게 동작)
+//   - 확대/축소: 두 손가락 핀치, 또는 우측 하단 [+][-] 버튼 (휠도 지원)
+//   - 탭(드래그가 아닌 짧은 터치): 건설/선택
+//   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, TECH_TREE, DIR_ARROW, RAIDER } from './data.js';
+import { STRUCTURES, RESOURCES, TECH_TREE, DIR_ARROW, RAIDER, WAR } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { getTile } from './world.js';
+import { findMatch, isShielded } from './logic.js';
+import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callAttack,
@@ -15,38 +21,68 @@ const canvas = document.getElementById('field');
 const renderer = new Renderer(canvas, game);
 
 let selectedStruct = null;   // 현재 건설 모드로 선택된 구조물 key
-let beltDir = 0;              // 벨트 건설 시 방향 (R키로 회전)
+let beltDir = 0;              // 벨트 건설 시 방향 (회전 버튼 / R키)
+let pendingNation = null;     // { name, color } — 수도 위치를 아직 못 고른 상태
+let selectedCapital = null;   // { x, y } — 탭으로 고른 수도 후보 위치
 
-// ---------- 시작 화면 ----------
+// ---------- 1단계: 국가 이름/색 ----------
 const startScreen = document.getElementById('start-screen');
 document.getElementById('start-btn').addEventListener('click', () => {
   const name = document.getElementById('nation-name').value.trim() || '이름없는 국가';
   const color = document.getElementById('nation-color').value;
-  const cx = Math.floor((Math.random() - 0.5) * 400);
-  const cy = Math.floor((Math.random() - 0.5) * 400);
+  pendingNation = { name, color };
 
-  // 네트워크 상태와 무관하게 즉시 플레이 가능하도록 로컬 국가를 먼저 만든다.
-  // (Firebase가 연결되면 아래 initMultiplayer()가 서버 권위 모드로 전환한다)
-  game.startNation(name, color, cx, cy);
-  renderer.centerOn(cx, cy);
   startScreen.classList.add('hidden');
+  document.getElementById('placement-bar').classList.remove('hidden');
+  renderer.centerOn(0, 0);
+  requestAnimationFrame(loop); // 국가 생성 전이라도 지도는 바로 보여준다
+});
+
+// ---------- 2단계: 지도를 탭해서 수도 위치 선택 ----------
+function updatePlacementBar() {
+  const bar = document.getElementById('placement-text');
+  const confirmBtn = document.getElementById('placement-confirm');
+  if (!selectedCapital) {
+    bar.textContent = '지도를 움직여 수도를 세울 칸을 탭하세요';
+    confirmBtn.disabled = true;
+  } else {
+    bar.textContent = `선택한 위치 (${selectedCapital.x}, ${selectedCapital.y}) — 다른 곳을 탭하면 위치를 바꿀 수 있어요`;
+    confirmBtn.disabled = false;
+  }
+}
+
+document.getElementById('placement-confirm').addEventListener('click', () => {
+  if (!selectedCapital || !pendingNation) return;
+  const { x, y } = selectedCapital;
+  const { name, color } = pendingNation;
+
+  game.startNation(name, color, x, y);
+  renderer.placementMarker = null;
+  document.getElementById('placement-bar').classList.add('hidden');
+  document.getElementById('touch-toolbar').classList.remove('hidden');
+
   buildBuildMenu();
   game.startLoop();
-  requestAnimationFrame(loop);
+  initMultiplayer(name, color, x, y);
 
-  initMultiplayer(name, color, cx, cy);
+  pendingNation = null;
+  selectedCapital = null;
 });
 
 async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
+
+  if (!FUNCTIONS_DEPLOYED) {
+    statusEl.textContent = '⚪ 로컬 모드 (Cloud Functions 미배포)';
+    return; // Functions 배포 전에는 Firebase 연결 자체를 시도하지 않는다 (안전한 폴백)
+  }
+
   const ok = await initFirebase();
   if (!ok) { statusEl.textContent = '⚪ 로컬 모드 (firebase-config.js 미설정)'; return; }
 
   const res = await callInitNation(name, color, cx, cy);
   if (res.error && !res.existed) { flashMessage('서버 연결 실패: ' + res.error, true); return; }
 
-  // 이 시점부터 클라이언트 로컬 tick()은 멈추고, 서버(Cloud Functions)가
-  // 계산한 결과를 Firestore 구독으로만 받아서 반영한다.
   game.serverAuthoritative = true;
   statusEl.textContent = '🟢 온라인 (서버 권위 모드)';
 
@@ -75,9 +111,15 @@ function buildBuildMenu() {
     btn.title = def.desc;
     btn.addEventListener('click', () => {
       document.querySelectorAll('.build-item.active').forEach(b => b.classList.remove('active'));
-      if (selectedStruct === key) { selectedStruct = null; return; }
+      const rotateBtn = document.getElementById('rotate-btn');
+      if (selectedStruct === key) {
+        selectedStruct = null;
+        rotateBtn.disabled = true;
+        return;
+      }
       selectedStruct = key;
       btn.classList.add('active');
+      rotateBtn.disabled = (key !== 'belt');
       renderCostPreview(def);
     });
     menu.appendChild(btn);
@@ -88,11 +130,28 @@ function renderCostPreview(def) {
   const el = document.getElementById('cost-preview');
   const parts = Object.entries(def.baseCost).map(([r, a]) => `${RESOURCES[r]?.icon || ''} ${RESOURCES[r]?.name || r} ${a}`);
   let text = parts.length ? `건설 비용: ${parts.join(' · ')}` : '건설 비용 없음';
-  if (def === STRUCTURES.belt) text += `  ·  방향 ${DIR_ARROW[beltDir]} (R키로 회전)`;
+  if (def === STRUCTURES.belt) text += `  ·  방향 ${DIR_ARROW[beltDir]} (우측 하단 ⟳ 버튼으로 회전)`;
   el.textContent = text;
 }
 
-// ---------- 키보드 (벨트 회전 / 전력 오버레이 토글) ----------
+// ---------- 터치 툴바 버튼 (회전 / 전력범위 / 줌) ----------
+document.getElementById('rotate-btn').addEventListener('click', () => {
+  if (selectedStruct !== 'belt') return;
+  beltDir = (beltDir + 1) % 4;
+  renderCostPreview(STRUCTURES.belt);
+});
+document.getElementById('power-btn').addEventListener('click', (e) => {
+  renderer.showPower = !renderer.showPower;
+  e.currentTarget.classList.toggle('active', renderer.showPower);
+});
+document.getElementById('zoom-in-btn').addEventListener('click', () => {
+  renderer.zoomAt(canvas.width / 2, canvas.height / 2, 4);
+});
+document.getElementById('zoom-out-btn').addEventListener('click', () => {
+  renderer.zoomAt(canvas.width / 2, canvas.height / 2, -4);
+});
+
+// ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
 window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'r' && selectedStruct === 'belt') {
     beltDir = (beltDir + 1) % 4;
@@ -100,27 +159,38 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key.toLowerCase() === 'p') {
     renderer.showPower = !renderer.showPower;
+    document.getElementById('power-btn').classList.toggle('active', renderer.showPower);
   }
 });
 
-// ---------- 캔버스 인터랙션 ----------
+// ---------- 캔버스 조작: 마우스 + 터치(팬/탭/핀치줌) 공용 ----------
 let dragging = false, lastX = 0, lastY = 0, dragged = false;
-canvas.addEventListener('mousedown', (e) => { dragging = true; dragged = false; lastX = e.clientX; lastY = e.clientY; });
-window.addEventListener('mouseup', () => dragging = false);
-canvas.addEventListener('mousemove', (e) => {
+let pinching = false, pinchStartDist = 0;
+
+function pointerDown(x, y) { dragging = true; dragged = false; lastX = x; lastY = y; }
+function pointerMove(x, y) {
   const rect = canvas.getBoundingClientRect();
-  renderer.hover = renderer.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+  renderer.hover = renderer.screenToWorld(x - rect.left, y - rect.top);
   if (dragging) {
-    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    const dx = x - lastX, dy = y - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 3) dragged = true;
     renderer.pan(dx, dy);
-    lastX = e.clientX; lastY = e.clientY;
+    lastX = x; lastY = y;
   }
-});
-canvas.addEventListener('click', async (e) => {
-  if (dragged) return;
+}
+function pointerUp() { dragging = false; }
+async function handleTap(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const { x, y } = renderer.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+  const { x, y } = renderer.screenToWorld(clientX - rect.left, clientY - rect.top);
+
+  // 수도 위치 선택 단계
+  if (pendingNation && !game.myNation) {
+    selectedCapital = { x, y };
+    renderer.placementMarker = { x, y };
+    updatePlacementBar();
+    return;
+  }
+  if (!game.myNation) return;
 
   if (selectedStruct) {
     if (isMultiplayer()) {
@@ -141,6 +211,48 @@ canvas.addEventListener('click', async (e) => {
     return x >= s.x && x < s.x + w && y >= s.y && y < s.y + h;
   });
   showStructPanel(clicked || null, x, y);
+}
+
+// 마우스
+canvas.addEventListener('mousedown', (e) => pointerDown(e.clientX, e.clientY));
+window.addEventListener('mouseup', pointerUp);
+canvas.addEventListener('mousemove', (e) => pointerMove(e.clientX, e.clientY));
+canvas.addEventListener('click', (e) => { if (!dragged) handleTap(e.clientX, e.clientY); });
+
+// 터치 (한 손가락 = 팬/탭, 두 손가락 = 핀치줌)
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 2) {
+    pinching = true; dragging = false;
+    const [t1, t2] = e.touches;
+    pinchStartDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+  } else if (e.touches.length === 1) {
+    pinching = false;
+    pointerDown(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (pinching && e.touches.length === 2) {
+    const [t1, t2] = e.touches;
+    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    const rect = canvas.getBoundingClientRect();
+    const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+    const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+    renderer.zoomAt(midX, midY, (dist - pinchStartDist) * 0.15);
+    pinchStartDist = dist;
+  } else if (e.touches.length === 1) {
+    pointerMove(e.touches[0].clientX, e.touches[0].clientY);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  if (pinching) { pinching = false; dragged = true; return; }
+  if (!dragged && e.changedTouches.length === 1) {
+    handleTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+  }
+  dragging = false;
 });
 
 function flashMessage(text, isError) {
@@ -235,25 +347,72 @@ function renderLabHtml() {
   return html;
 }
 
-// ---------- 전쟁 패널 ----------
+// ---------------- 전쟁: 매치메이킹 (COC식 "상대 찾기") ----------------
+let knownNations = [];  // 최근 watchNations로 받은 주변 국가 목록 (원본 데이터, 매치메이킹 소스)
+let currentMatch = null; // 현재 화면에 표시 중인 매치 후보
+
 function renderWarPanel(nations) {
+  knownNations = nations;
   const el = document.getElementById('war-list');
-  if (!nations.length) { el.innerHTML = '<div class="pd">아직 발견된 다른 국가가 없습니다.</div>'; return; }
-  el.innerHTML = nations.map(n => `
-    <div class="war-row">
-      <span class="dot" style="background:${n.color}"></span>
-      <span class="nm">${n.name}</span>
-      <span class="pw">전투력 ${militaryPowerOf(n)}</span>
-      <button data-id="${n.id}" class="atk-btn">공격</button>
-    </div>`).join('');
-  el.querySelectorAll('.atk-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const res = await callAttack(btn.dataset.id);
-      if (res.error) flashMessage(res.error, true);
-      else flashMessage(res.win ? '승리했습니다! 자원을 약탈했습니다.' : '패배했습니다...', !res.win);
-    });
+  if (currentMatch && !nations.some(n => n.id === currentMatch.id)) currentMatch = null;
+  el.innerHTML = `
+    <div class="pd">주변 국가 ${nations.length}개 발견됨</div>
+    <button id="find-match-btn" class="find-match-btn">⚔️ 상대 찾기</button>
+    <div id="match-card"></div>
+  `;
+  document.getElementById('find-match-btn').addEventListener('click', () => {
+    if (!game.myNation) return;
+    const now = Date.now();
+    if (isShielded(game.myNation, now)) {
+      flashMessage('내 보호막이 켜져 있는 동안은 공격하면 보호막이 사라집니다. 그래도 공격할까요?', false);
+    }
+    currentMatch = findMatch(game.myNation, knownNations, now);
+    renderMatchCard();
+  });
+  renderMatchCard();
+}
+
+function renderMatchCard() {
+  const el = document.getElementById('match-card');
+  if (!el) return;
+  if (!currentMatch) {
+    el.innerHTML = knownNations.length
+      ? '<div class="pd">상대 찾기 버튼을 눌러 트로피가 비슷한 국가를 찾아보세요.</div>'
+      : '<div class="pd">아직 발견된 다른 국가가 없습니다.</div>';
+    return;
+  }
+  const n = currentMatch;
+  const estLoot = Object.entries(n.resources || {})
+    .filter(([, v]) => v > 0)
+    .slice(0, 4)
+    .map(([r, v]) => `${RESOURCES[r]?.icon || ''}${Math.floor(v * 0.1)}`)
+    .join(' ');
+  el.innerHTML = `
+    <div class="match-card">
+      <div class="match-head">
+        <span class="dot" style="background:${n.color}"></span>
+        <span class="nm">${n.name}</span>
+        <span class="trophy">🏆 ${n.trophies || 0}</span>
+      </div>
+      <div class="pd">예상 전투력 ${militaryPowerOf(n)} · 약탈 예상 ${estLoot || '없음'}</div>
+      <div class="match-actions">
+        <button id="attack-match-btn" class="atk-btn">공격</button>
+        <button id="skip-match-btn" class="skip-btn">다른 상대</button>
+      </div>
+    </div>`;
+  document.getElementById('attack-match-btn').addEventListener('click', async () => {
+    const res = await callAttack(currentMatch.id);
+    if (res.error) { flashMessage(res.error, true); return; }
+    flashMessage(res.win ? `승리! 트로피 +${res.trophyDelta}` : `패배... 트로피 ${res.trophyDelta}`, !res.win);
+    currentMatch = null;
+    renderMatchCard();
+  });
+  document.getElementById('skip-match-btn').addEventListener('click', () => {
+    currentMatch = findMatch(game.myNation, knownNations, Date.now());
+    renderMatchCard();
   });
 }
+
 function militaryPowerOf(nationData) {
   return (nationData.structures || []).reduce((sum, s) => {
     const def = STRUCTURES[s.key];
@@ -266,18 +425,26 @@ function renderBattleLog(list) {
   el.innerHTML = list.map(b => {
     const mine = b.attackerId === game.myNation.id;
     const outcome = b.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '승리');
-    return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b></div>`;
+    const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (🏆${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
+    return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
   }).join('') || '<div class="pd">전투 기록 없음</div>';
 }
 
 // ---------- 자원 패널 ----------
 function renderResourcePanel() {
   const el = document.getElementById('resource-bar');
+  if (!game.myNation) { el.innerHTML = ''; return; }
   const res = game.myNation.resources;
   const keys = Object.keys(RESOURCES).filter(k => res[k]);
   const hp = game.myNation.capitalHp ?? RAIDER.capitalMaxHp;
   const raiders = (game.myNation.raiders || []).length;
   let html = keys.map(k => `<span class="res"><span class="ic">${RESOURCES[k].icon}</span>${Math.floor(res[k])}</span>`).join('');
+  html += `<span class="res" title="트로피">🏆 ${game.myNation.trophies || 0}</span>`;
+  const shieldMs = (game.myNation.shieldUntil || 0) - Date.now();
+  if (shieldMs > 0) {
+    const h = Math.floor(shieldMs / 3600000), m = Math.floor((shieldMs % 3600000) / 60000);
+    html += `<span class="res" style="color:#4a9d8f" title="보호막 남은 시간">🛡️ ${h}시간 ${m}분</span>`;
+  }
   html += `<span class="res" title="수도 체력">🏛️ ${Math.round(hp)}/${RAIDER.capitalMaxHp}</span>`;
   if (raiders > 0) html += `<span class="res" style="color:#c1443c">🚨 습격자 ${raiders}</span>`;
   el.innerHTML = html;
