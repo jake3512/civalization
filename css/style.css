@@ -212,6 +212,35 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .ph { font-size: 14px; letter-spacing: 0.5px; margin-bottom: 6px; color: var(--accent); }
 .pd { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
 
+/* ---- 구조물 인벤토리 / 수동 조작 ---- */
+.inv-block {
+  margin: 8px 0; padding: 8px; border: 1px solid var(--line);
+  border-radius: 3px; background: rgba(0,0,0,0.18);
+}
+.inv-title { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-bottom: 5px; }
+.inv-items { font-family: var(--font-mono); font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.inv-items .dim, .pd.dim { color: var(--text-dim); }
+.pd.ok { color: var(--teal); }
+.pd.err { color: var(--danger); }
+.invbar { height: 5px; background: rgba(0,0,0,0.45); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
+.invbar-fill { height: 100%; background: var(--teal); transition: width 0.2s; }
+.invbar-fill.warn { background: var(--accent); }
+.invbar-fill.full { background: var(--danger); }
+.inv-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.inv-btn {
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  border-radius: 3px; padding: 6px 9px; font-size: 11px; min-height: 32px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.inv-btn:hover { border-color: var(--accent-dim); }
+.manual-op-btn {
+  width: 100%; margin-top: 10px; padding: 12px;
+  background: var(--panel-2); border: 1px solid var(--teal); color: var(--teal);
+  border-radius: 4px; font-family: var(--font-display); font-size: 13px;
+  letter-spacing: 0.5px; user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.manual-op-btn.active { background: var(--teal); color: #10201d; }
+
 .recipe-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .recipe-btn {
   background: var(--panel); border: 1px solid var(--line); color: var(--text);

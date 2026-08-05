@@ -255,6 +255,10 @@ const structGlyphs = {
     <path d="M22 40 H42" stroke="${SD}" stroke-width="3"/>`,
   beltArrow: `<rect x="8" y="24" width="48" height="16" rx="4" fill="${S}"/>
     <path d="M26 28 L38 32 L26 36 Z" fill="${SD}"/>`,
+  crate: `<rect x="10" y="20" width="44" height="34" rx="3" fill="${S}"/>
+    <path d="M10 30 H54" stroke="${SD}" stroke-width="3"/>
+    <path d="M22 30 V54 M42 30 V54" stroke="${SD}" stroke-width="3"/>
+    <path d="M10 20 L32 8 L54 20" fill="none" stroke="${S}" stroke-width="4" stroke-linejoin="round"/>`,
 };
 
 function turret(barrel) { return structGlyphs.turretBase(barrel); }
@@ -284,6 +288,7 @@ const STRUCT_SPEC = {
   outpost:        structGlyphs.tent,
   lab:            structGlyphs.flask,
   belt:           structGlyphs.beltArrow,
+  warehouse:      structGlyphs.crate,
 };
 
 for (const [key, glyph] of Object.entries(STRUCT_SPEC)) {

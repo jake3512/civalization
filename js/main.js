@@ -5,13 +5,15 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon } from './data.js';
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
+         LOGISTICS, getStorageCapacity, getOutputCapacity } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
-import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite } from './logic.js';
+import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
+         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
@@ -300,6 +302,132 @@ function flashMessage(text, isError) {
   flashMessage._t = setTimeout(() => { el.style.opacity = 0; }, 2200);
 }
 
+// ---------- 구조물 인벤토리 / 수동 조작 UI ----------
+// 자원은 저절로 국고로 가지 않는다. 벨트가 없으면 여기 버튼으로 직접 옮겨야 한다.
+function renderInventoryHtml(struct, def) {
+  const isStorage = def.storageCapacity > 0;
+  const bar = (used, cap) => {
+    const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+    const cls = pct >= 100 ? 'full' : (pct >= 75 ? 'warn' : '');
+    return `<div class="invbar"><div class="invbar-fill ${cls}" style="width:${pct}%"></div></div>`;
+  };
+  const rows = (obj) => Object.entries(obj || {}).filter(([, v]) => v > 0)
+    .map(([r, v]) => `${resIcon(r)}${Math.floor(v)}`).join(' ') || '<span class="dim">비어 있음</span>';
+
+  let html = '';
+
+  if (isStorage) {
+    const cap = getStorageCapacity(struct.key, struct.level);
+    const used = storedTotal(struct);
+    const kinds = Object.keys(struct.store || {}).filter(k => struct.store[k] > 0);
+    html += `<div class="inv-block"><div class="inv-title">보관 ${Math.floor(used)} / ${cap}${
+      def.singleResource ? ` · <span class="dim">${kinds.length ? RESOURCES[kinds[0]]?.name + ' 전용' : '비어 있음 (첫 자원이 종류를 정함)'}</span>` : ''
+    }</div>${bar(used, cap)}<div class="inv-items">${rows(struct.store)}</div></div>`;
+  }
+
+  const outCap = getOutputCapacity(struct.key, struct.level);
+  if (outCap > 0) {
+    const outUsed = Object.values(struct.outputBuffer || {}).reduce((a, b) => a + b, 0);
+    html += `<div class="inv-block"><div class="inv-title">산출 인벤토리 ${Math.floor(outUsed)} / ${outCap}</div>
+      ${bar(outUsed, outCap)}<div class="inv-items">${rows(struct.outputBuffer)}</div>`;
+    const outKeys = Object.keys(struct.outputBuffer || {}).filter(k => struct.outputBuffer[k] > 0);
+    if (outKeys.length) {
+      html += `<div class="inv-actions">` + outKeys.map(r =>
+        `<button class="inv-btn" data-move-out="${r}">${resIcon(r)} 창고로 ${LOGISTICS.manualTransfer}</button>`).join('') + `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 투입 버퍼 — 레시피 재료나 발전소 연료를 손으로 채워 넣는 곳
+  const wantsInput = (def.recipes && Object.keys(def.recipes).length) || struct.key === 'power_plant' || struct.key === 'outpost';
+  if (wantsInput) {
+    html += `<div class="inv-block"><div class="inv-title">투입 버퍼</div>
+      <div class="inv-items">${rows(struct.inputBuffer)}</div>`;
+    // 지금 필요한 재료를 창고에서 바로 끌어오는 버튼
+    let needKeys = [];
+    if (struct.key === 'power_plant') needKeys = ['wood', 'petroleum'];
+    else if (def.recipes && struct.recipe) needKeys = Object.keys(def.recipes[struct.recipe].in);
+    else if (struct.key === 'outpost') {
+      const need = new Set();
+      for (const job of struct.recruitQueue || []) Object.keys(job.need).forEach(k => need.add(k));
+      needKeys = [...need];
+    }
+    const avail = needKeys.filter(r => (game.myNation.resources[r] || 0) > 0);
+    if (avail.length) {
+      html += `<div class="inv-actions">` + avail.map(r =>
+        `<button class="inv-btn" data-move-in="${r}">${resIcon(r)} 창고에서 ${LOGISTICS.manualTransfer}</button>`).join('') + `</div>`;
+    } else if (needKeys.length) {
+      html += `<div class="pd dim">필요한 재료(${needKeys.map(r => RESOURCES[r]?.name || r).join(', ')})가 창고에 없습니다</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 수동 운용 — 전력이 없어도 누르고 있는 동안 직접 돌린다
+  if (def.category === 'extraction' || def.category === 'production') {
+    html += `<button id="manual-op-btn" class="manual-op-btn">✋ 수동 운용 (누르고 있는 동안 가동)</button>
+      <div id="manual-op-status" class="pd dim">전력이 없어도 손으로 돌릴 수 있습니다 (생산량 ${Math.round(LOGISTICS.manualOperateRate * 100)}%)</div>`;
+  }
+  return html;
+}
+
+/** 수동 조작 버튼들의 이벤트 배선 (패널을 다시 그릴 때마다 호출) */
+function wireInventoryActions(panel, struct, x, y) {
+  const refresh = () => showStructPanel(game.myNation.structures.find(s => s.id === struct.id) || null, x, y);
+
+  panel.querySelectorAll('[data-move-out]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const res = manualMoveToStorage(game.myNation, struct.id, btn.dataset.moveOut);
+      if (!res.ok) flashMessage(res.error, true);
+      else flashMessage(`${RESOURCES[btn.dataset.moveOut]?.name} ${res.moved} 창고로 이송`, false);
+      refresh();
+    });
+  });
+  panel.querySelectorAll('[data-move-in]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const res = manualMoveToStructure(game.myNation, struct.id, btn.dataset.moveIn);
+      if (!res.ok) flashMessage(res.error, true);
+      else flashMessage(`${RESOURCES[btn.dataset.moveIn]?.name} ${res.moved} 투입`, false);
+      refresh();
+    });
+  });
+
+  // 수동 운용: 누르고 있는 동안 일정 간격으로 1사이클씩 돌린다
+  const opBtn = panel.querySelector('#manual-op-btn');
+  if (opBtn) {
+    const statusEl = panel.querySelector('#manual-op-status');
+    let timer = null;
+    const runOnce = () => {
+      const res = manualOperate(game.myNation, struct.id);
+      if (!res.ok) {
+        if (statusEl) { statusEl.textContent = res.error; statusEl.className = 'pd err'; }
+        stop();
+        return;
+      }
+      const made = Object.entries(res.produced || {}).map(([r, a]) => `${RESOURCES[r]?.name || r} +${a}`).join(', ');
+      if (statusEl) { statusEl.textContent = `가동 중… ${made}`; statusEl.className = 'pd ok'; }
+      renderResourcePanel();
+    };
+    const start = (e) => {
+      e.preventDefault();
+      if (timer) return;
+      opBtn.classList.add('active');
+      runOnce();
+      timer = setInterval(runOnce, LOGISTICS.manualOperateMs);
+    };
+    const stop = () => {
+      if (!timer) return;
+      clearInterval(timer); timer = null;
+      opBtn.classList.remove('active');
+      refresh(); // 인벤토리 표시 갱신
+    };
+    opBtn.addEventListener('mousedown', start);
+    opBtn.addEventListener('touchstart', start, { passive: false });
+    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => opBtn.addEventListener(ev, stop));
+    // 패널이 사라지거나 창을 벗어나도 타이머가 남지 않도록
+    window.addEventListener('blur', stop);
+  }
+}
+
 // ---------- 구조물 상세 패널 ----------
 function showStructPanel(struct, x, y) {
   const panel = document.getElementById('struct-panel');
@@ -309,7 +437,11 @@ function showStructPanel(struct, x, y) {
     return;
   }
   const def = STRUCTURES[struct.key];
-  let html = `<div class="ph">${def.name} · Lv.${struct.level}${struct.idle ? ' <span style="color:#c1443c">(정지됨)</span>' : ''}</div><div class="pd">${def.desc}</div>`;
+  const idleTxt = struct.idle
+    ? ` <span style="color:#c1443c">(정지됨${struct.idleReason ? ' · ' + struct.idleReason : ''})</span>` : '';
+  let html = `<div class="ph">${def.name} · Lv.${struct.level}${idleTxt}</div><div class="pd">${def.desc}</div>`;
+
+  html += renderInventoryHtml(struct, def);
 
   if (struct.key === 'lab') html += renderLabHtml();
   if (struct.key === 'outpost') html += renderOutpostHtml(struct);
@@ -328,6 +460,7 @@ function showStructPanel(struct, x, y) {
   html += `<button id="upgrade-btn" ${canUpgrade ? '' : 'disabled'}>레벨업 (${struct.level}→${struct.level + 1})</button>`;
 
   panel.innerHTML = html;
+  wireInventoryActions(panel, struct, x, y);
 
   panel.querySelectorAll('.recipe-btn').forEach(btn => {
     btn.addEventListener('click', async () => {

@@ -97,6 +97,9 @@ export const STRUCTURES = {
     desc: '국가의 시작 지점. 국가당 1개, 게임 시작 시 자동 배치됩니다. 레벨에 비례해 국고 골드를 생산하고, 레벨이 오를수록 주변 영토도 넓어집니다.',
     baseCost: {}, maxLevel: 5, upgradeCostMul: 1.8,
     category: 'core', baseHp: 600, goldIncome: 5, territoryRadius: 4,
+    // 수도는 여러 종류를 함께 보관하는 소규모 중앙 창고 역할도 한다
+    // (건국 직후 창고를 짓기 전까지 자원을 둘 곳이 필요하므로).
+    storageCapacity: 200,
   },
   hub: {
     id: 2, name: '중심지', volume: 4, footprint: [2, 2],
@@ -266,6 +269,14 @@ export const STRUCTURES = {
     baseCost: { iron_ingot: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
     category: 'utility', baseHp: 25,
   },
+  warehouse: {
+    id: 19, name: '창고', volume: 4, footprint: [2, 2],
+    desc: '자원을 보관합니다. 창고 하나에는 한 종류의 자원만 넣을 수 있습니다. 컨베이어 벨트나 수동 이송으로 넣고 뺄 수 있으며, 상단 국고 표시는 창고·수도에 실제로 보관된 자원의 합계입니다.',
+    baseCost: { wood: 30, stone: 20 }, maxLevel: 5, upgradeCostMul: 1.5,
+    category: 'storage', baseHp: 140,
+    storageCapacity: 500,   // 레벨당 이만큼씩 늘어난다 (getStorageCapacity 참고)
+    singleResource: true,   // 한 창고에는 한 종류만
+  },
 };
 
 // ---- 병력: 공격 유닛 10종 + 수비 유닛 4종 ----
@@ -300,7 +311,40 @@ export const UNITS = {
 };
 
 // ---- 기본으로 해금된 구조물 (연구소 없이도 지을 수 있는 최소 세트) ----
-export const BASE_UNLOCKED = ['capital', 'hub', 'mine', 'lumber_mill', 'belt', 'wall', 'lab'];
+// 창고는 유일한 자원 보관처라 처음부터 지을 수 있어야 한다.
+export const BASE_UNLOCKED = ['capital', 'hub', 'mine', 'lumber_mill', 'belt', 'wall', 'lab', 'warehouse'];
+
+// ---- 물류/보관 상수 ----
+// 구조물은 생산물을 자기 산출 인벤토리에 쌓고, 가득 차면 가동을 멈춘다.
+// 쌓인 자원은 컨베이어 벨트나 "수동 이송"으로 창고(수도 포함)까지 옮겨야
+// 비로소 국고(상단 표시)에 잡히고 건설·연구·모집에 쓸 수 있다.
+export const LOGISTICS = {
+  outputCapacity: 50,        // 채굴·가공 구조물의 산출 인벤토리 상한 (레벨당 증가)
+  outputCapacityPerLevel: 25,
+  inputCapacity: 120,        // 투입 버퍼 상한 (벨트가 이 이상은 밀어넣지 못함)
+  manualTransfer: 10,        // 수동 이송 버튼 1회 이송량
+  manualOperateRate: 0.5,    // 수동 운용(버튼 누르고 있는 동안) 생산 배율
+  manualOperateMs: 600,      // 수동 운용 1사이클 간격 (ms)
+  warehouseBeltRate: 10,     // 창고가 벨트로 매 틱 내보내는 양 (레벨 비례)
+};
+
+// 창고에 실물로 보관되지 않는 자원 (국고 골드 · 전력은 수치로만 관리한다)
+export const VIRTUAL_RESOURCES = new Set(['gold', 'electricity']);
+
+/** 보관 구조물(창고·수도)의 레벨별 보관 상한 */
+export function getStorageCapacity(structKey, level) {
+  const def = STRUCTURES[structKey];
+  if (!def || !def.storageCapacity) return 0;
+  return def.storageCapacity * level;
+}
+
+/** 채굴·가공 구조물의 레벨별 산출 인벤토리 상한 */
+export function getOutputCapacity(structKey, level) {
+  const def = STRUCTURES[structKey];
+  if (!def) return 0;
+  if (def.category !== 'extraction' && def.category !== 'production') return 0;
+  return LOGISTICS.outputCapacity + LOGISTICS.outputCapacityPerLevel * (level - 1);
+}
 
 // ---- 전력이 필요한 카테고리 ----
 // 발전소 공급 범위 밖이면 아래 카테고리의 구조물은 가동을 멈춘다 (idle).
