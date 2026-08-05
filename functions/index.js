@@ -18,8 +18,12 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2';
 
 import { Nation, createNation } from './shared/game.js';
-import { canAttack, applyRaidResult } from './shared/logic.js';
+import {
+  canAttack, applyRaidResult, sellFromStorage,
+  manualMoveToStorage, manualMoveToStructure, manualMoveBetweenStorages, manualOperate,
+} from './shared/logic.js';
 import { regionKeyOf } from './shared/regionUtil.js';
+import { LOGISTICS } from './shared/data.js';
 
 setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
 
@@ -122,6 +126,88 @@ export const submitRecruitUnit = onCall(async (request) => {
   if (err) return { error: err };
   await saveNation(uid, nation);
   return { ok: true };
+});
+
+// ---------------- 농사 · 목축 · 여행 · 판매 ----------------
+export const submitSetCrop = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { structId, cropKey } = request.data || {};
+  const err = nation.setCrop(structId, cropKey);
+  if (err) return { error: err };
+  await saveNation(uid, nation);
+  return { ok: true };
+});
+
+export const submitSetAnimal = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { structId, animalKey } = request.data || {};
+  const err = nation.setAnimal(structId, animalKey);
+  if (err) return { error: err };
+  await saveNation(uid, nation);
+  return { ok: true };
+});
+
+export const submitStartExpedition = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { key } = request.data || {};
+  const err = nation.startExpedition(key);
+  if (err) return { error: err };
+  await saveNation(uid, nation);
+  return { ok: true };
+});
+
+export const submitSell = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { res, amount } = request.data || {};
+  const out = sellFromStorage(nation, res, Number(amount) || 0);
+  if (!out.ok) return { error: out.error };
+  await saveNation(uid, nation);
+  return { ok: true, sold: out.sold, earned: out.earned };
+});
+
+// ---------------- 수동 조작 (컨베이어·전력이 없을 때 손으로 옮기고 손으로 돌린다) ----------------
+export const submitManualMove = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { mode, structId, toId, res, amount } = request.data || {};
+  const amt = Math.min(Number(amount) || LOGISTICS.manualTransfer, LOGISTICS.manualTransfer);
+  let out;
+  if (mode === 'out') out = manualMoveToStorage(nation, structId, res, amt);
+  else if (mode === 'in') out = manualMoveToStructure(nation, structId, res, amt);
+  else if (mode === 'between') out = manualMoveBetweenStorages(nation, structId, toId, res, amt);
+  else return { error: '알 수 없는 이송 방식' };
+  if (!out.ok) return { error: out.error };
+  await saveNation(uid, nation);
+  return { ok: true, moved: out.moved };
+});
+
+// 수동 운용은 버튼을 누르고 있는 동안 0.6초마다 1사이클씩 도는데, 그때마다 서버를
+// 호출하면 너무 잦다. 클라이언트가 버튼을 뗄 때 "몇 사이클 돌렸는지"만 보내고
+// 서버는 그 횟수만큼 다시 계산한다 (경과 시간으로 상한을 둬서 조작을 막는다).
+export const submitManualOperate = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { structId, cycles, heldMs } = request.data || {};
+  const allowed = Math.floor((Number(heldMs) || 0) / LOGISTICS.manualOperateMs) + 1;
+  const n = Math.max(0, Math.min(Number(cycles) || 0, allowed, 200));
+  const produced = {};
+  for (let i = 0; i < n; i++) {
+    const out = manualOperate(nation, structId);
+    if (!out.ok) break; // 인벤토리가 차거나 재료가 떨어지면 거기서 멈춘다
+    for (const [r, a] of Object.entries(out.produced || {})) produced[r] = (produced[r] || 0) + a;
+  }
+  await saveNation(uid, nation);
+  return { ok: true, produced };
 });
 
 // ---------------- 전투 (실시간 습격은 공격자 클라이언트가 로컬로 시뮬레이션하고,

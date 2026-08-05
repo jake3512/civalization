@@ -31,12 +31,51 @@ export const RESOURCES = {
   petroleum: { name: '석유',   icon: iconPath('petroleum'), color: '#3a3a3a' },
   naphtha:   { name: '나프타', icon: iconPath('naphtha'), color: '#8fd6d6' },
 
-  food:      { name: '식량',   icon: iconPath('food'), color: '#e0c14c' },
-  livestock: { name: '가축',   icon: iconPath('livestock'), color: '#c99a6b' },
-  meat:      { name: '고기',   icon: iconPath('meat'), color: '#c14c4c' },
+  // ---- 작물 (농지에서 재배 — 벼로 시작하고 나머지는 여행으로 구해온다) ----
+  rice:  { name: '쌀',     icon: iconPath('rice'), color: '#efe6c8' },
+  wheat: { name: '밀',     icon: iconPath('wheat'), color: '#e8b93c' },
+  corn:  { name: '옥수수', icon: iconPath('corn'), color: '#f5cf3a' },
+  apple: { name: '사과',   icon: iconPath('apple'), color: '#e0402f' },
+  grape: { name: '포도',   icon: iconPath('grape'), color: '#8b5cf6' },
+
+  // ---- 가축 (축사에서 사육 — 소로 시작) ----
+  cattle:  { name: '소',   icon: iconPath('cattle'), color: '#c9b3a0' },
+  pig:     { name: '돼지', icon: iconPath('pig'), color: '#f0a3b0' },
+  chicken: { name: '닭',   icon: iconPath('chicken'), color: '#e8d9b0' },
+  duck:    { name: '오리', icon: iconPath('duck'), color: '#d8e0e8' },
+
+  // ---- 축산물 ----
+  milk: { name: '우유',   icon: iconPath('milk'), color: '#f3f0e8' },
+  egg:  { name: '달걀',   icon: iconPath('egg'), color: '#f0e2c0' },
+  beef:         { name: '소고기',   icon: iconPath('beef'), color: '#c14c4c' },
+  pork:         { name: '돼지고기', icon: iconPath('pork'), color: '#e88a92' },
+  chicken_meat: { name: '닭고기',   icon: iconPath('chicken_meat'), color: '#e8c890' },
+  duck_meat:    { name: '오리고기', icon: iconPath('duck_meat'), color: '#c08a5a' },
+
+  // ---- 조리 1차 가공품 ----
+  flour:       { name: '밀가루', icon: iconPath('flour'), color: '#efe8d8' },
+  butter:      { name: '버터',   icon: iconPath('butter'), color: '#f5d76a' },
+  cheese:      { name: '치즈',   icon: iconPath('cheese'), color: '#f2b93c' },
+  dough:       { name: '반죽',   icon: iconPath('dough'), color: '#e8d5b0' },
+  boiled_rice: { name: '밥',     icon: iconPath('boiled_rice'), color: '#f5f0e2' },
+
+  // ---- 완성 요리 (조리소에서 제작 — 판매가가 높다) ----
+  bread:         { name: '빵',         icon: iconPath('bread'), color: '#c98a45' },
+  popcorn:       { name: '팝콘',       icon: iconPath('popcorn'), color: '#f5e9c0' },
+  grape_juice:   { name: '포도주스',   icon: iconPath('grape_juice'), color: '#7d4fc8' },
+  steak:         { name: '스테이크',   icon: iconPath('steak'), color: '#a8422f' },
+  grilled_pork:  { name: '삼겹살구이', icon: iconPath('grilled_pork'), color: '#d9705f' },
+  fried_chicken: { name: '후라이드치킨', icon: iconPath('fried_chicken'), color: '#d9a13c' },
+  roast_duck:    { name: '오리구이',   icon: iconPath('roast_duck'), color: '#b06a35' },
+  omelet:        { name: '오믈렛',     icon: iconPath('omelet'), color: '#f2c94c' },
+  sandwich:      { name: '샌드위치',   icon: iconPath('sandwich'), color: '#e0b878' },
+  bibimbap:      { name: '비빔밥',     icon: iconPath('bibimbap'), color: '#d95f45' },
+  fruit_pie:     { name: '과일파이',   icon: iconPath('fruit_pie'), color: '#e08a4c' },
+  cake:          { name: '케이크',     icon: iconPath('cake'), color: '#f5a8c0' },
 
   electricity: { name: '전력',   icon: iconPath('electricity'), color: '#f5d94e' },
   gold:        { name: '국고 골드', icon: iconPath('gold'), color: '#f2c94c' }, // 병력 모집·터렛 건설용 화폐
+  labor:       { name: '인력',     icon: iconPath('labor'), color: '#6fd4ff' },   // 여행(원정)에 쓰는 인력
 
   // ---- 1단계: 기초 가공품 ----
   plank: { name: '판자', icon: iconPath('plank'), color: '#b58a52' },
@@ -96,7 +135,7 @@ export const STRUCTURES = {
     id: 1, name: '수도', volume: 9, footprint: [3, 3],
     desc: '국가의 시작 지점. 국가당 1개, 게임 시작 시 자동 배치됩니다. 레벨에 비례해 국고 골드를 생산하고, 레벨이 오를수록 주변 영토도 넓어집니다.',
     baseCost: {}, maxLevel: 10, upgradeCostMul: 1.8,
-    category: 'core', baseHp: 600, goldIncome: 5, territoryRadius: 7,
+    category: 'core', baseHp: 600, goldIncome: 5, laborIncome: 3, territoryRadius: 7,
     // 수도는 여러 종류를 함께 보관하는 중앙 창고 역할도 한다
     // (건국 직후 창고를 짓기 전까지 자원을 둘 곳이 필요하므로).
     storageCapacity: 300,
@@ -204,7 +243,7 @@ export const STRUCTURES = {
   barn: {
     id: 10, name: '축사', volume: 4, footprint: [2, 2],
     desc: '가축을 투입하여 가축을 생산합니다.',
-    baseCost: { wood: 40, food: 20 }, maxLevel: 5, upgradeCostMul: 1.5,
+    baseCost: { wood: 40, rice: 20 }, maxLevel: 5, upgradeCostMul: 1.5,
     category: 'production', baseHp: 130, baseProduction: 2,
   },
   slaughterhouse: {
@@ -212,7 +251,42 @@ export const STRUCTURES = {
     desc: '가축을 고기로 가공합니다.',
     baseCost: { wood: 25, iron_ingot: 10 }, maxLevel: 5, upgradeCostMul: 1.5,
     category: 'production', baseHp: 100,
-    recipes: { meat: { in: { livestock: 2 }, out: 3, time: 3 } },
+    // 가축 종류마다 나오는 고기가 다르다 (축사에서 기른 가축을 벨트/수동으로 투입)
+    recipes: {
+      beef:         { in: { cattle: 1 },  out: 3, time: 3 },
+      pork:         { in: { pig: 1 },     out: 3, time: 3 },
+      chicken_meat: { in: { chicken: 1 }, out: 2, time: 2 },
+      duck_meat:    { in: { duck: 1 },    out: 2, time: 2 },
+    },
+  },
+  kitchen: {
+    id: 20, name: '조리소', volume: 6, footprint: [2, 3],
+    desc: '재료를 조합해 요리를 만듭니다. 조리 공정이 깊고 재료가 귀할수록 완성품의 판매 가격이 크게 올라갑니다. 재료는 벨트나 수동 이송으로 넣어주세요.',
+    baseCost: { wood: 70, stone: 50, brick: 20 }, maxLevel: 5, upgradeCostMul: 1.6,
+    category: 'production', baseHp: 180,
+    recipes: {
+      // --- 1차 조리 (재료 1종) ---
+      boiled_rice:   { in: { rice: 2 },                        out: 2, time: 2 },
+      flour:         { in: { wheat: 2 },                       out: 2, time: 2 },
+      butter:        { in: { milk: 2 },                        out: 1, time: 3 },
+      cheese:        { in: { milk: 3 },                        out: 1, time: 4 },
+      popcorn:       { in: { corn: 2 },                        out: 3, time: 2 },
+      grape_juice:   { in: { grape: 3 },                       out: 2, time: 3 },
+      // --- 2차 조리 (1차 가공품이 재료로 들어간다) ---
+      dough:         { in: { flour: 2, egg: 1 },               out: 2, time: 3 },
+      steak:         { in: { beef: 2, butter: 1 },             out: 2, time: 4 },
+      grilled_pork:  { in: { pork: 2, corn: 1 },               out: 2, time: 4 },
+      fried_chicken: { in: { chicken_meat: 2, flour: 1 },      out: 2, time: 4 },
+      roast_duck:    { in: { duck_meat: 2, apple: 1 },         out: 2, time: 5 },
+      omelet:        { in: { egg: 3, cheese: 1 },              out: 2, time: 4 },
+      // --- 3차 조리 (2차 가공품이 재료로 들어간다 — 판매가가 크게 뛴다) ---
+      bread:         { in: { dough: 2, butter: 1 },            out: 2, time: 4 },
+      bibimbap:      { in: { boiled_rice: 2, beef: 1, egg: 1 }, out: 2, time: 5 },
+      fruit_pie:     { in: { dough: 2, apple: 2, grape: 1 },   out: 1, time: 6 },
+      // --- 4차 조리 (최고급) ---
+      sandwich:      { in: { bread: 1, cheese: 1, pork: 1 },   out: 2, time: 5 },
+      cake:          { in: { dough: 2, butter: 2, grape: 2, cheese: 1 }, out: 1, time: 8 },
+    },
   },
   power_plant: {
     id: 12, name: '발전소', volume: 4, footprint: [2, 2],
@@ -294,6 +368,118 @@ export const STRUCTURES = {
   },
 };
 
+// ============================================================
+// 농사 · 축산 · 여행
+// ============================================================
+
+// ---- 작물 (농지에서 고른다) ----
+// 벼만 처음부터 재배할 수 있고, 나머지는 여행을 통해 종자를 구해와야 열린다.
+export const CROPS = {
+  rice:  { name: '벼',       yields: 'rice',  baseYield: 4, start: true },
+  wheat: { name: '밀',       yields: 'wheat', baseYield: 3 },
+  corn:  { name: '옥수수',   yields: 'corn',  baseYield: 3 },
+  apple: { name: '사과나무', yields: 'apple', baseYield: 2 },
+  grape: { name: '포도나무', yields: 'grape', baseYield: 2 },
+};
+
+// ---- 가축 (축사에서 고른다) ----
+// 소로 시작하고 나머지는 여행으로 데려온다. products는 매 틱 함께 나오는 부산물.
+export const ANIMALS = {
+  cattle:  { name: '소',   yields: 'cattle',  baseYield: 1, products: { milk: 2 }, start: true },
+  pig:     { name: '돼지', yields: 'pig',     baseYield: 2, products: {} },
+  chicken: { name: '닭',   yields: 'chicken', baseYield: 2, products: { egg: 3 } },
+  duck:    { name: '오리', yields: 'duck',    baseYield: 2, products: { egg: 2 } },
+};
+
+// ---- 여행 ----
+// 인력(labor)과 시간을 들여 원정을 보내, 자원과 함께 새 작물/가축/요리법을
+// 얻어온다. unlocks는 'crop:*' / 'animal:*' / 'dish:*' 형태의 해금 키.
+export const EXPEDITIONS = {
+  river_village: {
+    name: '강가 마을 교역', desc: '가까운 농촌과 물물교환을 합니다. 밀 종자를 얻어옵니다.',
+    labor: 30, ticks: 10, capitalLevel: 2,
+    rewards: { rice: 60, wheat: 40 }, unlocks: ['crop:wheat'],
+  },
+  southern_plain: {
+    name: '남부 평야 원정', desc: '옥수수를 재배하는 평야로 향합니다.',
+    labor: 50, ticks: 14, capitalLevel: 3,
+    rewards: { corn: 60, wheat: 40 }, unlocks: ['crop:corn'],
+  },
+  hill_farm: {
+    name: '구릉지 목장 방문', desc: '돼지를 사육하는 목장에서 종축을 들여옵니다.',
+    labor: 70, ticks: 16, capitalLevel: 3,
+    rewards: { pig: 10, rice: 60 }, unlocks: ['animal:pig'],
+  },
+  orchard_road: {
+    name: '과수원 길 탐사', desc: '사과와 포도 묘목을 구해옵니다.',
+    labor: 90, ticks: 20, capitalLevel: 4,
+    rewards: { apple: 50, grape: 40 }, unlocks: ['crop:apple', 'crop:grape'],
+  },
+  poultry_coast: {
+    name: '해안 가금 마을', desc: '닭과 오리를 들여오고 조리법을 배워옵니다.',
+    labor: 110, ticks: 22, capitalLevel: 4,
+    rewards: { chicken: 12, duck: 10, egg: 40 },
+    unlocks: ['animal:chicken', 'animal:duck', 'dish:omelet', 'dish:fried_chicken'],
+  },
+  capital_market: {
+    name: '대도시 요리 유학', desc: '이름난 조리사에게 고급 요리법을 배웁니다.',
+    labor: 160, ticks: 28, capitalLevel: 5,
+    rewards: { milk: 60, apple: 40 },
+    unlocks: ['dish:bread', 'dish:fruit_pie', 'dish:sandwich', 'dish:cake', 'dish:bibimbap', 'dish:roast_duck'],
+  },
+};
+
+// 처음부터 알고 있는 요리법 (나머지는 여행으로 배운다)
+export const START_DISHES = [
+  'boiled_rice', 'flour', 'butter', 'cheese', 'popcorn', 'grape_juice',
+  'dough', 'steak', 'grilled_pork',
+];
+
+// ============================================================
+// 판매 가격 — 재료의 희소성과 조리 공정 깊이에서 자동으로 계산된다.
+// (직접 값을 적지 않고 레시피를 따라 재귀 계산하므로, 공정이 깊거나
+//  귀한 재료를 쓰는 요리일수록 반드시 더 비싸진다)
+// ============================================================
+const BASE_VALUE = {
+  wood: 1, stone: 1, coal: 3, iron_ore: 3, copper_ore: 3, gold_ore: 8, crude_oil: 5, mana_stone: 15,
+  rice: 3, wheat: 4, corn: 4, apple: 7, grape: 8,
+  cattle: 12, pig: 10, chicken: 6, duck: 8,
+  milk: 5, egg: 5,
+};
+const VALUE_MARKUP = 1.7;  // 공정을 한 번 거칠 때마다 붙는 가공 마진
+const VALUE_STEP_BONUS = 3; // 공정 1회당 고정 가산 (공정 수 자체에 대한 보상)
+
+let _valueCache = null;
+function computeValues() {
+  const value = { ...BASE_VALUE };
+  // 레시피를 따라 고정점에 도달할 때까지 반복 계산한다
+  for (let pass = 0; pass < 12; pass++) {
+    let changed = false;
+    for (const def of Object.values(STRUCTURES)) {
+      if (!def.recipes) continue;
+      for (const [outKey, r] of Object.entries(def.recipes)) {
+        const outs = typeof r.out === 'number' ? { [outKey]: r.out } : r.out;
+        const ins = Object.entries(r.in);
+        if (!ins.every(([k]) => value[k] != null)) continue;
+        const inputCost = ins.reduce((sum, [k, q]) => sum + value[k] * q, 0);
+        const outQty = Object.values(outs).reduce((a, b) => a + b, 0);
+        const each = Math.ceil((inputCost * VALUE_MARKUP) / outQty) + VALUE_STEP_BONUS;
+        for (const k of Object.keys(outs)) {
+          if (value[k] == null || value[k] < each) { value[k] = each; changed = true; }
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  return value;
+}
+
+/** 자원 1개의 판매 가격(국고 골드). 원료는 싸고, 조리 단계가 깊을수록 비싸다. */
+export function getSellPrice(res) {
+  if (!_valueCache) _valueCache = computeValues();
+  return _valueCache[res] || 0;
+}
+
 // ---- 병력: 공격 유닛 10종 + 수비 유닛 4종 ----
 // gold: 전초기지에서 모집할 때 드는 국고 골드. equip: 벨트로 투입해야 하는 무장 아이템.
 // power: 전투력 환산치이자 실시간 전투에서의 타격 1회당 피해량.
@@ -344,7 +530,7 @@ export const LOGISTICS = {
 };
 
 // 창고에 실물로 보관되지 않는 자원 (국고 골드 · 전력은 수치로만 관리한다)
-export const VIRTUAL_RESOURCES = new Set(['gold', 'electricity']);
+export const VIRTUAL_RESOURCES = new Set(['gold', 'electricity', 'labor']);
 
 /** 보관 구조물(창고·수도)의 레벨별 보관 상한 */
 export function getStorageCapacity(structKey, level) {
@@ -383,10 +569,11 @@ export const TECH_TREE = {
   // 3단계 — 에너지·축산
   oil_well:       { cost: { stone: 60, iron_ingot: 20 },     time: 3, requires: ['smelter'],                 capitalLevel: 3 },
   power_plant:    { cost: { stone: 80, iron_ingot: 40 },     time: 4, requires: ['smelter'],                 capitalLevel: 3 },
-  barn:           { cost: { wood: 60, food: 20 },            time: 3, requires: ['farm'],                    capitalLevel: 3 },
+  barn:           { cost: { wood: 60, rice: 20 },            time: 3, requires: ['farm'],                    capitalLevel: 3 },
   // 4단계 — 가공 산업
   factory:        { cost: { wood: 100, iron_ingot: 50 },     time: 5, requires: ['smelter', 'power_plant'],  capitalLevel: 4 },
   refinery:       { cost: { stone: 80, iron_ingot: 45 },     time: 4, requires: ['oil_well'],                capitalLevel: 4 },
+  kitchen:        { cost: { wood: 80, brick: 25 },            time: 4, requires: ['farm'],                    capitalLevel: 4 },
   // 5단계 — 마석·식품 가공
   extractor:      { cost: { stone: 70, copper_ingot: 35 },   time: 4, requires: ['smelter'],                 capitalLevel: 5 },
   slaughterhouse: { cost: { wood: 50, iron_ingot: 25 },      time: 3, requires: ['barn'],                    capitalLevel: 5 },

@@ -79,6 +79,15 @@ const drop = (light, base, dark) => `${groundSm}
   ${fd('M32 8 C42 24 50 33 50 41 A18 18 0 0 1 32 59 Z', dark, 0.4)}
   ${fd('M24 36 a7 9 0 0 1 6 -12 a9 9 0 0 0 -6 12 Z', light, 0.95)}`;
 
+/** 고기 조각 — 만화풍 햄 덩어리에 뼈가 삐죽 나온 모양 (가축 종류별로 색만 바꿔 쓴다) */
+const meatCut = (light, base, dark) => `${groundSm}
+  <path d="M12 52 L52 12" stroke="${INK}" stroke-width="12" stroke-linecap="round"/>
+  <path d="M12 52 L52 12" stroke="#f4ead6" stroke-width="7" stroke-linecap="round"/>
+  ${sh('M20 14 q16 -4 24 8 q10 16 -2 28 q-14 12 -26 0 q-12 -14 4 -36 Z', base)}
+  ${fd('M32 11 q10 1 12 11 q10 16 -2 28 q-5 5 -12 5 Z', dark, 0.45)}
+  ${fd('M24 28 a9 8 0 0 1 10 -6 a11 9 0 0 0 -11 12 Z', light, 0.9)}
+  <path d="M26 42 q6 5 13 1" fill="none" stroke="${dark}" stroke-width="2.5" opacity="0.5" stroke-linecap="round"/>`;
+
 const resArt = {
   wood: `${groundSm}
     ${sh('M32 6 L46 28 H38 L50 46 H14 L26 28 H18 Z', P.green)}
@@ -105,25 +114,6 @@ const resArt = {
     ${fr(18, 24, 28, 10, P.goldL, 2)}
     <path d="M14 40 H50" stroke="${INK}" stroke-width="2.5"/>`,
   naphtha: drop(P.cyanL, P.cyan, P.cyanD),
-
-  food: `${groundSm}
-    ${sh('M32 52 C22 42 22 22 32 8 C42 22 42 42 32 52 Z', P.wheat)}
-    ${fd('M32 8 C42 22 42 42 32 52 Z', P.wheatD, 0.45)}
-    ${[18, 26, 34, 42].map(y => `<path d="M32 ${y} l-9 -5 M32 ${y} l9 -5" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>`).join('')}`,
-  livestock: `${groundSm}
-    ${sh('M14 30 h32 a8 8 0 0 1 8 8 v8 a6 6 0 0 1 -6 6 H12 a6 6 0 0 1 -6 -6 v-8 a8 8 0 0 1 8 -8 Z', '#f0e6da')}
-    ${fd('M32 30 h14 a8 8 0 0 1 8 8 v8 a6 6 0 0 1 -6 6 H32 Z', '#c2b3a3', 0.5)}
-    ${fd('M18 34 a7 6 0 0 1 10 4 a8 7 0 0 1 -12 3 Z', P.woodD, 0.85)}
-    ${fd('M38 40 a6 5 0 0 1 9 3 a7 6 0 0 1 -11 2 Z', P.woodD, 0.7)}
-    ${sh('M16 14 a9 9 0 0 1 16 6 h-16 Z', '#f0e6da')}
-    <circle cx="21" cy="19" r="2" fill="${INK}"/>`,
-  meat: `${groundSm}
-    <path d="M30 34 L48 50" stroke="${INK}" stroke-width="11" stroke-linecap="round"/>
-    <path d="M30 34 L48 50" stroke="#efe2cd" stroke-width="6.5" stroke-linecap="round"/>
-    ${ci(50, 46, 6, '#efe2cd', 2.5)}${ci(46, 53, 6, '#efe2cd', 2.5)}
-    ${sh('M12 34 a16 16 0 1 1 24 -6 a14 14 0 0 1 -8 14 a12 12 0 0 1 -16 -8 Z', P.meat)}
-    ${fd('M28 16 a14 14 0 0 1 0 26 a12 12 0 0 1 -6 2 Z', P.meatD, 0.42)}
-    ${fd('M16 22 a8 7 0 0 1 8 -4 a9 8 0 0 0 -8 9 Z', P.meatL, 0.9)}`,
 
   electricity: `${groundSm}
     ${sh('M36 4 L14 34 h13 l-5 26 L50 28 H35 l5 -24 Z', P.goldL)}
@@ -209,6 +199,177 @@ const resArt = {
     ${fd('M32 6 L52 14 V30 C52 44 44 52 32 58 Z', P.cyanD, 0.45)}
     ${fd('M22 30 l7 8 l14 -16 l3 4 l-17 19 l-10 -11 Z', '#ffffff', 0.95)}`,
   water: drop(P.blueL, P.blue, P.blueD),
+
+  // ---- 인력 ----
+  labor: `${groundSm}
+    ${ci(32, 16, 9, '#f0c9a0')}
+    ${sh('M14 54 q0 -18 18 -18 q18 0 18 18 Z', P.blue)}
+    ${fd('M32 36 q18 0 18 18 H32 Z', P.blueD, 0.45)}`,
+
+  // ---- 작물 ----
+  rice: `${groundSm}
+    ${sh('M32 54 C24 44 24 24 32 10 C40 24 40 44 32 54 Z', '#e8dfc0')}
+    ${fd('M32 10 C40 24 40 44 32 54 Z', '#b8ac86', 0.45)}
+    ${[20,28,36,44].map(y=>`<path d="M32 ${y} l-8 -5 M32 ${y} l8 -5" stroke="${INK}" stroke-width="2.2" stroke-linecap="round"/>`).join('')}`,
+  wheat: `${groundSm}
+    <path d="M32 54 V22" stroke="${INK}" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M32 54 V22" stroke="${P.wheatD}" stroke-width="2.2" stroke-linecap="round"/>
+    ${sh('M32 44 C22 40 20 30 22 22 C31 25 33 35 32 44 Z', P.wheat, 2.5)}
+    ${sh('M32 44 C42 40 44 30 42 22 C33 25 31 35 32 44 Z', P.wheatL, 2.5)}
+    ${sh('M32 26 C26 22 25 14 26 8 C32 12 33 20 32 26 Z', P.wheat, 2.5)}
+    ${sh('M32 26 C38 22 39 14 38 8 C32 12 31 20 32 26 Z', P.wheatL, 2.5)}`,
+  corn: `${groundSm}
+    ${sh('M32 6 q13 10 13 26 q0 18 -13 22 q-13 -4 -13 -22 q0 -16 13 -26 Z', P.goldL)}
+    ${fd('M32 6 q13 10 13 26 q0 18 -13 22 Z', P.goldD, 0.4)}
+    ${[18,26,34,42].map(y=>`<path d="M22 ${y} H42" stroke="${P.goldD}" stroke-width="2"/>`).join('')}
+    ${sh('M20 30 q-12 6 -8 22 q12 -4 12 -18 Z', P.green, 2.5)}`,
+  apple: `${groundSm}
+    ${sh('M32 18 q16 -4 16 16 q0 18 -16 20 q-16 -2 -16 -20 q0 -20 16 -16 Z', P.red)}
+    ${fd('M32 18 q16 -4 16 16 q0 18 -16 20 Z', P.redD, 0.42)}
+    ${fd('M22 28 a6 7 0 0 1 6 -6 a8 8 0 0 0 -6 10 Z', P.redL, 0.95)}
+    <path d="M32 18 V8" stroke="${P.woodD}" stroke-width="4" stroke-linecap="round"/>
+    ${sh('M32 12 q12 -8 14 2 q-10 6 -14 -2 Z', P.green, 2.5)}`,
+  grape: `${groundSm}
+    <path d="M32 12 V20" stroke="${P.woodD}" stroke-width="4" stroke-linecap="round"/>
+    ${sh('M32 10 q11 -7 13 2 q-9 6 -13 -2 Z', P.green, 2.5)}
+    ${[[24,26],[40,26],[32,32],[22,38],[42,38],[32,44],[26,50],[38,50]].map(([cx,cy])=>ci(cx,cy,7,P.purple,2.5)).join('')}
+    ${[[24,26],[32,32],[22,38]].map(([cx,cy])=>`<circle cx="${cx-2}" cy="${cy-2}" r="2.5" fill="${P.purpleL}"/>`).join('')}`,
+
+  // ---- 가축 ----
+  // 가축은 몸 전체보다 얼굴이 작은 크기에서 훨씬 잘 구분돼서 정면 얼굴로 그린다.
+  cattle: `${groundSm}
+    ${sh('M12 16 q-8 -6 -3 -11 q7 -2 9 6 Z', '#e8e2d6', 2.5)}
+    ${sh('M52 16 q8 -6 3 -11 q-7 -2 -9 6 Z', '#e8e2d6', 2.5)}
+    ${sh('M32 8 q20 0 20 18 q0 22 -20 26 q-20 -4 -20 -26 q0 -18 20 -18 Z', '#f2ece2')}
+    ${fd('M32 8 q20 0 20 18 q0 22 -20 26 Z', '#c4b8a8', 0.4)}
+    ${fd('M17 16 a9 8 0 0 1 12 3 a11 9 0 0 1 -15 5 Z', '#5a4632', 0.9)}
+    ${sh('M32 32 q13 0 13 9 q0 9 -13 9 q-13 0 -13 -9 q0 -9 13 -9 Z', '#f0b8bc')}
+    <circle cx="27" cy="40" r="2.4" fill="${INK}"/><circle cx="37" cy="40" r="2.4" fill="${INK}"/>
+    <circle cx="23" cy="24" r="3" fill="${INK}"/><circle cx="41" cy="24" r="3" fill="${INK}"/>`,
+  pig: `${groundSm}
+    ${sh('M13 18 q-4 -12 6 -11 q6 1 7 9 Z', '#f5a8b8', 2.5)}
+    ${sh('M51 18 q4 -12 -6 -11 q-6 1 -7 9 Z', '#f5a8b8', 2.5)}
+    ${sh('M32 10 q21 0 21 19 q0 21 -21 25 q-21 -4 -21 -25 q0 -19 21 -19 Z', '#f5a8b8')}
+    ${fd('M32 10 q21 0 21 19 q0 21 -21 25 Z', '#c96f84', 0.38)}
+    ${sh('M32 32 q12 0 12 9 q0 9 -12 9 q-12 0 -12 -9 q0 -9 12 -9 Z', '#e07f96')}
+    <circle cx="28" cy="41" r="2.6" fill="${INK}"/><circle cx="36" cy="41" r="2.6" fill="${INK}"/>
+    <circle cx="24" cy="25" r="3" fill="${INK}"/><circle cx="40" cy="25" r="3" fill="${INK}"/>`,
+  chicken: `${groundSm}
+    ${sh('M24 14 q1 -8 8 -6 q7 -2 8 6 q4 -3 6 3 q-9 4 -22 1 Z', P.red, 2.5)}
+    ${sh('M32 12 q19 0 19 18 q0 20 -19 24 q-19 -4 -19 -24 q0 -18 19 -18 Z', '#f7f2e2')}
+    ${fd('M32 12 q19 0 19 18 q0 20 -19 24 Z', '#cbc0a2', 0.38)}
+    ${sh('M32 34 l-8 6 h16 Z', P.goldL, 2.5)}
+    ${sh('M26 42 q6 8 12 0 q-6 4 -12 0 Z', P.red, 2)}
+    <circle cx="24" cy="26" r="3.2" fill="${INK}"/><circle cx="40" cy="26" r="3.2" fill="${INK}"/>`,
+  duck: `${groundSm}
+    ${sh('M32 10 q19 0 19 18 q0 18 -19 22 q-19 -4 -19 -22 q0 -18 19 -18 Z', '#eaf0f6')}
+    ${fd('M32 10 q19 0 19 18 q0 18 -19 22 Z', '#a8b6c4', 0.38)}
+    ${sh('M32 32 q15 0 15 9 q0 9 -15 9 q-15 0 -15 -9 q0 -9 15 -9 Z', P.goldL)}
+    ${fd('M32 32 q15 0 15 9 q0 9 -15 9 Z', P.goldD, 0.32)}
+    <path d="M20 41 H44" stroke="${INK}" stroke-width="2.2"/>
+    <circle cx="24" cy="24" r="3.2" fill="${INK}"/><circle cx="40" cy="24" r="3.2" fill="${INK}"/>`,
+
+  // ---- 축산물 ----
+  milk: `${groundSm}
+    ${sh('M20 20 h24 v30 a6 6 0 0 1 -6 6 H26 a6 6 0 0 1 -6 -6 Z', '#f7f5ef')}
+    ${fd('M32 20 h12 v30 a6 6 0 0 1 -6 6 H32 Z', '#c9c6bc', 0.45)}
+    ${sh('M24 8 h16 l4 12 H20 Z', '#e6e2d6')}
+    ${fr(25, 32, 14, 10, P.blue, 2)}`,
+  egg: `${groundSm}
+    ${sh('M32 8 C44 20 48 32 48 40 A16 18 0 0 1 16 40 C16 32 20 20 32 8 Z', '#f7ecd2')}
+    ${fd('M32 8 C44 20 48 32 48 40 A16 18 0 0 1 32 58 Z', '#cfc0a0', 0.42)}
+    ${fd('M25 32 a8 10 0 0 1 5 -14 a11 13 0 0 0 -5 14 Z', '#fffaf0', 0.95)}`,
+  beef: meatCut(P.meatL, P.meat, P.meatD),
+  pork: meatCut('#ffc0c8', '#f08898', '#b04f60'),
+  chicken_meat: meatCut('#f5e0b0', '#e0bc78', '#a07f3c'),
+  duck_meat: meatCut('#e0b489', '#c08a5a', '#7d5228'),
+
+  // ---- 조리 1차 가공품 ----
+  flour: `${groundSm}
+    ${sh('M16 22 h32 l4 30 a4 4 0 0 1 -4 4 H16 a4 4 0 0 1 -4 -4 Z', '#efe8d8')}
+    ${fd('M32 22 h16 l4 30 a4 4 0 0 1 -4 4 H32 Z', '#c4bca8', 0.45)}
+    ${sh('M18 14 q14 -8 28 0 l2 8 H16 Z', '#dfd6c2')}
+    ${fd('M24 34 h16 v10 h-16 Z', '#c4bca8', 0.5)}`,
+  butter: `${groundSm}
+    ${sh('M8 34 L18 22 H52 L44 46 H12 Z', P.goldL)}
+    ${fd('M44 22 L52 22 L44 46 H32 Z', P.goldD, 0.4)}
+    ${fd('M20 26 h16 l-3 8 H17 Z', '#fff3c0', 0.8)}`,
+  cheese: `${groundSm}
+    ${sh('M8 44 L20 22 H54 L48 48 H12 Z', P.gold)}
+    ${fd('M40 22 H54 L48 48 H34 Z', P.goldD, 0.4)}
+    <circle cx="24" cy="36" r="4" fill="${P.goldD}"/><circle cx="36" cy="42" r="3" fill="${P.goldD}"/>
+    <circle cx="40" cy="30" r="2.6" fill="${P.goldD}"/>`,
+  dough: `${groundSm}
+    ${sh('M10 42 q4 -18 22 -18 q18 0 22 18 q-4 12 -22 12 q-18 0 -22 -12 Z', '#ecdcbe')}
+    ${fd('M32 24 q18 0 22 18 q-4 12 -22 12 Z', '#c2ab88', 0.42)}
+    ${fd('M18 34 a8 5 0 0 1 10 -3 a10 6 0 0 0 -10 6 Z', '#fdf3dd', 0.9)}`,
+  boiled_rice: `${groundSm}
+    ${sh('M10 38 q22 -22 44 0 q-6 14 -22 14 q-16 0 -22 -14 Z', '#faf7ee')}
+    ${fd('M32 27 q14 2 22 11 q-6 14 -22 14 Z', '#cfc9ba', 0.4)}
+    ${sh('M6 38 h52 a4 4 0 0 1 -4 8 H10 a4 4 0 0 1 -4 -8 Z', P.blue)}`,
+
+  // ---- 완성 요리 ----
+  bread: `${groundSm}
+    ${sh('M8 42 q2 -22 24 -22 q22 0 24 22 q-4 12 -24 12 q-20 0 -24 -12 Z', '#d99b4e')}
+    ${fd('M32 20 q22 0 24 22 q-4 12 -24 12 Z', '#9c6222', 0.42)}
+    <path d="M20 30 l6 -8 M30 28 l6 -8 M40 30 l6 -8" stroke="#7d4d18" stroke-width="3" stroke-linecap="round"/>`,
+  popcorn: `${groundSm}
+    ${sh('M18 28 h28 l-4 28 H22 Z', '#f2f0e8')}
+    ${[22,30,38].map(x=>`<rect x="${x}" y="30" width="6" height="26" fill="${P.red}" opacity="0.8"/>`).join('')}
+    ${[[22,22],[32,18],[42,22],[27,26],[38,26]].map(([cx,cy])=>ci(cx,cy,7,'#fdf6d8',2.5)).join('')}`,
+  grape_juice: `${groundSm}
+    ${sh('M20 10 h24 l-3 20 a9 9 0 0 1 -18 0 Z', '#efe9dd')}
+    ${fd('M23 18 h18 l-2 10 a8 8 0 0 1 -14 0 Z', P.purple, 0.95)}
+    <path d="M32 40 V50" stroke="${INK}" stroke-width="4"/>
+    ${rc(20, 50, 24, 6, '#efe9dd', 2)}`,
+  steak: `${groundSm}
+    ${sh('M12 36 q6 -18 24 -16 q20 2 16 20 q-4 16 -22 14 q-20 -2 -18 -18 Z', '#a8422f')}
+    ${fd('M36 20 q20 2 16 20 q-4 16 -22 14 Z', '#6d2416', 0.45)}
+    <path d="M20 30 l16 4 M18 40 l18 4" stroke="#5d1d10" stroke-width="3" stroke-linecap="round"/>
+    ${fd('M40 24 a10 8 0 0 1 6 12 a12 10 0 0 0 -6 -14 Z', '#f2e8d0', 0.9)}`,
+  grilled_pork: `${groundSm}
+    ${[24,36,48].map(y=>`<path d="M10 ${y} h44" stroke="${INK}" stroke-width="11" stroke-linecap="round"/>
+      <path d="M10 ${y} h44" stroke="#e08b76" stroke-width="7" stroke-linecap="round"/>
+      <path d="M14 ${y} h12" stroke="#f7e4d0" stroke-width="4" stroke-linecap="round"/>`).join('')}`,
+  fried_chicken: `${groundSm}
+    ${sh('M14 34 a16 16 0 1 1 24 -8 a15 15 0 0 1 -8 22 Z', '#dba33f')}
+    ${fd('M30 20 a15 15 0 0 1 0 28 l-8 0 Z', '#a06f18', 0.45)}
+    <circle cx="22" cy="26" r="2.4" fill="#8a5c12"/><circle cx="28" cy="34" r="2" fill="#8a5c12"/>
+    <path d="M30 44 L46 56" stroke="${INK}" stroke-width="10" stroke-linecap="round"/>
+    <path d="M30 44 L46 56" stroke="#efe2cd" stroke-width="6" stroke-linecap="round"/>`,
+  roast_duck: `${groundSm}
+    ${sh('M10 42 q6 -22 26 -20 q22 2 18 20 q-4 12 -22 12 q-20 0 -22 -12 Z', '#b06a35')}
+    ${fd('M36 22 q22 2 18 20 q-4 12 -22 12 Z', '#7a4218', 0.45)}
+    ${sh('M46 20 q10 -6 12 2 q-8 6 -12 -2 Z', P.red, 2.5)}
+    <circle cx="24" cy="34" r="2.4" fill="#5d3010"/><circle cx="34" cy="40" r="2" fill="#5d3010"/>`,
+  omelet: `${groundSm}
+    ${sh('M8 44 q6 -22 24 -22 q18 0 24 22 q-8 8 -24 8 q-16 0 -24 -8 Z', P.goldL)}
+    ${fd('M32 22 q18 0 24 22 q-8 8 -24 8 Z', P.goldD, 0.4)}
+    ${fd('M18 34 a8 6 0 0 1 10 -4 a10 7 0 0 0 -10 8 Z', '#fff6cf', 0.9)}
+    <path d="M22 44 q10 -6 20 0" stroke="${P.red}" stroke-width="3" fill="none"/>`,
+  sandwich: `${groundSm}
+    ${sh('M8 20 L32 10 L56 20 L32 30 Z', '#e0b878')}
+    ${sh('M8 30 h48 v6 H8 Z', P.green)}
+    ${sh('M8 36 h48 v6 H8 Z', P.gold)}
+    ${sh('M8 42 q24 12 48 0 v6 q-24 12 -48 0 Z', '#e0b878')}`,
+  bibimbap: `${groundSm}
+    ${sh('M8 32 q24 -10 48 0 q-4 20 -24 20 q-20 0 -24 -20 Z', '#e8e2d2')}
+    ${fd('M32 27 q14 1 24 5 q-4 20 -24 20 Z', '#bdb6a4', 0.35)}
+    ${ci(22, 36, 5, P.green, 2.5)}${ci(42, 36, 5, P.red, 2.5)}
+    ${ci(32, 44, 5, P.goldL, 2.5)}${ci(32, 32, 4, '#a8422f', 2.5)}
+    ${sh('M4 30 h56 a4 4 0 0 1 -4 8 H8 a4 4 0 0 1 -4 -8 Z', '#3a6fa8')}`,
+  fruit_pie: `${groundSm}
+    ${sh('M6 34 q26 -16 52 0 q-4 18 -26 18 q-22 0 -26 -18 Z', '#e0a44c')}
+    ${fd('M32 27 q16 1 26 7 q-4 18 -26 18 Z', '#a86f1c', 0.42)}
+    <path d="M14 34 L50 40 M20 44 L46 30" stroke="#c98a2c" stroke-width="4"/>
+    ${ci(24, 32, 4, P.red, 2)}${ci(40, 36, 4, P.purple, 2)}`,
+  cake: `${groundSm}
+    ${sh('M10 34 h44 v18 a4 4 0 0 1 -4 4 H14 a4 4 0 0 1 -4 -4 Z', '#f7d0dc')}
+    ${fd('M32 34 h22 v18 a4 4 0 0 1 -4 4 H32 Z', '#c98499', 0.45)}
+    ${sh('M10 26 q22 -10 44 0 v8 H10 Z', '#fdf0f4')}
+    ${[[20,20],[32,16],[44,20]].map(([cx,cy])=>ci(cx,cy,4,P.red,2)).join('')}
+    <path d="M32 16 V6" stroke="${INK}" stroke-width="3"/>
+    ${sh('M32 4 q4 3 0 6 q-4 -3 0 -6 Z', P.goldL, 2)}`,
 };
 
 for (const [key, body] of Object.entries(resArt)) {
@@ -350,6 +511,17 @@ const art = {
     <circle cx="14" cy="33" r="5.5" fill="${P.metalL}" stroke="${INK}" stroke-width="2.5"/>
     <circle cx="50" cy="33" r="5.5" fill="${P.metalL}" stroke="${INK}" stroke-width="2.5"/>
     ${sh('M24 26 L38 33 L24 40 Z', P.goldL, 2.5)}`,
+
+  // 조리소 — 벽돌 화덕과 김이 오르는 냄비. 붉은 화구가 있어 공장류와 헷갈리지 않는다.
+  kitchen: `${ground}
+    ${rc(6, 24, 52, 30, P.roofL, 3)}
+    ${fd('M32 24 H58 V54 H32 Z', P.roofD, 0.4)}
+    <path d="M6 34 H58 M6 44 H58 M19 24 V34 M45 24 V34 M32 34 V44 M19 44 V54 M45 44 V54" stroke="${INK}" stroke-width="2.2"/>
+    ${sh('M18 40 h28 a4 4 0 0 1 -4 12 H22 a4 4 0 0 1 -4 -12 Z', P.metalL)}
+    ${fd('M32 40 h14 a4 4 0 0 1 -4 12 H32 Z', P.metalD, 0.4)}
+    ${rc(14, 36, 36, 5, P.metal, 2)}
+    <path d="M26 32 q-4 -5 0 -10 q4 -5 0 -10 M38 32 q-4 -5 0 -10 q4 -5 0 -10" fill="none" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>
+    <path d="M26 32 q-4 -5 0 -10 q4 -5 0 -10 M38 32 q-4 -5 0 -10 q4 -5 0 -10" fill="none" stroke="#f2f7ff" stroke-width="2" stroke-linecap="round"/>`,
 
   warehouse: `${ground}
     ${sh('M8 22 L32 8 L56 22 v32 H8 Z', P.woodL)}

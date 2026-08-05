@@ -9,7 +9,8 @@
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
 import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES,
-         VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity } from './data.js';
+         VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity,
+         CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -341,6 +342,10 @@ export function setRecipe(nation, structId, recipeKey) {
   if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
   const def = STRUCTURES[s.key];
   if (!def.recipes || !def.recipes[recipeKey]) return { ok: false, error: '올바르지 않은 레시피' };
+  // 조리소 레시피는 "요리법"이라서, 처음부터 아는 것 말고는 여행으로 배워와야 쓸 수 있다.
+  if (s.key === 'kitchen' && !hasGood(nation, `dish:${recipeKey}`)) {
+    return { ok: false, error: '아직 배우지 못한 요리법입니다 (여행으로 배워오세요)' };
+  }
   s.recipe = recipeKey;
   return { ok: true, structure: s };
 }
@@ -434,11 +439,12 @@ export function manualOperate(nation, structId) {
 
   // 가공 구조물 — 레시피 재료를 투입 버퍼에서 소모한다
   if (s.key === 'farm' || s.key === 'barn') {
-    const res = s.key === 'farm' ? 'food' : 'livestock';
-    const amt = Math.max(1, Math.floor(def.baseProduction * s.level * rate));
+    const plan = s.key === 'farm' ? CROPS[s.crop || 'rice'] : ANIMALS[s.animal || 'cattle'];
+    if (!plan) return { ok: false, error: s.key === 'farm' ? '작물을 먼저 고르세요' : '가축을 먼저 고르세요' };
+    const amt = Math.max(1, Math.floor(plan.baseYield * s.level * rate));
     const add = Math.min(amt, room);
-    s.outputBuffer[res] = (s.outputBuffer[res] || 0) + add;
-    return { ok: true, produced: { [res]: add } };
+    s.outputBuffer[plan.yields] = (s.outputBuffer[plan.yields] || 0) + add;
+    return { ok: true, produced: { [plan.yields]: add } };
   }
   if (!def.recipes || !s.recipe) return { ok: false, error: '레시피를 먼저 선택하세요' };
   const r = def.recipes[s.recipe];
@@ -475,6 +481,90 @@ export function recruitUnit(nation, structId, unitKey, isDefense) {
   s.recruitQueue = s.recruitQueue || [];
   s.recruitQueue.push({ unitKey, isDefense: !!isDefense, need: { ...unit.equip } });
   return { ok: true };
+}
+
+// ============================================================
+// 농사 · 축산 · 여행 · 판매
+// ============================================================
+
+/** 이 국가가 해금한 작물/가축/요리법인지 (예: 'crop:wheat') */
+export function hasGood(nation, key) {
+  const [kind, name] = key.split(':');
+  if (kind === 'crop') return !!CROPS[name]?.start || (nation.unlockedGoods || new Set()).has(key);
+  if (kind === 'animal') return !!ANIMALS[name]?.start || (nation.unlockedGoods || new Set()).has(key);
+  if (kind === 'dish') return START_DISHES.includes(name) || (nation.unlockedGoods || new Set()).has(key);
+  return false;
+}
+
+/** 농지에 재배할 작물을 고른다 (해금된 작물만) */
+export function setCrop(nation, structId, cropKey) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s || s.key !== 'farm') return { ok: false, error: '농지를 찾을 수 없습니다' };
+  if (!CROPS[cropKey]) return { ok: false, error: '알 수 없는 작물입니다' };
+  if (!hasGood(nation, `crop:${cropKey}`)) return { ok: false, error: '아직 구하지 못한 작물입니다 (여행으로 종자를 구해오세요)' };
+  s.crop = cropKey;
+  return { ok: true };
+}
+
+/** 축사에서 기를 가축을 고른다 (해금된 가축만) */
+export function setAnimal(nation, structId, animalKey) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s || s.key !== 'barn') return { ok: false, error: '축사를 찾을 수 없습니다' };
+  if (!ANIMALS[animalKey]) return { ok: false, error: '알 수 없는 가축입니다' };
+  if (!hasGood(nation, `animal:${animalKey}`)) return { ok: false, error: '아직 데려오지 못한 가축입니다 (여행으로 들여오세요)' };
+  s.animal = animalKey;
+  return { ok: true };
+}
+
+/**
+ * 여행(원정)을 떠난다. 인력을 즉시 지불하고 정해진 틱만큼 진행되며,
+ * 끝나면 자원과 새 작물/가축/요리법을 얻는다 (동시에 하나만 — 연구와 같은 규칙).
+ */
+export function startExpedition(nation, key) {
+  const exp = EXPEDITIONS[key];
+  if (!exp) return { ok: false, error: '알 수 없는 여행지입니다' };
+  if (nation.expedition && nation.expedition.key) return { ok: false, error: '이미 다른 여행이 진행 중입니다' };
+  const capLevel = getCapitalLevel(nation);
+  if (capLevel < (exp.capitalLevel || 1)) {
+    return { ok: false, error: `수도 레벨 ${exp.capitalLevel}이(가) 필요합니다 (현재 ${capLevel})` };
+  }
+  if ((nation.resources.labor || 0) < exp.labor) return { ok: false, error: `인력이 부족합니다 (${exp.labor} 필요)` };
+  nation.resources.labor -= exp.labor;
+  nation.expedition = { key, ticksLeft: exp.ticks };
+  return { ok: true };
+}
+
+/** 여행 완료 처리 — 보상 자원을 창고에 넣고 해금 목록을 갱신한다 */
+export function finishExpedition(nation) {
+  const cur = nation.expedition;
+  if (!cur || !cur.key) return null;
+  const exp = EXPEDITIONS[cur.key];
+  nation.expedition = null;
+  if (!exp) return null;
+
+  nation.unlockedGoods = nation.unlockedGoods || new Set();
+  for (const u of exp.unlocks || []) nation.unlockedGoods.add(u);
+  const gained = {};
+  for (const [res, amt] of Object.entries(exp.rewards || {})) {
+    const stored = depositAnywhere(nation, res, amt);
+    if (stored > 0) gained[res] = stored; // 창고가 가득 차면 못 받는 몫은 버려진다
+  }
+  recomputeStock(nation);
+  return { key: cur.key, name: exp.name, gained, unlocks: exp.unlocks || [] };
+}
+
+/** 창고에 있는 자원을 팔아 국고 골드로 바꾼다 (요리처럼 공정이 깊을수록 비싸다) */
+export function sellFromStorage(nation, res, amount) {
+  const price = getSellPrice(res);
+  if (price <= 0) return { ok: false, error: '팔 수 없는 자원입니다' };
+  const have = totalStock(nation, res);
+  const qty = Math.max(0, Math.min(Math.floor(amount), have));
+  if (qty <= 0) return { ok: false, error: '창고에 재고가 없습니다' };
+  withdrawAnywhere(nation, res, qty);
+  const earned = price * qty;
+  nation.resources.gold = (nation.resources.gold || 0) + earned;
+  recomputeStock(nation);
+  return { ok: true, sold: qty, earned };
 }
 
 /** 현재 수도 레벨 (수도가 없으면 0) — 연구 단계 판정에 쓰인다 */

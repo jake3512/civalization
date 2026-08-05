@@ -11,11 +11,26 @@
 // 밸런스를 고친 뒤에는 이 스크립트를 꼭 다시 돌려 데드락이 생기지 않았는지 확인할 것.
 // (실제로 연구소가 금 주괴를 요구해 제련소 연구가 영원히 불가능했던 적이 있다)
 // ============================================================
-import { STRUCTURES, TECH_TREE, BASE_UNLOCKED, TERRAIN_NODES, getUpgradeCost, VIRTUAL_RESOURCES } from '../js/data.js';
+import { STRUCTURES, TECH_TREE, BASE_UNLOCKED, TERRAIN_NODES, getUpgradeCost, VIRTUAL_RESOURCES,
+         CROPS, ANIMALS, EXPEDITIONS, START_DISHES } from '../js/data.js';
+
+// 해당 수도 레벨까지 다녀올 수 있는 여행으로 얻는 작물/가축/요리법
+function goodsUnlockedBy(capLevel) {
+  const goods = new Set();
+  for (const [k, c] of Object.entries(CROPS)) if (c.start) goods.add('crop:' + k);
+  for (const [k, a] of Object.entries(ANIMALS)) if (a.start) goods.add('animal:' + k);
+  for (const d of START_DISHES) goods.add('dish:' + d);
+  for (const exp of Object.values(EXPEDITIONS)) {
+    if ((exp.capitalLevel || 1) > capLevel) continue;
+    for (const u of exp.unlocks || []) goods.add(u);
+  }
+  return goods;
+}
 
 // 어떤 구조물 집합으로 만들 수 있는 자원 전체를 구한다 (고정점 반복)
-function producible(unlocked) {
-  const have = new Set(['gold']); // 골드는 수도가 자동 생산
+function producible(unlocked, capLevel = 99) {
+  const have = new Set(['gold', 'labor']); // 골드·인력은 수도가 자동 생산
+  const goods = goodsUnlockedBy(capLevel);
   for (const k of unlocked) {
     const d = STRUCTURES[k];
     if (!d) continue;
@@ -23,8 +38,17 @@ function producible(unlocked) {
       // 채굴 구조물은 설치 가능한 지형의 산출물을 전부 얻을 수 있다
       for (const nodeKey of d.requiresNode || []) have.add(TERRAIN_NODES[nodeKey].yields);
     }
-    if (k === 'farm') have.add('food');
-    if (k === 'barn') have.add('livestock');
+    // 농지·축사는 그 시점에 해금된 작물/가축만 기를 수 있다
+    if (k === 'farm') for (const [ck, c] of Object.entries(CROPS)) if (goods.has('crop:' + ck)) have.add(c.yields);
+    if (k === 'barn') for (const [ak, a] of Object.entries(ANIMALS)) if (goods.has('animal:' + ak)) {
+      have.add(a.yields);
+      for (const pr of Object.keys(a.products || {})) have.add(pr);
+    }
+  }
+  // 여행 보상으로 직접 받아오는 자원도 손에 넣을 수 있다
+  for (const exp of Object.values(EXPEDITIONS)) {
+    if ((exp.capitalLevel || 1) > capLevel) continue;
+    for (const r of Object.keys(exp.rewards || {})) have.add(r);
   }
   let changed = true;
   while (changed) {
@@ -48,14 +72,14 @@ let capLevel = 1;
 let ok = true;
 
 // 시작 시점: 처음부터 지을 수 있는 구조물의 건설비를 감당할 수 있는가
-let have = producible(unlocked);
+let have = producible(unlocked, 1);
 for (const k of BASE_UNLOCKED) {
   const blocked = Object.keys(STRUCTURES[k].baseCost).filter(r => !have.has(r));
   if (blocked.length) { console.log(`✗ 시작 구조물 [${k}] 건설 불가 — ${blocked.join(',')} 없음`); ok = false; }
 }
 
 while (capLevel < STRUCTURES.capital.maxLevel) {
-  have = producible(unlocked);
+  have = producible(unlocked, capLevel);
   // 이 수도 레벨에서 열리는 연구를 전부 수행
   let progressed = true;
   while (progressed) {
@@ -69,7 +93,7 @@ while (capLevel < STRUCTURES.capital.maxLevel) {
       const blockedBuild = Object.keys(STRUCTURES[key].baseCost).filter(r => !have.has(r));
       if (blockedBuild.length) { console.log(`✗ 구조물 [${key}] 건설비 불가 — ${blockedBuild.join(',')} 없음 (수도 Lv${capLevel})`); ok = false; }
       unlocked.add(key); progressed = true;
-      have = producible(unlocked);
+      have = producible(unlocked, capLevel);
     }
   }
   // 다음 수도 레벨 비용을 지금 만들 수 있는가

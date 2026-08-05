@@ -8,10 +8,11 @@
 // 중요: 자원은 저절로 국고로 들어가지 않는다. 벨트나 수동 이송으로 창고(수도 포함)
 // 까지 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
 // ============================================================
-import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity } from './data.js';
+import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity,
+         CROPS, ANIMALS } from './data.js';
 import { getTile } from './world.js';
 import { footprintTiles, tileKey, structureAt, getTerritoryRadius,
-         depositInto, withdrawFrom, recomputeStock } from './logic.js';
+         depositInto, withdrawFrom, recomputeStock, finishExpedition } from './logic.js';
 
 // ---------------- 전력 ----------------
 function computePoweredCircles(nation) {
@@ -228,9 +229,16 @@ export function tickNation(nation) {
           s.idleReason = '재료 부족';
         }
       } else if (s.key === 'farm') {
-        storeOutput(s, 'food', def.baseProduction * s.level);
+        const crop = CROPS[s.crop || 'rice'];
+        if (crop) storeOutput(s, crop.yields, crop.baseYield * s.level);
+        else { s.idle = true; s.idleReason = '작물 미선택'; }
       } else if (s.key === 'barn') {
-        storeOutput(s, 'livestock', def.baseProduction * s.level);
+        const animal = ANIMALS[s.animal || 'cattle'];
+        if (animal) {
+          storeOutput(s, animal.yields, animal.baseYield * s.level);
+          // 우유·달걀 같은 부산물은 가축과 함께 나온다
+          for (const [res, amt] of Object.entries(animal.products || {})) storeOutput(s, res, amt * s.level);
+        } else { s.idle = true; s.idleReason = '가축 미선택'; }
       } else {
         s.idle = true;
         s.idleReason = '레시피 미선택';
@@ -245,6 +253,7 @@ export function tickNation(nation) {
       }
     } else if (def.category === 'core' && s.key === 'capital') {
       nation.resources.gold = (nation.resources.gold || 0) + (def.goldIncome || 0) * s.level;
+      nation.resources.labor = (nation.resources.labor || 0) + (def.laborIncome || 0) * s.level;
     } else if (def.category === 'military_base' && s.key === 'outpost') {
       processRecruitQueue(nation, s);
     }
@@ -261,7 +270,15 @@ export function tickNation(nation) {
   // 4) 국고 표시 갱신 — 창고·수도에 실제로 든 재고의 합계
   recomputeStock(nation);
 
-  // 5) 연구 진행
+  // 5) 여행(원정) 진행 — 끝나면 보상 자원과 새 작물/가축/요리법을 얻는다
+  if (nation.expedition && nation.expedition.key) {
+    nation.expedition.ticksLeft -= 1;
+    if (nation.expedition.ticksLeft <= 0) {
+      nation.lastExpedition = finishExpedition(nation);
+    }
+  }
+
+  // 6) 연구 진행
   if (nation.research && nation.research.key) {
     nation.research.ticksLeft -= 1;
     if (nation.research.ticksLeft <= 0) {
