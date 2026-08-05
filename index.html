@@ -82,6 +82,22 @@
     </main>
   </div>
 
+  <!-- 구조물 세부정보 팝업 -->
+  <div id="struct-modal" class="struct-modal hidden">
+    <div class="struct-modal-backdrop"></div>
+    <div class="struct-modal-card">
+      <header class="struct-modal-head">
+        <img id="struct-modal-art" class="struct-modal-art" src="" alt="">
+        <div class="struct-modal-title">
+          <div id="struct-modal-name" class="struct-modal-name"></div>
+          <div id="struct-modal-sub" class="struct-modal-sub"></div>
+        </div>
+        <button id="struct-modal-close" class="struct-modal-close" aria-label="닫기">✕</button>
+      </header>
+      <div id="struct-modal-body" class="struct-modal-body"></div>
+    </div>
+  </div>
+
   <!-- 실시간 습격 전투 화면 -->
   <div id="battle-screen" class="battle-screen hidden">
     <header class="battle-topbar">

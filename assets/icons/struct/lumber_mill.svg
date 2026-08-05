@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="17" fill="none" stroke="#f2ede0" stroke-width="5"/>
-    <path d="M32 15 L37 24 L27 24 Z M49 32 L40 37 L40 27 Z M32 49 L27 40 L37 40 Z M15 32 L24 27 L24 37 Z" fill="#f2ede0"/>
-    <circle cx="32" cy="32" r="5" fill="#f2ede0"/>
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>
+    <path d="M8 54 V32 h30 v22 Z" fill="#d59a54" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M24 32 H38 V54 H24 Z" fill="#6f4319" opacity="0.4"/>
+    <path d="M4 32 L23 18 L42 32 Z" fill="#e0452f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M23 18 L42 32 H23 Z" fill="#9c2418" opacity="0.4"/>
+    <path d="M48 24 m-11 0 a11 11 0 1 0 22 0 a11 11 0 1 0 -22 0" fill="#e2ebf2" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M48 15 l3 6 h-6 Z M57 24 l-6 3 v-6 Z M48 33 l-3 -6 h6 Z M39 24 l6 -3 v6 Z" fill="#161018" opacity="0.75"/>
+    <circle cx="48" cy="24" r="3.2" fill="#161018"/>
 </svg>

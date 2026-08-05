@@ -4,9 +4,10 @@
 import { getTileRange } from './world.js';
 import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, structureIcon } from './data.js';
 
+// 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
-  plain: '#232a24',
-  water: '#1c3b45',
+  plain: '#2c4a30',
+  water: '#12557a',
 };
 
 // ---- 아이콘 이미지 캐시 ----
@@ -95,7 +96,7 @@ export class Renderer {
       ctx.fillRect(sx, sy, tile, tile);
 
       if (owned) {
-        ctx.fillStyle = 'rgba(217,142,52,0.14)';
+        ctx.fillStyle = 'rgba(255,168,46,0.26)'; // 내 영토 — 채도 높은 주황 틴트
         ctx.fillRect(sx, sy, tile, tile);
       }
 
@@ -108,7 +109,7 @@ export class Renderer {
       }
 
       if (tile >= 14) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'; // 어두운 격자선으로 타일 경계를 또렷하게
         ctx.strokeRect(sx, sy, tile, tile);
       }
     }
@@ -234,23 +235,40 @@ export class Renderer {
 
       if (s.key === 'belt') {
         // 벨트는 얇게, 방향 화살표로 표시
-        ctx.fillStyle = '#3a4650';
+        ctx.fillStyle = '#4b5a67';
         ctx.fillRect(sx + 2, sy + 2, tile - 4, tile - 4);
-        ctx.fillStyle = '#e8e4da';
-        ctx.font = `${tile * 0.6}px sans-serif`;
+        ctx.strokeStyle = '#120e14'; ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 2, sy + 2, tile - 4, tile - 4);
+        ctx.lineWidth = 1;
+        ctx.fillStyle = '#ffd84d';
+        ctx.font = `bold ${tile * 0.62}px sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(DIR_ARROW[s.dir ?? 0], sx + tile / 2, sy + tile / 2);
         continue;
       }
 
+      // 소속을 알리는 받침판 — 위쪽은 밝게, 아래쪽은 어둡게 칠해 입체감을 준다
+      const bw = w * tile - 2, bh = h * tile - 2;
+      ctx.globalAlpha = s.idle ? 0.5 : 1;
       ctx.fillStyle = color;
-      ctx.globalAlpha = s.idle ? 0.35 : 0.85; // 유휴(가동 정지) 상태는 흐리게 표시
-      ctx.fillRect(sx + 1, sy + 1, w * tile - 2, h * tile - 2);
+      ctx.fillRect(sx + 1, sy + 1, bw, bh);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(sx + 1, sy + 1, bw, Math.max(2, bh * 0.16));         // 상단 하이라이트
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.fillRect(sx + 1, sy + 1 + bh * 0.78, bw, bh * 0.22);          // 하단 그림자
       ctx.globalAlpha = 1;
-      this._drawStructIcon(s.key, sx, sy, w, h, s.idle ? 0.45 : 1);
-      ctx.strokeStyle = s.idle ? '#c1443c' : '#0d0d0d';
-      ctx.lineWidth = s.idle ? 2 : 1;
-      ctx.strokeRect(sx + 1, sy + 1, w * tile - 2, h * tile - 2);
+
+      this._drawStructIcon(s.key, sx, sy, w, h, s.idle ? 0.5 : 1);
+
+      // 굵은 검은 외곽선 + 정지 상태면 빨간 테두리로 강조 (아케이드풍 대비)
+      ctx.strokeStyle = '#120e14';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx + 1, sy + 1, bw, bh);
+      if (s.idle) {
+        ctx.strokeStyle = '#ff4d3d';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 2.5, sy + 2.5, bw - 3, bh - 3);
+      }
       ctx.lineWidth = 1;
       // 레벨은 아이콘을 가리지 않도록 우측 하단에 작은 배지로 표시
       if (tile >= 16) {
@@ -272,7 +290,7 @@ export class Renderer {
     const img = getIconImage(structureIcon(structKey));
     if (!img.complete || img.naturalWidth === 0) return;
     const box = Math.min(w, h) * tile;
-    const size = box * 0.72;
+    const size = box * 0.92; // 그림 자체가 음영/외곽선을 가지므로 발판을 크게 채운다
     ctx.globalAlpha = alpha;
     ctx.drawImage(img, sx + (w * tile - size) / 2, sy + (h * tile - size) / 2, size, size);
     ctx.globalAlpha = 1;

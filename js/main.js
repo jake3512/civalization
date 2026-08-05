@@ -6,14 +6,14 @@
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
 import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
-         LOGISTICS, getStorageCapacity, getOutputCapacity } from './data.js';
+         LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
-         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate } from './logic.js';
+         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
@@ -429,25 +429,97 @@ function wireInventoryActions(panel, struct, x, y) {
 }
 
 // ---------- 구조물 상세 패널 ----------
+/** 구조물 팝업 닫기 */
+function closeStructModal() {
+  document.getElementById('struct-modal').classList.add('hidden');
+}
+document.getElementById('struct-modal-close').addEventListener('click', closeStructModal);
+document.querySelector('.struct-modal-backdrop').addEventListener('click', closeStructModal);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeStructModal(); });
+
+/**
+ * 레벨업 정보 — 다음 레벨에서 실제로 무엇이 얼마나 좋아지는지와 비용을 보여준다.
+ * (숫자를 직접 비교해 보여주므로 "올릴 가치가 있는지" 판단할 수 있다)
+ */
+function renderUpgradeHtml(struct, def) {
+  const cur = struct.level, next = cur + 1;
+  const maxed = cur >= def.maxLevel;
+
+  let html = `<div class="up-block"><div class="up-head">레벨 ${cur} / ${def.maxLevel}</div>
+    <div class="lvl-dots">${Array.from({ length: def.maxLevel }, (_, i) =>
+      `<span class="lvl-dot${i < cur ? ' on' : ''}"></span>`).join('')}</div>`;
+
+  if (maxed) {
+    html += `<div class="pd dim">최대 레벨에 도달했습니다</div><button id="upgrade-btn" disabled>최대 레벨</button></div>`;
+    return html;
+  }
+
+  // 레벨에 따라 실제로 달라지는 능력치만 골라 현재→다음 값을 나란히 보여준다
+  const gains = [];
+  const add = (label, a, b, unit = '') => gains.push({ label, a: `${a}${unit}`, b: `${b}${unit}` });
+  if (def.baseProduction) add('생산량', def.baseProduction * cur, def.baseProduction * next, '/틱');
+  if (def.goldIncome) add('골드 수입', def.goldIncome * cur, def.goldIncome * next, '/틱');
+  if (def.territoryRadius) add('영토 반경', getTerritoryRadius(struct.key, cur), getTerritoryRadius(struct.key, next), '칸');
+  if (def.powerRadius) add('전력 범위', def.powerRadius + (cur - 1), def.powerRadius + (next - 1), '칸');
+  if (def.storageCapacity) add('보관 용량', getStorageCapacity(struct.key, cur), getStorageCapacity(struct.key, next));
+  if (getOutputCapacity(struct.key, cur)) add('산출 용량', getOutputCapacity(struct.key, cur), getOutputCapacity(struct.key, next));
+  if (def.category === 'turret') {
+    add('공격력', (def.attack || 0) * cur, (def.attack || 0) * next);
+    add('사거리', def.range + (cur - 1), def.range + (next - 1), '칸');
+    add('전력 소모', (def.powerDraw || 0) * cur, (def.powerDraw || 0) * next, 'kW');
+  }
+  if (def.defense) add('방어력', def.defense * cur, def.defense * next);
+  if (def.baseHp) add('내구도', getStructureMaxHp(struct.key, cur), getStructureMaxHp(struct.key, next));
+  if (struct.key === 'belt') add('처리량', beltThroughput(cur), beltThroughput(next), '/틱');
+
+  if (gains.length) {
+    html += `<div class="up-gains">` + gains.map(g =>
+      `<div class="up-row"><span class="up-label">${g.label}</span>
+        <span class="up-a">${g.a}</span><span class="up-arrow">▶</span><span class="up-b">${g.b}</span></div>`).join('') + `</div>`;
+  }
+
+  const cost = getUpgradeCost(struct.key, cur);
+  const costTxt = Object.entries(cost || {}).map(([r, a]) => {
+    const have = Math.floor(game.myNation.resources[r] || 0);
+    const enough = have >= a;
+    return `<span class="up-cost${enough ? '' : ' short'}">${resIcon(r)}${a}<i>(${have})</i></span>`;
+  }).join('');
+  const affordable = Object.entries(cost || {}).every(([r, a]) => (game.myNation.resources[r] || 0) >= a);
+
+  html += `<div class="up-costline">비용 ${costTxt || '없음'}</div>
+    <button id="upgrade-btn" ${affordable ? '' : 'disabled'}>레벨 ${cur} ▶ ${next} 업그레이드</button></div>`;
+  return html;
+}
+
+/**
+ * 구조물을 선택하면 세부정보/레벨업 정보를 팝업 창으로 띄운다.
+ * (빈 타일을 탭했을 때는 팝업 대신 우측 패널의 지형 정보만 갱신한다)
+ */
 function showStructPanel(struct, x, y) {
+  const modal = document.getElementById('struct-modal');
   const panel = document.getElementById('struct-panel');
   if (!struct) {
+    closeStructModal();
     const t = getTile(x, y);
     panel.innerHTML = `<div class="ph">타일 (${x}, ${y})</div><div class="pd">지형: ${t.node ? t.node.name : (t.terrain === 'water' ? '강/호수' : '평지')}</div>`;
     return;
   }
   const def = STRUCTURES[struct.key];
-  const idleTxt = struct.idle
-    ? ` <span style="color:#c1443c">(정지됨${struct.idleReason ? ' · ' + struct.idleReason : ''})</span>` : '';
-  let html = `<div class="ph">${def.name} · Lv.${struct.level}${idleTxt}</div><div class="pd">${def.desc}</div>`;
 
+  document.getElementById('struct-modal-art').src = structureIcon(struct.key);
+  document.getElementById('struct-modal-name').textContent = `${def.name} · Lv.${struct.level}`;
+  document.getElementById('struct-modal-sub').innerHTML = struct.idle
+    ? `<span class="badge-idle">정지됨${struct.idleReason ? ' · ' + struct.idleReason : ''}</span>`
+    : `<span class="badge-run">가동 중</span>`;
+
+  let html = `<div class="pd">${def.desc}</div>`;
   html += renderInventoryHtml(struct, def);
 
   if (struct.key === 'lab') html += renderLabHtml();
   if (struct.key === 'outpost') html += renderOutpostHtml(struct);
 
   if (def.recipes) {
-    html += `<div class="pd">레시피 선택${def.recipes[struct.recipe]?.requiresBelt ? ' (벨트 투입 전용)' : ''}:</div><div class="recipe-list">`;
+    html += `<div class="pd">레시피 선택:</div><div class="recipe-list">`;
     for (const key of Object.keys(def.recipes)) {
       const active = struct.recipe === key ? 'active' : '';
       const label = RESOURCES[key]?.name || key;
@@ -456,13 +528,15 @@ function showStructPanel(struct, x, y) {
     html += `</div>`;
   }
 
-  const canUpgrade = def.maxLevel > struct.level;
-  html += `<button id="upgrade-btn" ${canUpgrade ? '' : 'disabled'}>레벨업 (${struct.level}→${struct.level + 1})</button>`;
+  html += renderUpgradeHtml(struct, def);
 
-  panel.innerHTML = html;
-  wireInventoryActions(panel, struct, x, y);
+  const body = document.getElementById('struct-modal-body');
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  modal.classList.remove('hidden');
+  wireInventoryActions(body, struct, x, y);
 
-  panel.querySelectorAll('.recipe-btn').forEach(btn => {
+  body.querySelectorAll('.recipe-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (isMultiplayer()) {
         const res = await callSetRecipe(struct.id, btn.dataset.recipe);
@@ -483,7 +557,7 @@ function showStructPanel(struct, x, y) {
       if (err) flashMessage(err, true); else { flashMessage('레벨업 완료', false); showStructPanel(struct, x, y); }
     }
   });
-  panel.querySelectorAll('.research-btn').forEach(btn => {
+  body.querySelectorAll('.research-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.tech;
       if (isMultiplayer()) {
@@ -495,7 +569,7 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
-  panel.querySelectorAll('.recruit-btn').forEach(btn => {
+  body.querySelectorAll('.recruit-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const unitKey = btn.dataset.unit;
       const isDefense = btn.dataset.defense === '1';
@@ -648,6 +722,7 @@ let battleDragging = false, battleLastX = 0, battleLastY = 0, battleDragged = fa
 let battlePinching = false, battlePinchStartDist = 0;
 
 function openBattleScreen(defenderSnapshot) {
+  closeStructModal(); // 팝업이 전투 화면 위에 남지 않도록
   const deck = { ...((game.myNation.units && game.myNation.units.attack) || {}) };
   battleSession = createBattleSession(defenderSnapshot, deck);
   battleDeployKey = null;
