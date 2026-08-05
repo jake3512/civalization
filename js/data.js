@@ -95,11 +95,26 @@ export const STRUCTURES = {
   capital: {
     id: 1, name: '수도', volume: 9, footprint: [3, 3],
     desc: '국가의 시작 지점. 국가당 1개, 게임 시작 시 자동 배치됩니다. 레벨에 비례해 국고 골드를 생산하고, 레벨이 오를수록 주변 영토도 넓어집니다.',
-    baseCost: {}, maxLevel: 5, upgradeCostMul: 1.8,
-    category: 'core', baseHp: 600, goldIncome: 5, territoryRadius: 4,
-    // 수도는 여러 종류를 함께 보관하는 소규모 중앙 창고 역할도 한다
+    baseCost: {}, maxLevel: 10, upgradeCostMul: 1.8,
+    category: 'core', baseHp: 600, goldIncome: 5, territoryRadius: 7,
+    // 수도는 여러 종류를 함께 보관하는 중앙 창고 역할도 한다
     // (건국 직후 창고를 짓기 전까지 자원을 둘 곳이 필요하므로).
-    storageCapacity: 200,
+    storageCapacity: 300,
+    // 수도는 국가의 성장 단계 그 자체라 레벨업 비용을 개별 표로 지정한다.
+    // 각 단계의 비용은 "그 레벨에서 이미 만들 수 있는 자원"으로만 구성해,
+    // 아직 해금되지 않은 자원을 요구해 진행이 막히는 일이 없도록 했다
+    // (levelCosts[0] = 1→2, [8] = 9→10).
+    levelCosts: [
+      { wood: 250, stone: 250 },                                             // 1→2  기초 자원
+      { wood: 500, stone: 450, iron_ingot: 80 },                             // 2→3  제련소 해금 이후
+      { stone: 800, iron_ingot: 200, copper_ingot: 120, coal: 150 },         // 3→4  발전소·유전 단계
+      { iron_ingot: 350, brick: 300, plank: 300, petroleum: 120 },           // 4→5  공장·정제소 단계
+      { brick: 500, rebar: 180, circuit_board: 90, mana_stone: 60 },         // 5→6  추출기 단계
+      { rebar: 320, circuit_board: 200, gold_ingot: 180, plastic: 150 },     // 6→7
+      { circuit_board: 380, rebar: 450, mana_stone: 220, gun: 60 },          // 7→8
+      { circuit_board: 600, mana_stone: 380, vest: 90, gun: 120 },           // 8→9
+      { circuit_board: 900, mana_stone: 600, gun: 200, vest: 200, gold_ingot: 600 }, // 9→10
+    ],
   },
   hub: {
     id: 2, name: '중심지', volume: 4, footprint: [2, 2],
@@ -260,13 +275,13 @@ export const STRUCTURES = {
   lab: {
     id: 16, name: '연구소', volume: 4, footprint: [2, 2],
     desc: '새로운 구조물을 해금할 수 있게 합니다.',
-    baseCost: { wood: 40, gold_ingot: 10 }, maxLevel: 5, upgradeCostMul: 1.8,
+    baseCost: { wood: 60, stone: 40 }, maxLevel: 5, upgradeCostMul: 1.8,
     category: 'utility', baseHp: 150,
   },
   belt: {
     id: 17, name: '컨베이어 벨트', volume: 1, footprint: [1, 1],
     desc: '자원을 다른 구조물로 이동시킵니다.',
-    baseCost: { iron_ingot: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
+    baseCost: { wood: 2, stone: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
     category: 'utility', baseHp: 25,
   },
   warehouse: {
@@ -359,23 +374,31 @@ export function beltThroughput(level) { return 10 * level; }
 
 // ---- 연구소 기술 트리 ----
 // requires: 선행 연구(구조물 key) 배열. cost: 연구 자원 소모. time: 필요 틱 수.
+// capitalLevel: 이 연구를 열려면 필요한 수도 레벨 — 수도를 키워야 다음 단계
+//   기술이 연구소에 나타난다(수도 성장 = 국가의 시대 진행).
 export const TECH_TREE = {
-  smelter:        { cost: { wood: 30, stone: 20 },          time: 3, requires: [] },
-  oil_well:       { cost: { stone: 30, iron_ingot: 10 },    time: 3, requires: ['smelter'] },
-  farm:           { cost: { wood: 30 },                      time: 2, requires: [] },
-  barn:           { cost: { wood: 30, food: 10 },            time: 3, requires: ['farm'] },
-  slaughterhouse: { cost: { wood: 20, iron_ingot: 10 },     time: 3, requires: ['barn'] },
-  power_plant:    { cost: { stone: 40, iron_ingot: 20 },    time: 4, requires: ['smelter'] },
-  factory:        { cost: { wood: 50, iron_ingot: 20 },     time: 5, requires: ['smelter', 'power_plant'] },
-  refinery:       { cost: { stone: 40, iron_ingot: 20 },    time: 4, requires: ['oil_well'] },
-  extractor:      { cost: { stone: 30, copper_ingot: 15 },  time: 4, requires: ['smelter'] },
-  turret_01:      { cost: { iron_ingot: 15 },                time: 3, requires: ['smelter', 'power_plant'] },
-  turret_02:      { cost: { iron_ingot: 20, petroleum: 5 },  time: 4, requires: ['turret_01'] },
-  turret_03:      { cost: { circuit_board: 3 },              time: 5, requires: ['turret_02', 'factory'] },
-  turret_04:      { cost: { copper_wire: 8 },                time: 4, requires: ['turret_03'] },
-  turret_05:      { cost: { rebar: 6 },                      time: 5, requires: ['turret_04'] },
-  turret_06:      { cost: { mana_stone: 4 },                 time: 6, requires: ['turret_05', 'extractor'] },
-  outpost:        { cost: { wood: 40, iron_ingot: 20 },     time: 4, requires: ['turret_01'] },
+  // 2단계 — 제련·농업
+  smelter:        { cost: { wood: 60, stone: 40 },           time: 3, requires: [],                          capitalLevel: 2 },
+  farm:           { cost: { wood: 60, stone: 30 },           time: 2, requires: [],                          capitalLevel: 2 },
+  // 3단계 — 에너지·축산
+  oil_well:       { cost: { stone: 60, iron_ingot: 20 },     time: 3, requires: ['smelter'],                 capitalLevel: 3 },
+  power_plant:    { cost: { stone: 80, iron_ingot: 40 },     time: 4, requires: ['smelter'],                 capitalLevel: 3 },
+  barn:           { cost: { wood: 60, food: 20 },            time: 3, requires: ['farm'],                    capitalLevel: 3 },
+  // 4단계 — 가공 산업
+  factory:        { cost: { wood: 100, iron_ingot: 50 },     time: 5, requires: ['smelter', 'power_plant'],  capitalLevel: 4 },
+  refinery:       { cost: { stone: 80, iron_ingot: 45 },     time: 4, requires: ['oil_well'],                capitalLevel: 4 },
+  // 5단계 — 마석·식품 가공
+  extractor:      { cost: { stone: 70, copper_ingot: 35 },   time: 4, requires: ['smelter'],                 capitalLevel: 5 },
+  slaughterhouse: { cost: { wood: 50, iron_ingot: 25 },      time: 3, requires: ['barn'],                    capitalLevel: 5 },
+  // 6단계 — 기초 군사
+  turret_01:      { cost: { iron_ingot: 40, brick: 30 },     time: 3, requires: ['smelter', 'power_plant'],  capitalLevel: 6 },
+  outpost:        { cost: { wood: 90, iron_ingot: 50 },      time: 4, requires: ['turret_01'],               capitalLevel: 6 },
+  // 7단계 이상 — 고급 방어 시설
+  turret_02:      { cost: { iron_ingot: 60, petroleum: 20 }, time: 4, requires: ['turret_01'],               capitalLevel: 7 },
+  turret_03:      { cost: { circuit_board: 12 },             time: 5, requires: ['turret_02', 'factory'],    capitalLevel: 7 },
+  turret_04:      { cost: { copper_wire: 30 },               time: 4, requires: ['turret_03'],               capitalLevel: 8 },
+  turret_05:      { cost: { rebar: 25 },                     time: 5, requires: ['turret_04'],               capitalLevel: 8 },
+  turret_06:      { cost: { mana_stone: 20 },                time: 6, requires: ['turret_05', 'extractor'],  capitalLevel: 9 },
 };
 
 // ---- 클래시오브클랜식 대전 운영 상수 (트로피 · 실드 · 매치메이킹) ----
@@ -415,6 +438,9 @@ export function getUpgradeCost(structKey, currentLevel) {
   const def = STRUCTURES[structKey];
   if (!def) return null;
   if (currentLevel >= def.maxLevel) return null;
+
+  // 수도처럼 단계별 비용표가 지정된 구조물은 그 표를 그대로 쓴다
+  if (def.levelCosts) return { ...(def.levelCosts[currentLevel - 1] || {}) };
 
   const mul = Math.pow(def.upgradeCostMul, currentLevel);
   const cost = {};

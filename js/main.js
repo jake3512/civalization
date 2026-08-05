@@ -13,7 +13,7 @@ import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
-         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius } from './logic.js';
+         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
@@ -626,17 +626,35 @@ function renderLabHtml() {
     const def = STRUCTURES[nation.research.key];
     return `<div class="pd">연구 중: ${def.name} (남은 ${nation.research.ticksLeft}틱)</div>`;
   }
-  let html = `<div class="pd">해금 가능한 기술:</div><div class="recipe-list">`;
+  // 연구는 수도 레벨로 단계가 나뉘므로, 수도 레벨별로 묶어서 보여준다.
+  const capLevel = getCapitalLevel(nation);
+  const byLevel = new Map();
   for (const [key, tech] of Object.entries(TECH_TREE)) {
     if (nation.unlocked.has(key)) continue;
-    const missing = tech.requires.filter(k => !nation.unlocked.has(k));
-    const locked = missing.length > 0;
-    const costTxt = Object.entries(tech.cost).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
-    html += `<button class="recipe-btn research-btn" data-tech="${key}" ${locked ? 'disabled title="선행 연구 필요: ' + missing.join(',') + '"' : ''}>
-      ${STRUCTURES[key].name} (${costTxt}, ${tech.time}틱)
-    </button>`;
+    const lv = tech.capitalLevel || 1;
+    if (!byLevel.has(lv)) byLevel.set(lv, []);
+    byLevel.get(lv).push([key, tech]);
   }
-  html += `</div>`;
+  if (!byLevel.size) return `<div class="pd">모든 기술을 연구했습니다.</div>`;
+
+  let html = `<div class="pd">연구 가능한 기술 <span class="dim">(수도 Lv.${capLevel})</span></div>`;
+  for (const lv of [...byLevel.keys()].sort((a, b) => a - b)) {
+    const levelLocked = capLevel < lv;
+    html += `<div class="tech-tier${levelLocked ? ' locked' : ''}">
+      <div class="tech-tier-head">${levelLocked ? '🔒 ' : ''}수도 Lv.${lv} 단계</div><div class="recipe-list">`;
+    for (const [key, tech] of byLevel.get(lv)) {
+      const missing = tech.requires.filter(k => !nation.unlocked.has(k));
+      const locked = levelLocked || missing.length > 0;
+      const title = levelLocked
+        ? `수도 레벨 ${lv} 필요 (현재 ${capLevel})`
+        : (missing.length ? '선행 연구 필요: ' + missing.map(m => STRUCTURES[m].name).join(', ') : '');
+      const costTxt = Object.entries(tech.cost).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
+      html += `<button class="recipe-btn research-btn" data-tech="${key}" ${locked ? `disabled title="${title}"` : ''}>
+        ${STRUCTURES[key].name} (${costTxt}, ${tech.time}틱)
+      </button>`;
+    }
+    html += `</div></div>`;
+  }
   return html;
 }
 

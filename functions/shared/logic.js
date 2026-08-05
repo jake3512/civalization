@@ -477,6 +477,12 @@ export function recruitUnit(nation, structId, unitKey, isDefense) {
   return { ok: true };
 }
 
+/** 현재 수도 레벨 (수도가 없으면 0) — 연구 단계 판정에 쓰인다 */
+export function getCapitalLevel(nation) {
+  const cap = nation.structures.find(s => s.key === 'capital');
+  return cap ? cap.level : 0;
+}
+
 /** 연구소 연구 시작 (동시에 하나만 진행 — 단순화된 규칙) */
 export function startResearch(nation, structKey) {
   if (nation.unlocked.has(structKey)) return { ok: false, error: '이미 해금된 구조물입니다' };
@@ -485,6 +491,10 @@ export function startResearch(nation, structKey) {
   if (nation.research && nation.research.key) return { ok: false, error: '이미 다른 연구가 진행 중입니다' };
   const hasLab = nation.structures.some(s => s.key === 'lab');
   if (!hasLab) return { ok: false, error: '연구소를 먼저 건설해야 합니다' };
+  const capLevel = getCapitalLevel(nation);
+  if (capLevel < (tech.capitalLevel || 1)) {
+    return { ok: false, error: `수도 레벨 ${tech.capitalLevel}이(가) 필요합니다 (현재 ${capLevel})` };
+  }
   const missing = tech.requires.filter(k => !nation.unlocked.has(k));
   if (missing.length) return { ok: false, error: `선행 연구가 필요합니다: ${missing.join(', ')}` };
   if (!canAfford(nation, tech.cost)) return { ok: false, error: '연구 자원이 부족합니다' };

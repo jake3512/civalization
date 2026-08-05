@@ -441,3 +441,9 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .up-cost i { font-style: normal; color: var(--text-dim); font-size: 10px; }
 .up-cost.short { color: var(--danger); }
 .up-cost.short i { color: var(--danger); }
+
+/* ---- 연구소: 수도 레벨별 기술 단계 ---- */
+.tech-tier { margin: 8px 0; padding: 8px; border: 2px solid var(--line); border-radius: 5px; background: rgba(0,0,0,0.22); }
+.tech-tier.locked { opacity: 0.55; border-style: dashed; }
+.tech-tier-head { font-family: var(--font-mono); font-size: 11px; color: var(--accent); margin-bottom: 6px; }
+.tech-tier.locked .tech-tier-head { color: var(--text-dim); }

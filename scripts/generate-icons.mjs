@@ -1,11 +1,12 @@
 // ============================================================
-// scripts/generate-icons.mjs — assets/icons/*.svg 아이콘 세트를 생성한다.
+// scripts/generate-icons.mjs — assets/icons 아이콘/그림 세트를 생성한다.
 //
-// 이모지는 플랫폼(OS/브라우저)마다 모양·색·크기가 달라 게임 UI에서 가독성이
-// 들쭉날쭉했다. 대신 자원마다 "배지(badge) + 글리프" 형태의 벡터 아이콘을
-// 코드로 생성해 assets/icons/ 에 커밋해 둔다 (해상도 독립적, 다크 테마에서도
-// 항상 동일하게 보임). 규칙을 바꾸고 싶으면 이 스크립트만 고치고 다시
-// `node scripts/generate-icons.mjs` 를 실행하면 된다.
+// 이모지는 플랫폼마다 모양·색이 달라 가독성이 들쭉날쭉해서, 자원과 구조물
+// 모두 코드로 그린 SVG 그림을 쓴다. 픽토그램(단색 실루엣)이 아니라 왼쪽
+// 위에서 빛이 온다고 보고 밝은 면/어두운 면을 나눠 칠하고 굵은 검은 외곽선을
+// 두른 "일러스트"라서, 아케이드풍 화면에서 또렷하게 보인다.
+//
+// 규칙을 바꾸려면 이 스크립트만 고치고 `node scripts/generate-icons.mjs` 실행.
 // ============================================================
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,203 +16,10 @@ const OUT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'a
 mkdirSync(OUT_DIR, { recursive: true });
 
 const SIZE = 64;
-const CX = SIZE / 2, CY = SIZE / 2;
+const INK = '#161018';   // 공통 외곽선 (거의 검정 — 대비를 크게)
+const OUT_W = 3;         // 외곽선 두께
 
-function luminance(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-}
-function glyphColor(bgHex) {
-  return luminance(bgHex) > 0.55 ? '#1b1b1b' : '#f2ede0';
-}
-function shade(hex, amt) {
-  // amt<0 = 어둡게, amt>0 = 밝게
-  const n = parseInt(hex.slice(1), 16);
-  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const adj = (c) => Math.max(0, Math.min(255, Math.round(c + 255 * amt)));
-  r = adj(r); g = adj(g); b = adj(b);
-  return `#${[r, g, b].map(c => c.toString(16).padStart(2, '0')).join('')}`;
-}
-
-function badge(bg, glyphSvg) {
-  const border = shade(bg, -0.28);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}">
-  <rect x="2" y="2" width="${SIZE - 4}" height="${SIZE - 4}" rx="14" fill="${bg}" stroke="${border}" stroke-width="2.5"/>
-  ${glyphSvg}
-</svg>`;
-}
-
-// ---------------- 글리프(자원 종류별 상징 도형) ----------------
-const glyphs = {
-  tree(c) {
-    return `<path d="M32 14 L44 32 L38 32 L48 46 L16 46 L26 32 L20 32 Z" fill="${c}"/>
-    <rect x="29" y="46" width="6" height="8" rx="1.5" fill="${c}"/>`;
-  },
-  rock(c, accent) {
-    return `<path d="M14 40 L20 24 L32 18 L46 24 L50 40 L42 48 L22 48 Z" fill="${c}"/>
-    ${accent ? `<path d="M24 30 L34 26 L40 34 L30 40 Z" fill="${accent}" opacity="0.55"/>` : ''}`;
-  },
-  nugget(c, accent) {
-    return `<path d="M18 38 Q14 26 26 22 Q38 16 46 26 Q52 34 44 42 Q34 50 22 46 Q16 44 18 38 Z" fill="${c}"/>
-    ${accent ? `<circle cx="28" cy="30" r="3" fill="${accent}"/><circle cx="38" cy="36" r="2.4" fill="${accent}"/>` : ''}`;
-  },
-  crystal(c, accent) {
-    return `<path d="M32 12 L44 26 L38 52 L26 52 L20 26 Z" fill="${c}"/>
-    <path d="M32 12 L38 52 L26 52 Z" fill="${accent || '#000'}" opacity="0.18"/>`;
-  },
-  droplet(c) {
-    return `<path d="M32 12 C40 24 48 33 48 42 A16 16 0 0 1 16 42 C16 33 24 24 32 12 Z" fill="${c}"/>`;
-  },
-  bar(c, lines) {
-    let inner = '';
-    if (lines === 'grain') {
-      inner = [18, 26, 34, 42].map(y => `<line x1="14" y1="${y}" x2="50" y2="${y}" stroke="${shade(c, -0.25)}" stroke-width="1.6"/>`).join('');
-    } else if (lines === 'brick') {
-      inner = `<line x1="14" y1="26" x2="50" y2="26" stroke="${shade(c, -0.3)}" stroke-width="2"/>
-      <line x1="14" y1="38" x2="50" y2="38" stroke="${shade(c, -0.3)}" stroke-width="2"/>
-      <line x1="32" y1="14" x2="32" y2="26" stroke="${shade(c, -0.3)}" stroke-width="2"/>
-      <line x1="22" y1="26" x2="22" y2="38" stroke="${shade(c, -0.3)}" stroke-width="2"/>
-      <line x1="42" y1="26" x2="42" y2="38" stroke="${shade(c, -0.3)}" stroke-width="2"/>
-      <line x1="32" y1="38" x2="32" y2="50" stroke="${shade(c, -0.3)}" stroke-width="2"/>`;
-    } else if (lines === 'rib') {
-      inner = [20, 26, 32, 38, 44].map(x => `<line x1="${x}" y1="16" x2="${x - 6}" y2="48" stroke="${shade(c, -0.3)}" stroke-width="2"/>`).join('');
-    } else {
-      inner = `<rect x="16" y="20" width="32" height="6" rx="2" fill="${shade(c, 0.25)}" opacity="0.8"/>`;
-    }
-    return `<rect x="12" y="14" width="40" height="36" rx="6" fill="${c}"/>${inner}`;
-  },
-  bolt(c) {
-    return `<path d="M34 10 L18 36 L28 36 L24 54 L46 28 L34 28 Z" fill="${c}"/>`;
-  },
-  coin(c) {
-    return `<circle cx="32" cy="32" r="18" fill="${c}"/>
-    <circle cx="32" cy="32" r="12.5" fill="none" stroke="${shade(c, -0.3)}" stroke-width="2"/>
-    <path d="M32 24 L34.5 30 L41 30.5 L36 34.8 L37.6 41 L32 37.4 L26.4 41 L28 34.8 L23 30.5 L29.5 30 Z" fill="${shade(c, -0.3)}"/>`;
-  },
-  wheat(c) {
-    return `<path d="M32 50 C24 42 24 26 32 14 C40 26 40 42 32 50 Z" fill="${c}"/>
-    ${[20, 26, 32, 38, 44].map(y => `<circle cx="26" cy="${y}" r="2.4" fill="${shade(c, -0.2)}"/><circle cx="38" cy="${y}" r="2.4" fill="${shade(c, -0.2)}"/>`).join('')}`;
-  },
-  animal(c) {
-    return `<ellipse cx="32" cy="36" rx="18" ry="12" fill="${c}"/>
-    <circle cx="18" cy="26" r="9" fill="${c}"/>
-    <circle cx="14" cy="20" r="3" fill="${shade(c, -0.25)}"/>
-    <circle cx="22" cy="20" r="3" fill="${shade(c, -0.25)}"/>
-    <circle cx="24" cy="42" r="3" fill="${shade(c, -0.2)}"/>
-    <circle cx="34" cy="45" r="3" fill="${shade(c, -0.2)}"/>
-    <circle cx="44" cy="42" r="3" fill="${shade(c, -0.2)}"/>`;
-  },
-  drumstick(c) {
-    return `<circle cx="24" cy="24" r="13" fill="${c}"/>
-    <path d="M32 32 L48 48" stroke="${shade(c, 0.35)}" stroke-width="7" stroke-linecap="round"/>
-    <circle cx="49" cy="49" r="4.5" fill="${shade(c, 0.4)}"/>`;
-  },
-  coil(c) {
-    return `<path d="M12 44 Q12 20 32 20 Q52 20 52 38" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round"/>
-    <circle cx="12" cy="44" r="5" fill="${c}"/>
-    <circle cx="52" cy="38" r="5" fill="${c}"/>`;
-  },
-  chip(c) {
-    return `<rect x="18" y="18" width="28" height="28" rx="3" fill="${c}"/>
-    <rect x="24" y="24" width="16" height="16" rx="2" fill="${shade(c, -0.3)}"/>
-    ${[14, 24, 34, 44].flatMap(p => [
-      `<line x1="${p}" y1="18" x2="${p}" y2="12" stroke="${c}" stroke-width="3"/>`,
-      `<line x1="${p}" y1="46" x2="${p}" y2="52" stroke="${c}" stroke-width="3"/>`,
-    ]).join('')}`;
-  },
-  spear(c) {
-    return `<line x1="16" y1="48" x2="42" y2="16" stroke="${c}" stroke-width="4.5" stroke-linecap="round"/>
-    <path d="M38 20 L50 10 L46 22 L54 18 L40 30 Z" fill="${c}"/>`;
-  },
-  shieldGear(c) {
-    return `<path d="M32 12 L48 18 V30 C48 42 42 50 32 54 C22 50 16 42 16 30 V18 Z" fill="${c}"/>
-    <path d="M32 20 L41 24 V31 C41 39 37 44 32 47 C27 44 23 39 23 31 V24 Z" fill="${shade(c, -0.25)}"/>`;
-  },
-  pistol(c) {
-    return `<path d="M14 30 H40 V22 H46 V34 H40 V38 H26 V48 H18 V38 H14 Z" fill="${c}"/>`;
-  },
-  vestShape(c) {
-    return `<path d="M20 16 L32 22 L44 16 L48 24 L44 26 L44 50 L34 50 L34 34 L30 34 L30 50 L20 50 L20 26 L16 24 Z" fill="${c}"/>`;
-  },
-  trophyShape(c) {
-    return `<path d="M22 14 H42 V26 C42 34 37 39 32 39 C27 39 22 34 22 26 Z" fill="${c}"/>
-    <path d="M22 16 H14 V22 C14 28 18 31 22 30" fill="none" stroke="${c}" stroke-width="3.4"/>
-    <path d="M42 16 H50 V22 C50 28 46 31 42 30" fill="none" stroke="${c}" stroke-width="3.4"/>
-    <rect x="28" y="39" width="8" height="8" fill="${c}"/>
-    <rect x="20" y="47" width="24" height="6" rx="2" fill="${c}"/>`;
-  },
-};
-
-// key -> { bg, glyph: [fnName, ...extraArgs] }
-const SPEC = {
-  wood:          { bg: '#4a7c3f', glyph: ['tree'] },
-  stone:         { bg: '#8a8577', glyph: ['rock'] },
-  coal:          { bg: '#3a3a3a', glyph: ['rock', '#6b6b6b'] },
-  iron_ore:      { bg: '#a86b4c', glyph: ['rock', '#7a4a33'] },
-  gold_ore:      { bg: '#c9a227', glyph: ['nugget', '#fff2b0'] },
-  copper_ore:    { bg: '#b5651d', glyph: ['rock', '#7a4212'] },
-  crude_oil:     { bg: '#2a2a2a', glyph: ['droplet'] },
-  mana_stone:    { bg: '#7d5fd8', glyph: ['crystal', '#c9b8ff'] },
-
-  iron_ingot:    { bg: '#9a9a9a', glyph: ['bar'] },
-  gold_ingot:    { bg: '#d4af37', glyph: ['bar'] },
-  copper_ingot:  { bg: '#c9762f', glyph: ['bar'] },
-
-  petroleum:     { bg: '#3a3a3a', glyph: ['droplet'] },
-  naphtha:       { bg: '#5fa9ad', glyph: ['droplet'] },
-
-  food:          { bg: '#c9a83e', glyph: ['wheat'] },
-  livestock:     { bg: '#b98457', glyph: ['animal'] },
-  meat:          { bg: '#b43c3c', glyph: ['drumstick'] },
-
-  electricity:   { bg: '#e0b830', glyph: ['bolt'] },
-  gold:          { bg: '#d9a92c', glyph: ['coin'] },
-
-  plank:         { bg: '#a97a44', glyph: ['bar', 'grain'] },
-  brick:         { bg: '#8c4a34', glyph: ['bar', 'brick'] },
-
-  copper_wire:   { bg: '#c9762f', glyph: ['coil'] },
-  plastic:       { bg: '#6fa2b8', glyph: ['droplet'] },
-
-  circuit_board: { bg: '#3f9d6c', glyph: ['chip'] },
-  rebar:         { bg: '#787c81', glyph: ['bar', 'rib'] },
-
-  wood_spear:    { bg: '#8f6a41', glyph: ['spear'] },
-  wood_shield:   { bg: '#8f6a41', glyph: ['shieldGear'] },
-  iron_spear:    { bg: '#9a9a9a', glyph: ['spear'] },
-  iron_shield:   { bg: '#9a9a9a', glyph: ['shieldGear'] },
-  gun:           { bg: '#4a4a4a', glyph: ['pistol'] },
-  vest:          { bg: '#b58a2e', glyph: ['vestShape'] },
-
-  // ---- 자원표에 없는 상태 아이콘(HUD) ----
-  trophy:        { bg: '#d9a92c', glyph: ['trophyShape'] },
-  shield_status: { bg: '#3d7f74', glyph: ['shieldGear'] },
-  water:         { bg: '#2f6f7d', glyph: ['droplet'] },
-};
-
-for (const [key, { bg, glyph: [fn, ...args] }] of Object.entries(SPEC)) {
-  const c = glyphColor(bg);
-  const svg = badge(bg, glyphs[fn](c, ...args));
-  writeFileSync(path.join(OUT_DIR, `${key}.svg`), svg, 'utf-8');
-}
-
-// ============================================================
-// ============================================================
-// 구조물 그림 (assets/icons/struct/*.svg)
-//
-// 단색 픽토그램이 아니라 "그린 그림"에 가깝게 만든다 — 구조물마다 고유
-// 색을 쓰고, 왼쪽 위에서 빛이 온다고 보고 밝은 면/어두운 면을 나눠 칠하고,
-// 굵은 어두운 외곽선을 둘러 아케이드 게임풍으로 또렷하게 보이게 한다.
-// (필드 캔버스와 건설 카탈로그가 같은 그림을 공유한다)
-// ============================================================
-const STRUCT_DIR = path.join(OUT_DIR, 'struct');
-mkdirSync(STRUCT_DIR, { recursive: true });
-
-const INK = '#161018';          // 공통 외곽선 (거의 검정 — 대비를 크게)
-const OUT_W = 3;                // 외곽선 두께
-
-// 채도 높은 아케이드 팔레트
+// 채도 높은 아케이드 팔레트 (자원·구조물 공용)
 const P = {
   stoneL: '#b9c3cc', stone: '#8d99a6', stoneD: '#5d6773',
   woodL: '#d59a54', wood: '#a86a2e', woodD: '#6f4319',
@@ -222,19 +30,198 @@ const P = {
   blueL: '#6fd4ff', blue: '#2e9bd6', blueD: '#175f8c',
   purpleL: '#c9a6ff', purple: '#8b5cf6', purpleD: '#542ea8',
   redL: '#ff8f6b', red: '#e04b3a', redD: '#8f2318',
-  dark: '#2f2a33', darkL: '#4a444f',
+  dark: '#2f2a33', darkL: '#4a444f', darkD: '#171319',
+  copperL: '#ff9f5a', copper: '#d2691e', copperD: '#8a3f0c',
+  coalL: '#5a5a66', coal: '#33333d', coalD: '#1a1a22',
+  oilL: '#4a4a58', oil: '#26262f', oilD: '#101014',
+  cyanL: '#9df4ee', cyan: '#3fd6c8', cyanD: '#1d8c84',
   glass: '#ffe9a8',
+  meatL: '#ff9d8a', meat: '#e0604c', meatD: '#8f2f22',
+  wheatL: '#ffe17a', wheat: '#e8b93c', wheatD: '#9c7411',
+  plasticL: '#a8e4f5', plastic: '#5cb8d6', plasticD: '#2b7794',
 };
 
 /** 외곽선이 들어간 도형 */
 const sh = (d, fill, sw = OUT_W) => `<path d="${d}" fill="${fill}" stroke="${INK}" stroke-width="${sw}" stroke-linejoin="round"/>`;
 const rc = (x, y, w, h, fill, r = 2, sw = OUT_W) =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}" stroke="${INK}" stroke-width="${sw}"/>`;
-/** 외곽선 없는 내부 디테일 (음영·창문 등) */
+const ci = (cx, cy, r, fill, sw = OUT_W) =>
+  `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${INK}" stroke-width="${sw}"/>`;
+/** 외곽선 없는 내부 디테일 (음영·하이라이트) */
 const fd = (d, fill, op = 1) => `<path d="${d}" fill="${fill}" opacity="${op}"/>`;
 const fr = (x, y, w, h, fill, r = 1) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}"/>`;
-/** 바닥 그림자 — 구조물이 땅에 놓인 느낌 */
+/** 바닥 그림자 */
 const ground = `<ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>`;
+const groundSm = `<ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>`;
+
+// ============================================================
+// 자원 그림 (assets/icons/*.svg)
+// 배지 없이 사물 자체를 그린다 — 굵은 외곽선 덕에 지도 위에서도 잘 보인다.
+// ============================================================
+
+/** 광석 덩어리 (원석류 공용) */
+const oreRock = (light, base, dark, gem) => `${groundSm}
+  ${sh('M10 44 L16 24 L30 14 L48 20 L54 40 L44 52 L20 52 Z', base)}
+  ${fd('M30 14 L48 20 L54 40 L44 52 L32 52 Z', dark, 0.5)}
+  ${fd('M18 26 L29 18 L36 26 L26 36 Z', light, 0.9)}
+  ${gem ? `<circle cx="26" cy="30" r="4" fill="${gem}"/><circle cx="40" cy="38" r="3" fill="${gem}"/>` : ''}`;
+
+/** 주괴 (사다리꼴 금속 덩어리) */
+const ingot = (light, base, dark) => `${groundSm}
+  ${sh('M8 46 L16 26 H48 L56 46 Z', base)}
+  ${fd('M32 26 H48 L56 46 H32 Z', dark, 0.45)}
+  ${fd('M18 30 H30 L27 38 H14 Z', light, 0.85)}
+  <path d="M16 26 H48" stroke="${INK}" stroke-width="2.5"/>`;
+
+/** 액체 방울 */
+const drop = (light, base, dark) => `${groundSm}
+  ${sh('M32 8 C42 24 50 33 50 41 A18 18 0 0 1 14 41 C14 33 22 24 32 8 Z', base)}
+  ${fd('M32 8 C42 24 50 33 50 41 A18 18 0 0 1 32 59 Z', dark, 0.4)}
+  ${fd('M24 36 a7 9 0 0 1 6 -12 a9 9 0 0 0 -6 12 Z', light, 0.95)}`;
+
+const resArt = {
+  wood: `${groundSm}
+    ${sh('M32 6 L46 28 H38 L50 46 H14 L26 28 H18 Z', P.green)}
+    ${fd('M32 6 L46 28 H38 L50 46 H32 Z', P.greenD, 0.45)}
+    ${rc(28, 44, 8, 12, P.woodD, 2)}`,
+  stone: oreRock(P.stoneL, P.stone, P.stoneD),
+  coal: oreRock(P.coalL, P.coal, P.coalD),
+  iron_ore: oreRock('#d8b9a8', '#a86b4c', '#6d3f28', '#8d99a6'),
+  gold_ore: oreRock('#ffe9a0', '#c9a227', '#7d5f0d', P.goldL),
+  copper_ore: oreRock(P.copperL, P.copper, P.copperD, '#ffb27a'),
+  crude_oil: drop(P.oilL, P.oil, P.oilD),
+  mana_stone: `${groundSm}
+    ${sh('M32 6 L48 24 L40 56 H24 L16 24 Z', P.purple)}
+    ${fd('M32 6 L48 24 L40 56 H32 Z', P.purpleD, 0.5)}
+    ${fd('M24 22 L32 12 L36 24 L28 34 Z', P.purpleL, 0.95)}`,
+
+  iron_ingot: ingot(P.metalL, P.metal, P.metalD),
+  gold_ingot: ingot(P.goldL, P.gold, P.goldD),
+  copper_ingot: ingot(P.copperL, P.copper, P.copperD),
+
+  petroleum: `${groundSm}
+    ${rc(14, 16, 36, 40, '#3a3a46', 4)}
+    ${fd('M32 16 H50 V56 H32 Z', '#1c1c24', 0.5)}
+    ${fr(18, 24, 28, 10, P.goldL, 2)}
+    <path d="M14 40 H50" stroke="${INK}" stroke-width="2.5"/>`,
+  naphtha: drop(P.cyanL, P.cyan, P.cyanD),
+
+  food: `${groundSm}
+    ${sh('M32 52 C22 42 22 22 32 8 C42 22 42 42 32 52 Z', P.wheat)}
+    ${fd('M32 8 C42 22 42 42 32 52 Z', P.wheatD, 0.45)}
+    ${[18, 26, 34, 42].map(y => `<path d="M32 ${y} l-9 -5 M32 ${y} l9 -5" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>`).join('')}`,
+  livestock: `${groundSm}
+    ${sh('M14 30 h32 a8 8 0 0 1 8 8 v8 a6 6 0 0 1 -6 6 H12 a6 6 0 0 1 -6 -6 v-8 a8 8 0 0 1 8 -8 Z', '#f0e6da')}
+    ${fd('M32 30 h14 a8 8 0 0 1 8 8 v8 a6 6 0 0 1 -6 6 H32 Z', '#c2b3a3', 0.5)}
+    ${fd('M18 34 a7 6 0 0 1 10 4 a8 7 0 0 1 -12 3 Z', P.woodD, 0.85)}
+    ${fd('M38 40 a6 5 0 0 1 9 3 a7 6 0 0 1 -11 2 Z', P.woodD, 0.7)}
+    ${sh('M16 14 a9 9 0 0 1 16 6 h-16 Z', '#f0e6da')}
+    <circle cx="21" cy="19" r="2" fill="${INK}"/>`,
+  meat: `${groundSm}
+    <path d="M30 34 L48 50" stroke="${INK}" stroke-width="11" stroke-linecap="round"/>
+    <path d="M30 34 L48 50" stroke="#efe2cd" stroke-width="6.5" stroke-linecap="round"/>
+    ${ci(50, 46, 6, '#efe2cd', 2.5)}${ci(46, 53, 6, '#efe2cd', 2.5)}
+    ${sh('M12 34 a16 16 0 1 1 24 -6 a14 14 0 0 1 -8 14 a12 12 0 0 1 -16 -8 Z', P.meat)}
+    ${fd('M28 16 a14 14 0 0 1 0 26 a12 12 0 0 1 -6 2 Z', P.meatD, 0.42)}
+    ${fd('M16 22 a8 7 0 0 1 8 -4 a9 8 0 0 0 -8 9 Z', P.meatL, 0.9)}`,
+
+  electricity: `${groundSm}
+    ${sh('M36 4 L14 34 h13 l-5 26 L50 28 H35 l5 -24 Z', P.goldL)}
+    ${fd('M36 4 L40 4 l-5 24 h15 L22 60 Z', P.goldD, 0.35)}`,
+  gold: `${groundSm}
+    ${ci(32, 32, 20, P.gold)}
+    ${fd('M32 12 a20 20 0 0 1 0 40 Z', P.goldD, 0.4)}
+    ${ci(32, 32, 13, P.goldL, 2.5)}
+    ${fd('M32 22 l3 7 l8 .5 l-6 5 l2 8 l-7 -4.4 l-7 4.4 l2 -8 l-6 -5 l8 -.5 Z', P.goldD, 0.9)}`,
+
+  plank: `${groundSm}
+    ${rc(6, 20, 52, 12, P.woodL, 2)}
+    ${fd('M6 27 H58 V32 H6 Z', P.woodD, 0.4)}
+    ${rc(6, 34, 52, 12, P.wood, 2)}
+    ${fd('M6 41 H58 V46 H6 Z', P.woodD, 0.45)}
+    <path d="M20 20 V32 M40 20 V32 M28 34 V46 M48 34 V46" stroke="${P.woodD}" stroke-width="2" opacity="0.7"/>`,
+  brick: `${groundSm}
+    ${rc(6, 18, 52, 30, '#c0603f', 2)}
+    ${fd('M6 33 H58 V48 H6 Z', '#8a3a22', 0.45)}
+    <path d="M6 28 H58 M6 38 H58" stroke="${INK}" stroke-width="2.5"/>
+    <path d="M22 18 V28 M42 18 V28 M14 28 V38 M34 28 V38 M52 28 V38 M22 38 V48 M42 38 V48" stroke="${INK}" stroke-width="2.5"/>`,
+
+  copper_wire: `${groundSm}
+    <path d="M10 46 Q10 18 32 18 Q54 18 54 40" fill="none" stroke="${INK}" stroke-width="9" stroke-linecap="round"/>
+    <path d="M10 46 Q10 18 32 18 Q54 18 54 40" fill="none" stroke="${P.copper}" stroke-width="5" stroke-linecap="round"/>
+    <path d="M12 42 Q13 24 30 22" fill="none" stroke="${P.copperL}" stroke-width="2" stroke-linecap="round"/>
+    ${ci(10, 48, 5, P.copperL, 2.5)}${ci(54, 42, 5, P.copperL, 2.5)}`,
+  plastic: `${groundSm}
+    ${rc(18, 18, 28, 36, P.plastic, 5)}
+    ${fd('M32 18 H46 V54 H32 Z', P.plasticD, 0.45)}
+    ${fd('M22 24 h6 v22 h-6 Z', P.plasticL, 0.9)}
+    ${rc(26, 8, 12, 10, P.plasticD, 2)}`,
+
+  circuit_board: `${groundSm}
+    ${rc(10, 14, 44, 38, '#2f9e5e', 3)}
+    ${fd('M32 14 H54 V52 H32 Z', '#1c6b3e', 0.45)}
+    ${rc(24, 26, 16, 15, '#20303a', 2, 2.5)}
+    <path d="M17 20 H24 M17 26 H24 M17 33 H24 M40 20 H47 M40 33 H47 M32 41 V48" stroke="${P.goldL}" stroke-width="2.5"/>
+    <circle cx="17" cy="45" r="3" fill="${P.goldL}"/><circle cx="47" cy="45" r="3" fill="${P.goldL}"/>`,
+  rebar: `${groundSm}
+    ${[16, 30, 44].map(x => `<path d="M${x} 10 L${x - 6} 54" stroke="${INK}" stroke-width="9" stroke-linecap="round"/>
+      <path d="M${x} 10 L${x - 6} 54" stroke="${P.stone}" stroke-width="5.5" stroke-linecap="round"/>`).join('')}
+    <path d="M8 24 H54 M6 40 H52" stroke="${INK}" stroke-width="4"/>
+    <path d="M8 24 H54 M6 40 H52" stroke="${P.stoneL}" stroke-width="2"/>`,
+
+  wood_spear: `${groundSm}
+    <path d="M14 52 L44 16" stroke="${INK}" stroke-width="9" stroke-linecap="round"/>
+    <path d="M14 52 L44 16" stroke="${P.wood}" stroke-width="5" stroke-linecap="round"/>
+    ${sh('M40 20 L54 6 L52 22 L38 26 Z', P.stoneL, 2.5)}`,
+  iron_spear: `${groundSm}
+    <path d="M14 52 L42 18" stroke="${INK}" stroke-width="9" stroke-linecap="round"/>
+    <path d="M14 52 L42 18" stroke="${P.woodD}" stroke-width="5" stroke-linecap="round"/>
+    ${sh('M36 24 L56 4 L52 26 L34 32 Z', P.metalL, 2.5)}
+    ${fd('M46 14 L52 26 L38 30 Z', P.metalD, 0.5)}`,
+  wood_shield: `${groundSm}
+    ${sh('M32 6 L52 14 V30 C52 44 44 52 32 58 C20 52 12 44 12 30 V14 Z', P.woodL)}
+    ${fd('M32 6 L52 14 V30 C52 44 44 52 32 58 Z', P.woodD, 0.45)}
+    ${fd('M32 16 L44 21 V30 C44 39 39 45 32 49 Z', P.wood, 0.6)}
+    <path d="M32 6 V58" stroke="${INK}" stroke-width="2.5"/>`,
+  iron_shield: `${groundSm}
+    ${sh('M32 6 L52 14 V30 C52 44 44 52 32 58 C20 52 12 44 12 30 V14 Z', P.metalL)}
+    ${fd('M32 6 L52 14 V30 C52 44 44 52 32 58 Z', P.metalD, 0.45)}
+    ${ci(32, 30, 8, P.gold, 2.5)}`,
+  gun: `${groundSm}
+    ${sh('M8 26 H40 V18 H50 V34 H40 V38 H24 V52 H12 V38 H8 Z', P.darkL)}
+    ${fd('M24 38 H40 V26 H24 Z', P.darkD, 0.5)}
+    ${fr(12, 29, 10, 4, P.metalL, 1)}`,
+  vest: `${groundSm}
+    ${sh('M18 12 L32 20 L46 12 L52 22 L46 25 V54 H36 V36 H28 V54 H18 V25 L12 22 Z', P.wheat)}
+    ${fd('M32 20 L46 12 L52 22 L46 25 V54 H36 V36 H32 Z', P.wheatD, 0.45)}
+    ${fr(20, 30, 6, 12, P.darkD, 1)}${fr(38, 30, 6, 12, P.darkD, 1)}`,
+
+  // HUD 상태 아이콘
+  trophy: `${groundSm}
+    ${sh('M20 8 H44 V24 C44 34 38 40 32 40 C26 40 20 34 20 24 Z', P.gold)}
+    ${fd('M32 8 H44 V24 C44 34 38 40 32 40 Z', P.goldD, 0.4)}
+    <path d="M20 12 H10 V20 C10 27 15 31 20 30" fill="none" stroke="${INK}" stroke-width="4"/>
+    <path d="M44 12 H54 V20 C54 27 49 31 44 30" fill="none" stroke="${INK}" stroke-width="4"/>
+    ${rc(27, 40, 10, 8, P.goldD, 1)}
+    ${rc(18, 48, 28, 8, P.gold, 2)}`,
+  shield_status: `${groundSm}
+    ${sh('M32 6 L52 14 V30 C52 44 44 52 32 58 C20 52 12 44 12 30 V14 Z', P.cyan)}
+    ${fd('M32 6 L52 14 V30 C52 44 44 52 32 58 Z', P.cyanD, 0.45)}
+    ${fd('M22 30 l7 8 l14 -16 l3 4 l-17 19 l-10 -11 Z', '#ffffff', 0.95)}`,
+  water: drop(P.blueL, P.blue, P.blueD),
+};
+
+for (const [key, body] of Object.entries(resArt)) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}">\n  ${body}\n</svg>`;
+  writeFileSync(path.join(OUT_DIR, `${key}.svg`), svg, 'utf-8');
+}
+const SPEC = resArt; // 아래 로그에서 개수 표시용
+
+// ============================================================
+// (필드 캔버스와 건설 카탈로그가 같은 그림을 공유한다)
+// ============================================================
+const STRUCT_DIR = path.join(OUT_DIR, 'struct');
+mkdirSync(STRUCT_DIR, { recursive: true });
 
 const art = {
   capital: `${ground}
