@@ -304,11 +304,14 @@ async function handleTap(clientX, clientY) {
   // 건설은 pointerDown/Move에서 이미 처리된다 (드래그 건설)
   if (selectedStruct) return;
 
-  const clicked = game.myNation.structures.find(s => {
-    const def = STRUCTURES[s.key];
-    const [w, h] = def.footprint;
-    return x >= s.x && x < s.x + w && y >= s.y && y < s.y + h;
-  });
+  // 카메라가 기울어져 있어서 건물은 자기 타일보다 위로 솟아 보인다.
+  // 눈에 보이는 그림을 눌렀을 때 그 건물이 잡히도록 화면 영역으로 먼저 찾고,
+  // 빈 곳이면 그 타일에 실제로 놓인 구조물을 찾는다.
+  const clicked = renderer.pickStructure(game.myNation, clientX - rect.left, clientY - rect.top)
+    || game.myNation.structures.find(s => {
+      const [w, h] = STRUCTURES[s.key].footprint;
+      return x >= s.x && x < s.x + w && y >= s.y && y < s.y + h;
+    });
   showStructPanel(clicked || null, x, y);
 }
 
@@ -1221,3 +1224,4 @@ window.addEventListener('resize', () => renderer.resize());
 // 자동화 테스트도 이 훅으로 게임 상태를 확인한다)
 window.__game = game;
 window.__showStruct = showStructPanel;
+window.__renderer = renderer;
