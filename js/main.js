@@ -5,13 +5,15 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS } from './data.js';
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
+         LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
-import { findMatch, isShielded, getDefensePower } from './logic.js';
+import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
+         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
@@ -43,6 +45,7 @@ document.getElementById('start-btn').addEventListener('click', () => {
 
   startScreen.classList.add('hidden');
   document.getElementById('placement-bar').classList.remove('hidden');
+  updatePlacementBar(); // 입지 요건 안내를 처음부터 보여준다
   renderer.centerOn(0, 0);
   requestAnimationFrame(loop); // 국가 생성 전이라도 지도는 바로 보여준다
 });
@@ -52,18 +55,43 @@ function updatePlacementBar() {
   const bar = document.getElementById('placement-text');
   const confirmBtn = document.getElementById('placement-confirm');
   if (!selectedCapital) {
-    bar.textContent = '지도를 움직여 수도를 세울 칸을 탭하세요';
+    bar.innerHTML = `지도를 움직여 수도를 세울 칸을 탭하세요 — 주변 영토에 ${CAPITAL_REQUIRED_NODES.map(k => TERRAIN_NODES[k].name).join('·')}이 있어야 합니다`;
     confirmBtn.disabled = true;
-  } else {
-    bar.textContent = `선택한 위치 (${selectedCapital.x}, ${selectedCapital.y}) — 다른 곳을 탭하면 위치를 바꿀 수 있어요`;
+    return;
+  }
+  const site = capitalSiteReport(selectedCapital.x, selectedCapital.y);
+  if (site.ok) {
+    bar.innerHTML = `<b style="color:var(--teal)">건설 가능</b> (${selectedCapital.x}, ${selectedCapital.y}) — ${CAPITAL_REQUIRED_NODES.map(k => `${resIcon(TERRAIN_NODES[k].yields)}${TERRAIN_NODES[k].name}`).join(' ')} 확보`;
     confirmBtn.disabled = false;
+  } else {
+    const names = site.missing.map(k => TERRAIN_NODES[k].name).join(', ');
+    bar.innerHTML = `<b style="color:var(--danger)">${names} 없음</b> — 다른 곳을 탭해 ${names}이(가) 영토에 들어오는 자리를 찾아보세요`;
+    confirmBtn.disabled = true;
   }
 }
+
+// 조건을 만족하는 칸이 전체의 7% 정도라 직접 찾기 번거로우므로,
+// 현재 화면 중앙에서 가장 가까운 유효 자리로 카메라를 옮겨주고 바로 선택해준다.
+document.getElementById('placement-suggest').addEventListener('click', () => {
+  const cx = Math.round(renderer.originX + canvas.width / renderer.tile / 2);
+  const cy = Math.round(renderer.originY + canvas.height / renderer.tile / 2);
+  const site = findNearestCapitalSite(cx, cy);
+  if (!site) { flashMessage('주변에서 조건을 만족하는 자리를 찾지 못했습니다', true); return; }
+  renderer.centerOn(site.x + 1, site.y + 1);
+  selectedCapital = { x: site.x, y: site.y };
+  const report = capitalSiteReport(site.x, site.y);
+  renderer.placementMarker = { x: site.x, y: site.y, ok: report.ok, radius: report.radius };
+  updatePlacementBar();
+});
 
 document.getElementById('placement-confirm').addEventListener('click', () => {
   if (!selectedCapital || !pendingNation) return;
   const { x, y } = selectedCapital;
   const { name, color } = pendingNation;
+
+  // 버튼이 비활성화돼 있어 정상 흐름에선 실패하지 않지만, 만에 하나 요건을
+  // 만족하지 않으면 수도 없는 국가가 만들어지므로 여기서도 막는다.
+  if (!capitalSiteReport(x, y).ok) { updatePlacementBar(); return; }
 
   game.startNation(name, color, x, y);
   renderer.placementMarker = null;
@@ -116,7 +144,7 @@ function buildBuildMenu() {
     const btn = document.createElement('button');
     btn.className = 'build-item';
     btn.disabled = !game.myNation.unlocked.has(key);
-    btn.innerHTML = `<span class="idx">${def.code || def.id}</span><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
+    btn.innerHTML = `<img class="sic" src="${structureIcon(key)}" alt=""><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
     btn.title = def.desc;
     btn.addEventListener('click', () => {
       document.querySelectorAll('.build-item.active').forEach(b => b.classList.remove('active'));
@@ -195,7 +223,8 @@ async function handleTap(clientX, clientY) {
   // 수도 위치 선택 단계
   if (pendingNation && !game.myNation) {
     selectedCapital = { x, y };
-    renderer.placementMarker = { x, y };
+    const site = capitalSiteReport(x, y);
+    renderer.placementMarker = { x, y, ok: site.ok, radius: site.radius };
     updatePlacementBar();
     return;
   }
@@ -273,22 +302,224 @@ function flashMessage(text, isError) {
   flashMessage._t = setTimeout(() => { el.style.opacity = 0; }, 2200);
 }
 
+// ---------- 구조물 인벤토리 / 수동 조작 UI ----------
+// 자원은 저절로 국고로 가지 않는다. 벨트가 없으면 여기 버튼으로 직접 옮겨야 한다.
+function renderInventoryHtml(struct, def) {
+  const isStorage = def.storageCapacity > 0;
+  const bar = (used, cap) => {
+    const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+    const cls = pct >= 100 ? 'full' : (pct >= 75 ? 'warn' : '');
+    return `<div class="invbar"><div class="invbar-fill ${cls}" style="width:${pct}%"></div></div>`;
+  };
+  const rows = (obj) => Object.entries(obj || {}).filter(([, v]) => v > 0)
+    .map(([r, v]) => `${resIcon(r)}${Math.floor(v)}`).join(' ') || '<span class="dim">비어 있음</span>';
+
+  let html = '';
+
+  if (isStorage) {
+    const cap = getStorageCapacity(struct.key, struct.level);
+    const used = storedTotal(struct);
+    const kinds = Object.keys(struct.store || {}).filter(k => struct.store[k] > 0);
+    html += `<div class="inv-block"><div class="inv-title">보관 ${Math.floor(used)} / ${cap}${
+      def.singleResource ? ` · <span class="dim">${kinds.length ? RESOURCES[kinds[0]]?.name + ' 전용' : '비어 있음 (첫 자원이 종류를 정함)'}</span>` : ''
+    }</div>${bar(used, cap)}<div class="inv-items">${rows(struct.store)}</div></div>`;
+  }
+
+  const outCap = getOutputCapacity(struct.key, struct.level);
+  if (outCap > 0) {
+    const outUsed = Object.values(struct.outputBuffer || {}).reduce((a, b) => a + b, 0);
+    html += `<div class="inv-block"><div class="inv-title">산출 인벤토리 ${Math.floor(outUsed)} / ${outCap}</div>
+      ${bar(outUsed, outCap)}<div class="inv-items">${rows(struct.outputBuffer)}</div>`;
+    const outKeys = Object.keys(struct.outputBuffer || {}).filter(k => struct.outputBuffer[k] > 0);
+    if (outKeys.length) {
+      html += `<div class="inv-actions">` + outKeys.map(r =>
+        `<button class="inv-btn" data-move-out="${r}">${resIcon(r)} 창고로 ${LOGISTICS.manualTransfer}</button>`).join('') + `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 투입 버퍼 — 레시피 재료나 발전소 연료를 손으로 채워 넣는 곳
+  const wantsInput = (def.recipes && Object.keys(def.recipes).length) || struct.key === 'power_plant' || struct.key === 'outpost';
+  if (wantsInput) {
+    html += `<div class="inv-block"><div class="inv-title">투입 버퍼</div>
+      <div class="inv-items">${rows(struct.inputBuffer)}</div>`;
+    // 지금 필요한 재료를 창고에서 바로 끌어오는 버튼
+    let needKeys = [];
+    if (struct.key === 'power_plant') needKeys = ['wood', 'petroleum'];
+    else if (def.recipes && struct.recipe) needKeys = Object.keys(def.recipes[struct.recipe].in);
+    else if (struct.key === 'outpost') {
+      const need = new Set();
+      for (const job of struct.recruitQueue || []) Object.keys(job.need).forEach(k => need.add(k));
+      needKeys = [...need];
+    }
+    const avail = needKeys.filter(r => (game.myNation.resources[r] || 0) > 0);
+    if (avail.length) {
+      html += `<div class="inv-actions">` + avail.map(r =>
+        `<button class="inv-btn" data-move-in="${r}">${resIcon(r)} 창고에서 ${LOGISTICS.manualTransfer}</button>`).join('') + `</div>`;
+    } else if (needKeys.length) {
+      html += `<div class="pd dim">필요한 재료(${needKeys.map(r => RESOURCES[r]?.name || r).join(', ')})가 창고에 없습니다</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 수동 운용 — 전력이 없어도 누르고 있는 동안 직접 돌린다
+  if (def.category === 'extraction' || def.category === 'production') {
+    html += `<button id="manual-op-btn" class="manual-op-btn">✋ 수동 운용 (누르고 있는 동안 가동)</button>
+      <div id="manual-op-status" class="pd dim">전력이 없어도 손으로 돌릴 수 있습니다 (생산량 ${Math.round(LOGISTICS.manualOperateRate * 100)}%)</div>`;
+  }
+  return html;
+}
+
+/** 수동 조작 버튼들의 이벤트 배선 (패널을 다시 그릴 때마다 호출) */
+function wireInventoryActions(panel, struct, x, y) {
+  const refresh = () => showStructPanel(game.myNation.structures.find(s => s.id === struct.id) || null, x, y);
+
+  panel.querySelectorAll('[data-move-out]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const res = manualMoveToStorage(game.myNation, struct.id, btn.dataset.moveOut);
+      if (!res.ok) flashMessage(res.error, true);
+      else flashMessage(`${RESOURCES[btn.dataset.moveOut]?.name} ${res.moved} 창고로 이송`, false);
+      refresh();
+    });
+  });
+  panel.querySelectorAll('[data-move-in]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const res = manualMoveToStructure(game.myNation, struct.id, btn.dataset.moveIn);
+      if (!res.ok) flashMessage(res.error, true);
+      else flashMessage(`${RESOURCES[btn.dataset.moveIn]?.name} ${res.moved} 투입`, false);
+      refresh();
+    });
+  });
+
+  // 수동 운용: 누르고 있는 동안 일정 간격으로 1사이클씩 돌린다
+  const opBtn = panel.querySelector('#manual-op-btn');
+  if (opBtn) {
+    const statusEl = panel.querySelector('#manual-op-status');
+    let timer = null;
+    const runOnce = () => {
+      const res = manualOperate(game.myNation, struct.id);
+      if (!res.ok) {
+        if (statusEl) { statusEl.textContent = res.error; statusEl.className = 'pd err'; }
+        stop();
+        return;
+      }
+      const made = Object.entries(res.produced || {}).map(([r, a]) => `${RESOURCES[r]?.name || r} +${a}`).join(', ');
+      if (statusEl) { statusEl.textContent = `가동 중… ${made}`; statusEl.className = 'pd ok'; }
+      renderResourcePanel();
+    };
+    const start = (e) => {
+      e.preventDefault();
+      if (timer) return;
+      opBtn.classList.add('active');
+      runOnce();
+      timer = setInterval(runOnce, LOGISTICS.manualOperateMs);
+    };
+    const stop = () => {
+      if (!timer) return;
+      clearInterval(timer); timer = null;
+      opBtn.classList.remove('active');
+      refresh(); // 인벤토리 표시 갱신
+    };
+    opBtn.addEventListener('mousedown', start);
+    opBtn.addEventListener('touchstart', start, { passive: false });
+    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => opBtn.addEventListener(ev, stop));
+    // 패널이 사라지거나 창을 벗어나도 타이머가 남지 않도록
+    window.addEventListener('blur', stop);
+  }
+}
+
 // ---------- 구조물 상세 패널 ----------
+/** 구조물 팝업 닫기 */
+function closeStructModal() {
+  document.getElementById('struct-modal').classList.add('hidden');
+}
+document.getElementById('struct-modal-close').addEventListener('click', closeStructModal);
+document.querySelector('.struct-modal-backdrop').addEventListener('click', closeStructModal);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeStructModal(); });
+
+/**
+ * 레벨업 정보 — 다음 레벨에서 실제로 무엇이 얼마나 좋아지는지와 비용을 보여준다.
+ * (숫자를 직접 비교해 보여주므로 "올릴 가치가 있는지" 판단할 수 있다)
+ */
+function renderUpgradeHtml(struct, def) {
+  const cur = struct.level, next = cur + 1;
+  const maxed = cur >= def.maxLevel;
+
+  let html = `<div class="up-block"><div class="up-head">레벨 ${cur} / ${def.maxLevel}</div>
+    <div class="lvl-dots">${Array.from({ length: def.maxLevel }, (_, i) =>
+      `<span class="lvl-dot${i < cur ? ' on' : ''}"></span>`).join('')}</div>`;
+
+  if (maxed) {
+    html += `<div class="pd dim">최대 레벨에 도달했습니다</div><button id="upgrade-btn" disabled>최대 레벨</button></div>`;
+    return html;
+  }
+
+  // 레벨에 따라 실제로 달라지는 능력치만 골라 현재→다음 값을 나란히 보여준다
+  const gains = [];
+  const add = (label, a, b, unit = '') => gains.push({ label, a: `${a}${unit}`, b: `${b}${unit}` });
+  if (def.baseProduction) add('생산량', def.baseProduction * cur, def.baseProduction * next, '/틱');
+  if (def.goldIncome) add('골드 수입', def.goldIncome * cur, def.goldIncome * next, '/틱');
+  if (def.territoryRadius) add('영토 반경', getTerritoryRadius(struct.key, cur), getTerritoryRadius(struct.key, next), '칸');
+  if (def.powerRadius) add('전력 범위', def.powerRadius + (cur - 1), def.powerRadius + (next - 1), '칸');
+  if (def.storageCapacity) add('보관 용량', getStorageCapacity(struct.key, cur), getStorageCapacity(struct.key, next));
+  if (getOutputCapacity(struct.key, cur)) add('산출 용량', getOutputCapacity(struct.key, cur), getOutputCapacity(struct.key, next));
+  if (def.category === 'turret') {
+    add('공격력', (def.attack || 0) * cur, (def.attack || 0) * next);
+    add('사거리', def.range + (cur - 1), def.range + (next - 1), '칸');
+    add('전력 소모', (def.powerDraw || 0) * cur, (def.powerDraw || 0) * next, 'kW');
+  }
+  if (def.defense) add('방어력', def.defense * cur, def.defense * next);
+  if (def.baseHp) add('내구도', getStructureMaxHp(struct.key, cur), getStructureMaxHp(struct.key, next));
+  if (struct.key === 'belt') add('처리량', beltThroughput(cur), beltThroughput(next), '/틱');
+
+  if (gains.length) {
+    html += `<div class="up-gains">` + gains.map(g =>
+      `<div class="up-row"><span class="up-label">${g.label}</span>
+        <span class="up-a">${g.a}</span><span class="up-arrow">▶</span><span class="up-b">${g.b}</span></div>`).join('') + `</div>`;
+  }
+
+  const cost = getUpgradeCost(struct.key, cur);
+  const costTxt = Object.entries(cost || {}).map(([r, a]) => {
+    const have = Math.floor(game.myNation.resources[r] || 0);
+    const enough = have >= a;
+    return `<span class="up-cost${enough ? '' : ' short'}">${resIcon(r)}${a}<i>(${have})</i></span>`;
+  }).join('');
+  const affordable = Object.entries(cost || {}).every(([r, a]) => (game.myNation.resources[r] || 0) >= a);
+
+  html += `<div class="up-costline">비용 ${costTxt || '없음'}</div>
+    <button id="upgrade-btn" ${affordable ? '' : 'disabled'}>레벨 ${cur} ▶ ${next} 업그레이드</button></div>`;
+  return html;
+}
+
+/**
+ * 구조물을 선택하면 세부정보/레벨업 정보를 팝업 창으로 띄운다.
+ * (빈 타일을 탭했을 때는 팝업 대신 우측 패널의 지형 정보만 갱신한다)
+ */
 function showStructPanel(struct, x, y) {
+  const modal = document.getElementById('struct-modal');
   const panel = document.getElementById('struct-panel');
   if (!struct) {
+    closeStructModal();
     const t = getTile(x, y);
     panel.innerHTML = `<div class="ph">타일 (${x}, ${y})</div><div class="pd">지형: ${t.node ? t.node.name : (t.terrain === 'water' ? '강/호수' : '평지')}</div>`;
     return;
   }
   const def = STRUCTURES[struct.key];
-  let html = `<div class="ph">${def.name} · Lv.${struct.level}${struct.idle ? ' <span style="color:#c1443c">(정지됨)</span>' : ''}</div><div class="pd">${def.desc}</div>`;
+
+  document.getElementById('struct-modal-art').src = structureIcon(struct.key);
+  document.getElementById('struct-modal-name').textContent = `${def.name} · Lv.${struct.level}`;
+  document.getElementById('struct-modal-sub').innerHTML = struct.idle
+    ? `<span class="badge-idle">정지됨${struct.idleReason ? ' · ' + struct.idleReason : ''}</span>`
+    : `<span class="badge-run">가동 중</span>`;
+
+  let html = `<div class="pd">${def.desc}</div>`;
+  html += renderInventoryHtml(struct, def);
 
   if (struct.key === 'lab') html += renderLabHtml();
   if (struct.key === 'outpost') html += renderOutpostHtml(struct);
 
   if (def.recipes) {
-    html += `<div class="pd">레시피 선택${def.recipes[struct.recipe]?.requiresBelt ? ' (벨트 투입 전용)' : ''}:</div><div class="recipe-list">`;
+    html += `<div class="pd">레시피 선택:</div><div class="recipe-list">`;
     for (const key of Object.keys(def.recipes)) {
       const active = struct.recipe === key ? 'active' : '';
       const label = RESOURCES[key]?.name || key;
@@ -297,12 +528,15 @@ function showStructPanel(struct, x, y) {
     html += `</div>`;
   }
 
-  const canUpgrade = def.maxLevel > struct.level;
-  html += `<button id="upgrade-btn" ${canUpgrade ? '' : 'disabled'}>레벨업 (${struct.level}→${struct.level + 1})</button>`;
+  html += renderUpgradeHtml(struct, def);
 
-  panel.innerHTML = html;
+  const body = document.getElementById('struct-modal-body');
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  modal.classList.remove('hidden');
+  wireInventoryActions(body, struct, x, y);
 
-  panel.querySelectorAll('.recipe-btn').forEach(btn => {
+  body.querySelectorAll('.recipe-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (isMultiplayer()) {
         const res = await callSetRecipe(struct.id, btn.dataset.recipe);
@@ -323,7 +557,7 @@ function showStructPanel(struct, x, y) {
       if (err) flashMessage(err, true); else { flashMessage('레벨업 완료', false); showStructPanel(struct, x, y); }
     }
   });
-  panel.querySelectorAll('.research-btn').forEach(btn => {
+  body.querySelectorAll('.research-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.tech;
       if (isMultiplayer()) {
@@ -335,7 +569,7 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
-  panel.querySelectorAll('.recruit-btn').forEach(btn => {
+  body.querySelectorAll('.recruit-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const unitKey = btn.dataset.unit;
       const isDefense = btn.dataset.defense === '1';
@@ -488,6 +722,7 @@ let battleDragging = false, battleLastX = 0, battleLastY = 0, battleDragged = fa
 let battlePinching = false, battlePinchStartDist = 0;
 
 function openBattleScreen(defenderSnapshot) {
+  closeStructModal(); // 팝업이 전투 화면 위에 남지 않도록
   const deck = { ...((game.myNation.units && game.myNation.units.attack) || {}) };
   battleSession = createBattleSession(defenderSnapshot, deck);
   battleDeployKey = null;
@@ -685,9 +920,56 @@ function renderResourcePanel() {
   el.innerHTML = html;
 }
 
+// ---------- 건국 단계: 화면에 보이는 수도 후보 칸 갱신 ----------
+// 매 프레임 다시 계산하면 낭비라, 보이는 타일 범위가 실제로 바뀌었을 때만 다시 찾는다.
+let lastCapitalViewKey = null;
+function updateCapitalSites() {
+  if (!pendingNation || game.myNation) {
+    renderer.capitalSites = null;
+    lastCapitalViewKey = null;
+    return;
+  }
+  const x0 = Math.floor(renderer.originX), y0 = Math.floor(renderer.originY);
+  const x1 = x0 + Math.ceil(canvas.width / renderer.tile);
+  const y1 = y0 + Math.ceil(canvas.height / renderer.tile);
+  const key = `${x0},${y0},${x1},${y1}`;
+  if (key === lastCapitalViewKey) return;
+  lastCapitalViewKey = key;
+  renderer.capitalSites = findCapitalSites(x0, y0, x1, y1);
+}
+
+// ---------- 건설 미리보기(고스트) ----------
+// 커서/마지막 터치 지점에 배치 결과를 매 프레임 다시 계산해 보여준다.
+// (자원이 틱마다 변해 "자원 부족" 여부가 바뀌므로 매 프레임 재검증한다)
+function updateBuildPreview() {
+  if (!game.myNation || !selectedStruct || !renderer.hover) {
+    renderer.buildPreview = null;
+    const hintEl = document.getElementById('preview-hint');
+    if (hintEl) { hintEl.textContent = ''; hintEl.className = 'preview-hint'; }
+    return;
+  }
+  const { x, y } = renderer.hover;
+  const def = STRUCTURES[selectedStruct];
+  const check = validatePlacement(game.myNation, selectedStruct, x, y);
+  renderer.buildPreview = {
+    key: selectedStruct, x, y, dir: beltDir,
+    ok: check.ok, error: check.error,
+    territoryRadius: def.territoryRadius || 0,
+    powerRadius: def.powerRadius || 0,
+  };
+  // 좌측 패널 비용 줄에 현재 위치 기준 사유를 함께 보여준다
+  const hint = document.getElementById('preview-hint');
+  if (hint) {
+    hint.textContent = check.ok ? `(${x}, ${y}) 건설 가능` : `(${x}, ${y}) ${check.error}`;
+    hint.className = `preview-hint ${check.ok ? 'ok' : 'err'}`;
+  }
+}
+
 // ---------- 메인 루프 ----------
 function loop() {
   renderer.resize();
+  updateCapitalSites();
+  updateBuildPreview();
   renderer.draw();
   renderResourcePanel();
   requestAnimationFrame(loop);

@@ -15,7 +15,15 @@ const TICK_MS = 2000; // 자원 생산 주기
 /** 새 국가를 생성하고 수도를 자동 배치한다. (클라이언트 오프라인 모드 / Cloud Functions 양쪽에서 재사용) */
 export function createNation(id, name, color, capitalX, capitalY) {
   const n = new Nation({ id, name, color, capitalX, capitalY });
-  logic.build(n, 'capital', capitalX, capitalY); // 비용 없음 → 항상 성공, 영토는 build()가 직접 부여
+  // 수도는 비용이 없지만 입지 요건(주변 영토에 숲·채석장)이 있으므로 실패할 수 있다.
+  // 조용히 넘기면 수도 없는 국가가 만들어지므로 반드시 에러로 알린다.
+  const res = logic.build(n, 'capital', capitalX, capitalY);
+  if (!res.ok) throw new Error(res.error);
+  // 시작 자원은 수도의 보관함에 들어간다 (국고 표시는 창고·수도 재고의 합계라서,
+  // 어딘가에 실물로 담겨 있지 않으면 존재하지 않는 것과 같다)
+  logic.depositInto(res.structure, 'wood', 100);
+  logic.depositInto(res.structure, 'stone', 100);
+  logic.recomputeStock(n);
   n.shieldUntil = Date.now() + WAR.starterShieldMs; // 건국 직후 보호막 (COC 신규 유저 보호막과 동일한 취지)
   return n;
 }
@@ -28,7 +36,7 @@ export class Nation {
     this.capital = { x: capitalX, y: capitalY };
     this.structures = [];
     this.territory = new Set();
-    this.resources = { wood: 100, stone: 100 };
+    this.resources = {}; // 실물 자원은 창고·수도 재고에서 집계된다 (logic.recomputeStock)
     this.nextStructId = 1;
     this.unlocked = new Set(BASE_UNLOCKED);
     this.research = null;

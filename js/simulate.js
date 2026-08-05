@@ -2,12 +2,16 @@
 // simulate.js — 매 틱마다 실행되는 시뮬레이션 (클라이언트/서버 공용)
 //
 // 순서: ① 전력 공급 범위 계산 → ② 채굴/생산(전력 필요 시 범위 내인지 검사,
-// 산출물은 벨트가 연결돼 있으면 벨트를 타고 이동, 아니면 창고로 직행) →
-// ③ 벨트 물류 해석 → ④ 연구 진행
+// 산출물은 구조물 자신의 산출 인벤토리에 쌓이고 가득 차면 가동 정지) →
+// ③ 산출/창고 재고를 인접 벨트로 배출 → ④ 국고 표시 집계 → ⑤ 연구 진행
+//
+// 중요: 자원은 저절로 국고로 들어가지 않는다. 벨트나 수동 이송으로 창고(수도 포함)
+// 까지 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
 // ============================================================
-import { STRUCTURES, RESOURCES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput } from './data.js';
+import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity } from './data.js';
 import { getTile } from './world.js';
-import { footprintTiles, tileKey, structureAt, getTerritoryRadius } from './logic.js';
+import { footprintTiles, tileKey, structureAt, getTerritoryRadius,
+         depositInto, withdrawFrom, recomputeStock } from './logic.js';
 
 // ---------------- 전력 ----------------
 function computePoweredCircles(nation) {
@@ -62,41 +66,90 @@ function findAdjacentBelt(nation, s, def, wantFacingAway) {
   return null;
 }
 
+/**
+ * 벨트 체인을 따라 자원을 보낸다. 실제로 목적지에 들어간 양을 반환한다.
+ * (들어가지 못한 양은 호출자가 원래 있던 곳에 그대로 남겨둔다 — 예전처럼
+ *  국고로 순간이동시키지 않는다. 국고는 창고 재고의 합계일 뿐이기 때문)
+ */
 function pushIntoBeltChain(nation, startBelt, res, amt) {
   let cur = startBelt;
-  let remaining = amt;
   const visited = new Set();
-  while (remaining > 0 && cur) {
+  while (cur) {
     const key = tileKey(cur.x, cur.y);
     if (visited.has(key)) break; // 루프 방지
     visited.add(key);
     const [dx, dy] = DIR_VECT[cur.dir];
     const nx = cur.x + dx, ny = cur.y + dy;
-    const throughput = beltThroughput(cur.level);
-    const moved = Math.min(remaining, throughput);
+    const moved = Math.min(amt, beltThroughput(cur.level));
 
     const targetStruct = structureAt(nation, nx, ny);
     if (targetStruct && targetStruct.key !== 'belt') {
+      // 창고로 들어가는 경우 — 종류/용량 제한을 그대로 적용한다
+      if (STRUCTURES[targetStruct.key]?.storageCapacity) {
+        return depositInto(targetStruct, res, moved);
+      }
       targetStruct.inputBuffer = targetStruct.inputBuffer || {};
-      targetStruct.inputBuffer[res] = (targetStruct.inputBuffer[res] || 0) + moved;
-      remaining -= moved;
-      break;
+      const room = LOGISTICS.inputCapacity - (targetStruct.inputBuffer[res] || 0);
+      const accepted = Math.max(0, Math.min(moved, room));
+      targetStruct.inputBuffer[res] = (targetStruct.inputBuffer[res] || 0) + accepted;
+      return accepted;
     }
     const nextBelt = nation.structures.find(b => b.key === 'belt' && b.x === nx && b.y === ny);
     if (nextBelt) { cur = nextBelt; continue; }
-    break; // 벨트가 허공에서 끝남 → 남은 양은 유실 (플레이어가 경로를 이어줘야 함)
+    break; // 벨트가 허공에서 끝남 → 아무것도 옮기지 못한다
   }
-  if (remaining > 0) {
-    // 목적지를 못 찾은 나머지는 창고로 반환 (자원 유실 방지, 초보자 배려)
-    nation.resources[res] = (nation.resources[res] || 0) + remaining;
+  return 0;
+}
+
+/**
+ * 생산물을 구조물의 산출 인벤토리에 넣는다 (용량 상한 적용).
+ * 넣지 못한 양이 있으면 그만큼 가동이 막힌 것으로 본다.
+ * 실제로 적재한 양을 반환한다.
+ */
+function storeOutput(s, res, amt) {
+  if (amt <= 0) return 0;
+  s.outputBuffer = s.outputBuffer || {};
+  const cap = getOutputCapacity(s.key, s.level);
+  const used = Object.values(s.outputBuffer).reduce((a, b) => a + b, 0);
+  const add = Math.max(0, Math.min(amt, cap - used));
+  if (add > 0) s.outputBuffer[res] = (s.outputBuffer[res] || 0) + add;
+  return add;
+}
+
+/** 산출 인벤토리에 여유 공간이 남아 있는지 */
+function hasOutputRoom(s) {
+  s.outputBuffer = s.outputBuffer || {};
+  const used = Object.values(s.outputBuffer).reduce((a, b) => a + b, 0);
+  return used < getOutputCapacity(s.key, s.level);
+}
+
+/** 구조물의 산출 인벤토리를 인접한 나가는 벨트로 흘려보낸다 */
+function drainOutputToBelt(nation, s, def) {
+  s.outputBuffer = s.outputBuffer || {};
+  const entries = Object.entries(s.outputBuffer).filter(([, v]) => v > 0);
+  if (!entries.length) return;
+  const exitBelt = findAdjacentBelt(nation, s, def, true);
+  if (!exitBelt) return;
+  for (const [res, have] of entries) {
+    const moved = pushIntoBeltChain(nation, exitBelt, res, have);
+    if (moved > 0) {
+      s.outputBuffer[res] -= moved;
+      if (s.outputBuffer[res] <= 0) delete s.outputBuffer[res];
+    }
   }
 }
 
-function emitOutput(nation, s, def, res, amt) {
-  if (amt <= 0) return;
+/** 창고도 인접한 나가는 벨트로 재고를 내보낼 수 있다 (창고 → 공장 공급) */
+function drainStorageToBelt(nation, s, def) {
+  const entries = Object.entries(s.store || {}).filter(([, v]) => v > 0);
+  if (!entries.length) return;
   const exitBelt = findAdjacentBelt(nation, s, def, true);
-  if (exitBelt) pushIntoBeltChain(nation, exitBelt, res, amt);
-  else nation.resources[res] = (nation.resources[res] || 0) + amt;
+  if (!exitBelt) return;
+  const rate = LOGISTICS.warehouseBeltRate * s.level;
+  for (const [res, have] of entries) {
+    const moved = pushIntoBeltChain(nation, exitBelt, res, Math.min(rate, have));
+    if (moved > 0) withdrawFrom(s, res, moved);
+  }
 }
 
 // ---------------- 전초기지: 병력 모집 대기열 처리 ----------------
@@ -121,17 +174,22 @@ function processRecruitQueue(nation, s) {
 // ---------------- 메인 틱 ----------------
 export function tickNation(nation) {
   // 0) 초기화
-  for (const s of nation.structures) { s.idle = false; s._fueled = false; }
+  for (const s of nation.structures) { s.idle = false; s._fueled = false; s.idleReason = null; }
 
-  // 1) 발전소 연료 소모 (나무 2 또는 석유 1)
+  // 1) 발전소 연료 소모 — 연료는 벨트나 수동 이송으로 발전소에 직접 넣어줘야 한다
+  //    (국고는 창고 재고의 합계일 뿐이라 원격으로 끌어다 쓸 수 없다)
   for (const s of nation.structures) {
     if (s.key !== 'power_plant') continue;
     const def = STRUCTURES.power_plant;
-    const fuel = (nation.resources.wood >= 2) ? 'wood' : ((nation.resources.petroleum || 0) >= 1 ? 'petroleum' : null);
+    s.inputBuffer = s.inputBuffer || {};
+    const fuel = (s.inputBuffer.wood || 0) >= 2 ? 'wood'
+      : ((s.inputBuffer.petroleum || 0) >= 1 ? 'petroleum' : null);
     if (fuel) {
-      nation.resources[fuel] -= fuel === 'wood' ? 2 : 1;
+      s.inputBuffer[fuel] -= fuel === 'wood' ? 2 : 1;
       nation.resources.electricity = (nation.resources.electricity || 0) + def.baseProduction * s.level;
       s._fueled = true;
+    } else {
+      s.idleReason = '연료 없음';
     }
   }
   const poweredCircles = computePoweredCircles(nation);
@@ -140,54 +198,42 @@ export function tickNation(nation) {
   for (const s of nation.structures) {
     const def = STRUCTURES[s.key];
     if (POWER_REQUIRED_CATEGORIES.has(def.category) && !isPowered(poweredCircles, s, def)) {
-      s.idle = true; // 전력 부족 → 이번 틱 가동 안 함
+      s.idle = true; // 전력 부족 → 이번 틱 가동 안 함 (수동 운용으로는 돌릴 수 있다)
+      s.idleReason = '전력 없음';
       continue;
     }
 
     if (def.category === 'extraction') {
+      // 산출 인벤토리가 가득 차면 캐낼 곳이 없어 가동을 멈춘다
+      if (!hasOutputRoom(s)) { s.idle = true; s.idleReason = '산출 가득 참'; continue; }
       const t = getTile(s.x, s.y);
-      if (t.node) emitOutput(nation, s, def, t.node.yields, def.baseProduction * s.level);
+      if (t.node) storeOutput(s, t.node.yields, def.baseProduction * s.level);
     } else if (def.category === 'production') {
+      if (!hasOutputRoom(s)) { s.idle = true; s.idleReason = '산출 가득 참'; continue; }
+
       if (def.recipes && s.recipe) {
         const r = def.recipes[s.recipe];
         const need = {};
         for (const [res, amt] of Object.entries(r.in)) need[res] = amt * s.level;
 
-        if (r.requiresBelt) {
-          // 벨트로 투입된 양만 사용 (창고 자원 사용 불가)
-          const buf = s.inputBuffer || {};
-          const ok = Object.entries(need).every(([res, amt]) => (buf[res] || 0) >= amt);
-          if (ok) {
-            for (const [res, amt] of Object.entries(need)) buf[res] -= amt;
-            const outRes = s.recipe;
-            emitOutput(nation, s, def, outRes, r.out * s.level);
-          } else {
-            s.idle = true;
-          }
+        // 재료는 반드시 투입 버퍼(벨트 또는 수동 이송)에 들어와 있어야 한다
+        const buf = s.inputBuffer || {};
+        const ok = Object.entries(need).every(([res, amt]) => (buf[res] || 0) >= amt);
+        if (ok) {
+          for (const [res, amt] of Object.entries(need)) buf[res] -= amt;
+          const outs = typeof r.out === 'number' ? { [s.recipe]: r.out } : r.out;
+          for (const [res, amt] of Object.entries(outs)) storeOutput(s, res, amt * s.level);
         } else {
-          // 벨트 입력분을 우선 소모하고 부족분은 창고에서 충당
-          const buf = s.inputBuffer || {};
-          const totalAvail = {};
-          for (const res of Object.keys(need)) totalAvail[res] = (buf[res] || 0) + (nation.resources[res] || 0);
-          const ok = Object.entries(need).every(([res, amt]) => totalAvail[res] >= amt);
-          if (ok) {
-            for (const [res, amt] of Object.entries(need)) {
-              const fromBuf = Math.min(buf[res] || 0, amt);
-              buf[res] = (buf[res] || 0) - fromBuf;
-              nation.resources[res] = (nation.resources[res] || 0) - (amt - fromBuf);
-            }
-            if (typeof r.out === 'number') emitOutput(nation, s, def, s.recipe, r.out * s.level);
-            else for (const [res, amt] of Object.entries(r.out)) emitOutput(nation, s, def, res, amt * s.level);
-          } else {
-            s.idle = true;
-          }
+          s.idle = true;
+          s.idleReason = '재료 부족';
         }
       } else if (s.key === 'farm') {
-        emitOutput(nation, s, def, 'food', def.baseProduction * s.level);
+        storeOutput(s, 'food', def.baseProduction * s.level);
       } else if (s.key === 'barn') {
-        emitOutput(nation, s, def, 'livestock', def.baseProduction * s.level);
+        storeOutput(s, 'livestock', def.baseProduction * s.level);
       } else {
         s.idle = true;
+        s.idleReason = '레시피 미선택';
       }
     } else if (def.category === 'turret') {
       // 터렛은 사거리 내에 있어도(전력 공급 범위) 매 틱 kW만큼 전력을 계속 소모해야 작동한다.
@@ -204,7 +250,18 @@ export function tickNation(nation) {
     }
   }
 
-  // 3) 연구 진행
+  // 3) 물류 — 산출 인벤토리와 창고 재고를 인접한 나가는 벨트로 흘려보낸다
+  for (const s of nation.structures) {
+    const def = STRUCTURES[s.key];
+    if (!def || s.key === 'belt') continue;
+    if (def.storageCapacity) drainStorageToBelt(nation, s, def);
+    else drainOutputToBelt(nation, s, def);
+  }
+
+  // 4) 국고 표시 갱신 — 창고·수도에 실제로 든 재고의 합계
+  recomputeStock(nation);
+
+  // 5) 연구 진행
   if (nation.research && nation.research.key) {
     nation.research.ticksLeft -= 1;
     if (nation.research.ticksLeft <= 0) {

@@ -57,7 +57,13 @@ export const submitInitNation = onCall(async (request) => {
     throw new HttpsError('invalid-argument', '좌표가 필요합니다');
   }
   const safeName = (name || '이름없는 국가').toString().slice(0, 16);
-  const nation = createNation(uid, safeName, color || '#d98e34', Math.round(x), Math.round(y));
+  let nation;
+  try {
+    // 수도 입지 요건(주변 영토에 숲·채석장)을 서버에서도 다시 검증한다
+    nation = createNation(uid, safeName, color || '#d98e34', Math.round(x), Math.round(y));
+  } catch (e) {
+    return { error: e.message || '이 위치에는 수도를 세울 수 없습니다' };
+  }
   await saveNation(uid, nation);
   return { ok: true, existed: false };
 });

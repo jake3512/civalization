@@ -8,7 +8,8 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE } from './data.js';
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES,
+         VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -47,11 +48,120 @@ export function getTerritoryRadius(structKey, level) {
   return def.territoryRadius + (level - 1);
 }
 
+// ============================================================
+// 보관(창고/수도) — 국고 표시는 "실제로 창고·수도에 든 자원의 합계"다.
+// 생산물은 구조물 산출 인벤토리에 쌓이고, 벨트나 수동 이송으로 창고까지
+// 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
+// (골드·전력은 실물이 아니라서 창고를 거치지 않고 nation.resources에 직접 둔다)
+// ============================================================
+
+/** 자원을 보관할 수 있는 구조물(창고·수도) 목록 */
+export function storageStructures(nation) {
+  return nation.structures.filter(s => STRUCTURES[s.key]?.storageCapacity > 0);
+}
+
+/** 보관 구조물이 현재 담고 있는 총량 */
+export function storedTotal(s) {
+  return Object.values(s.store || {}).reduce((a, b) => a + b, 0);
+}
+
+/** 보관 구조물에 res를 amt만큼 넣을 때 실제로 들어갈 수 있는 양 */
+export function acceptableAmount(s, res, amt) {
+  const def = STRUCTURES[s.key];
+  if (!def || !def.storageCapacity) return 0;
+  if (VIRTUAL_RESOURCES.has(res)) return 0;
+  s.store = s.store || {};
+  // 창고는 한 종류만 — 이미 다른 자원이 들어 있으면 받지 않는다
+  if (def.singleResource) {
+    const keys = Object.keys(s.store).filter(k => s.store[k] > 0);
+    if (keys.length && keys[0] !== res) return 0;
+  }
+  const room = getStorageCapacity(s.key, s.level) - storedTotal(s);
+  return Math.max(0, Math.min(amt, room));
+}
+
+/** 보관 구조물에 넣는다. 실제로 들어간 양을 반환 */
+export function depositInto(s, res, amt) {
+  const take = acceptableAmount(s, res, amt);
+  if (take <= 0) return 0;
+  s.store = s.store || {};
+  s.store[res] = (s.store[res] || 0) + take;
+  return take;
+}
+
+/** 보관 구조물에서 빼낸다. 실제로 빠진 양을 반환 */
+export function withdrawFrom(s, res, amt) {
+  s.store = s.store || {};
+  const take = Math.max(0, Math.min(amt, s.store[res] || 0));
+  if (take <= 0) return 0;
+  s.store[res] -= take;
+  if (s.store[res] <= 0) delete s.store[res]; // 비면 창고 종류가 풀린다
+  return take;
+}
+
+/** 국가 전체 보관량 (창고 + 수도) */
+export function totalStock(nation, res) {
+  return storageStructures(nation).reduce((sum, s) => sum + ((s.store && s.store[res]) || 0), 0);
+}
+
+/** 아무 창고에나 넣어본다 (남은 공간이 있는 곳부터). 들어간 양을 반환 */
+export function depositAnywhere(nation, res, amt) {
+  let left = amt;
+  // 이미 같은 자원을 담고 있는 곳 → 빈 창고 → 수도 순으로 채운다
+  const targets = storageStructures(nation).sort((a, b) => {
+    const aHas = (a.store && a.store[res]) ? 0 : 1;
+    const bHas = (b.store && b.store[res]) ? 0 : 1;
+    return aHas - bHas;
+  });
+  for (const s of targets) {
+    if (left <= 0) break;
+    left -= depositInto(s, res, left);
+  }
+  return amt - left;
+}
+
+/** 창고들에서 res를 amt만큼 꺼낸다. 실제로 꺼낸 양을 반환 */
+export function withdrawAnywhere(nation, res, amt) {
+  let left = amt;
+  for (const s of storageStructures(nation)) {
+    if (left <= 0) break;
+    left -= withdrawFrom(s, res, left);
+  }
+  return amt - left;
+}
+
+/**
+ * 상단 국고 표시용 집계. 실물 자원은 창고·수도에 든 양을 그대로 합산해
+ * nation.resources에 반영하고, 골드·전력은 기존 값을 유지한다.
+ */
+export function recomputeStock(nation) {
+  const next = {};
+  for (const key of VIRTUAL_RESOURCES) {
+    if (nation.resources[key]) next[key] = nation.resources[key];
+  }
+  for (const s of storageStructures(nation)) {
+    for (const [res, amt] of Object.entries(s.store || {})) {
+      if (amt > 0) next[res] = (next[res] || 0) + amt;
+    }
+  }
+  nation.resources = next;
+}
+
 function canAfford(nation, cost) {
-  return Object.entries(cost).every(([res, amt]) => (nation.resources[res] || 0) >= amt);
+  return Object.entries(cost).every(([res, amt]) => {
+    if (VIRTUAL_RESOURCES.has(res)) return (nation.resources[res] || 0) >= amt;
+    return totalStock(nation, res) >= amt;
+  });
 }
 function pay(nation, cost) {
-  for (const [res, amt] of Object.entries(cost)) nation.resources[res] = (nation.resources[res] || 0) - amt;
+  for (const [res, amt] of Object.entries(cost)) {
+    if (VIRTUAL_RESOURCES.has(res)) {
+      nation.resources[res] = (nation.resources[res] || 0) - amt;
+    } else {
+      withdrawAnywhere(nation, res, amt); // 실물은 창고에서 실제로 빠진다
+    }
+  }
+  recomputeStock(nation);
 }
 
 function addTerritory(nation, cx, cy, radius) {
@@ -68,10 +178,84 @@ function addTerritory(nation, cx, cy, radius) {
 }
 
 /**
- * 구조물 건설. dir(0~3)은 벨트 전용 방향.
- * 성공 시 { ok:true, structure }, 실패 시 { ok:false, error }.
+ * 수도 후보 자리를 평가한다. 수도가 만들어낼 초기 영토(반경) 안에
+ * CAPITAL_REQUIRED_NODES의 자원 노드가 각각 최소 1개씩 있어야 한다.
+ * 건국 화면에서 실시간 미리보기로도 쓰이므로 nation 없이 좌표만으로 판정한다.
+ * returns { ok, found:Set, missing:string[], radius, center:[cx,cy] }
  */
-export function build(nation, structKey, x, y, dir = 0) {
+export function capitalSiteReport(x, y) {
+  const def = STRUCTURES.capital;
+  const [cx, cy] = footprintCenter(x, y, def.footprint);
+  const radius = getTerritoryRadius('capital', 1);
+  const found = new Set();
+
+  const y0 = Math.floor(cy - radius), y1 = Math.ceil(cy + radius);
+  const x0 = Math.floor(cx - radius), x1 = Math.ceil(cx + radius);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (Math.hypot(tx - cx, ty - cy) > radius) continue;
+      const terrain = getTile(tx, ty).terrain;
+      if (CAPITAL_REQUIRED_NODES.includes(terrain)) found.add(terrain);
+    }
+  }
+  const missing = CAPITAL_REQUIRED_NODES.filter(k => !found.has(k));
+  return { ok: missing.length === 0, found, missing, radius, center: [cx, cy] };
+}
+
+/**
+ * 사각 영역 안에서 수도를 세울 수 있는 칸들을 찾는다 (건국 화면의 후보지 표시용).
+ * 칸마다 capitalSiteReport를 돌리면 (칸 수 × 반경 원) 만큼 지형을 다시 계산해 느리므로,
+ * 필요한 자원 노드 위치만 한 번 모아두고 각 후보와의 거리만 비교한다.
+ */
+export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
+  const def = STRUCTURES.capital;
+  const radius = getTerritoryRadius('capital', 1);
+  const pad = Math.ceil(radius) + 2; // 화면 밖 노드도 후보의 영토에 들어올 수 있다
+
+  const nodes = {};
+  for (const k of CAPITAL_REQUIRED_NODES) nodes[k] = [];
+  for (let y = y0 - pad; y <= y1 + pad; y++) {
+    for (let x = x0 - pad; x <= x1 + pad; x++) {
+      const t = getTile(x, y).terrain;
+      if (nodes[t]) nodes[t].push([x, y]);
+    }
+  }
+
+  const sites = [];
+  for (let y = y0; y <= y1 && sites.length < limit; y++) {
+    for (let x = x0; x <= x1 && sites.length < limit; x++) {
+      const [cx, cy] = footprintCenter(x, y, def.footprint);
+      const all = CAPITAL_REQUIRED_NODES.every(k =>
+        nodes[k].some(([nx, ny]) => Math.hypot(nx - cx, ny - cy) <= radius));
+      if (all) sites.push([x, y]);
+    }
+  }
+  return sites;
+}
+
+/**
+ * 시작 지점에서 바깥으로 나선형으로 훑어 가장 가까운 유효 수도 자리를 찾는다.
+ * ("추천 위치" 버튼 — 조건을 만족하는 칸이 7% 정도뿐이라 맨손 탐색은 번거롭다)
+ */
+export function findNearestCapitalSite(startX, startY, maxRadius = 60) {
+  for (let r = 0; r <= maxRadius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // 링의 테두리만
+        const x = startX + dx, y = startY + dy;
+        if (capitalSiteReport(x, y).ok) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 건설 가능 여부만 검사하는 순수 함수 (상태를 바꾸지 않는다).
+ * build()와 건설 미리보기(고스트) 양쪽에서 같은 규칙을 공유하기 위해 분리했다.
+ * 성공 시 { ok:true }, 실패 시 { ok:false, error }.
+ */
+export function validatePlacement(nation, structKey, x, y) {
   const def = STRUCTURES[structKey];
   if (!def) return { ok: false, error: '알 수 없는 구조물' };
   if (!nation.unlocked.has(structKey)) return { ok: false, error: '연구소에서 아직 해금되지 않았습니다' };
@@ -84,6 +268,11 @@ export function build(nation, structKey, x, y, dir = 0) {
     // 수도는 스스로 영토를 만들어내는 시작점이라, 기존 영토 안에 있을 필요가 없다.
     const clear = footprintTiles(x, y, def.footprint).every(([tx, ty]) => !structureAt(nation, tx, ty));
     if (!clear) return { ok: false, error: '이 위치에는 건설할 수 없습니다 (이미 점유됨)' };
+    const site = capitalSiteReport(x, y);
+    if (!site.ok) {
+      const names = site.missing.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+      return { ok: false, error: `수도 주변 영토에 ${names}이(가) 없습니다` };
+    }
   } else if (!isAreaFree(nation, x, y, def.footprint)) {
     return { ok: false, error: '이 위치에는 건설할 수 없습니다 (영토 밖이거나 이미 점유됨)' };
   }
@@ -91,7 +280,8 @@ export function build(nation, structKey, x, y, dir = 0) {
   if (def.requiresNode) {
     const t = getTile(x, y);
     if (!def.requiresNode.includes(t.terrain)) {
-      return { ok: false, error: `이 구조물은 [${def.requiresNode.join(', ')}] 지형 위에만 설치할 수 있습니다` };
+      const names = def.requiresNode.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+      return { ok: false, error: `이 구조물은 [${names}] 지형 위에만 설치할 수 있습니다` };
     }
   }
   if (def.requiresAdjacent === 'water') {
@@ -99,12 +289,25 @@ export function build(nation, structKey, x, y, dir = 0) {
     if (!isAdjacentToWater(x, y, w, h)) return { ok: false, error: '농지는 물(강/호수) 옆에만 설치할 수 있습니다' };
   }
   if (!canAfford(nation, def.baseCost)) return { ok: false, error: '자원이 부족합니다' };
+  return { ok: true };
+}
+
+/**
+ * 구조물 건설. dir(0~3)은 벨트 전용 방향.
+ * 성공 시 { ok:true, structure }, 실패 시 { ok:false, error }.
+ */
+export function build(nation, structKey, x, y, dir = 0) {
+  const check = validatePlacement(nation, structKey, x, y);
+  if (!check.ok) return check;
+  const def = STRUCTURES[structKey];
 
   pay(nation, def.baseCost);
   const structure = {
     id: nation.nextStructId++, key: structKey, x, y, level: 1,
     recipe: null, dir: structKey === 'belt' ? dir : undefined,
-    inputBuffer: {}, idle: false,
+    inputBuffer: {}, outputBuffer: {}, idle: false,
+    // 보관 구조물(창고·수도)만 실제 재고를 담는다
+    store: def.storageCapacity ? {} : undefined,
     recruitQueue: structKey === 'outpost' ? [] : undefined,
   };
   nation.structures.push(structure);
@@ -140,6 +343,121 @@ export function setRecipe(nation, structId, recipeKey) {
   if (!def.recipes || !def.recipes[recipeKey]) return { ok: false, error: '올바르지 않은 레시피' };
   s.recipe = recipeKey;
   return { ok: true, structure: s };
+}
+
+// ============================================================
+// 수동 조작 — 전력이 없거나 벨트가 없어도 손으로 돌릴 수 있게 해주는 장치
+// ============================================================
+
+/**
+ * 구조물의 산출 인벤토리에서 res를 꺼내 창고(수도 포함)로 손으로 옮긴다.
+ * 벨트를 깔기 전이나 벨트가 끊겼을 때 쓰는 수단.
+ */
+export function manualMoveToStorage(nation, structId, res, amount = LOGISTICS.manualTransfer) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  s.outputBuffer = s.outputBuffer || {};
+  const have = s.outputBuffer[res] || 0;
+  if (have <= 0) return { ok: false, error: '옮길 자원이 없습니다' };
+
+  const moved = depositAnywhere(nation, res, Math.min(amount, have));
+  if (moved <= 0) return { ok: false, error: '창고에 빈 공간이 없습니다 (창고를 더 짓거나 종류를 비워주세요)' };
+  s.outputBuffer[res] -= moved;
+  if (s.outputBuffer[res] <= 0) delete s.outputBuffer[res];
+  recomputeStock(nation);
+  return { ok: true, moved };
+}
+
+/**
+ * 창고에서 자원을 꺼내 구조물의 투입 버퍼로 손으로 넣는다.
+ * (레시피 재료를 벨트 없이 직접 공급하는 수단)
+ */
+export function manualMoveToStructure(nation, structId, res, amount = LOGISTICS.manualTransfer) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  s.inputBuffer = s.inputBuffer || {};
+
+  const room = LOGISTICS.inputCapacity - (s.inputBuffer[res] || 0);
+  if (room <= 0) return { ok: false, error: '투입 버퍼가 가득 찼습니다' };
+  const moved = withdrawAnywhere(nation, res, Math.min(amount, room));
+  if (moved <= 0) return { ok: false, error: '창고에 해당 자원이 없습니다' };
+  s.inputBuffer[res] = (s.inputBuffer[res] || 0) + moved;
+  recomputeStock(nation);
+  return { ok: true, moved };
+}
+
+/** 창고에 든 자원을 다른 창고로 옮긴다 (종류 정리용) */
+export function manualMoveBetweenStorages(nation, fromId, toId, res, amount = LOGISTICS.manualTransfer) {
+  const from = nation.structures.find(st => st.id === fromId);
+  const to = nation.structures.find(st => st.id === toId);
+  if (!from || !to) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  const take = Math.min(amount, (from.store && from.store[res]) || 0);
+  if (take <= 0) return { ok: false, error: '옮길 자원이 없습니다' };
+  const accepted = acceptableAmount(to, res, take);
+  if (accepted <= 0) return { ok: false, error: '대상 창고가 이 자원을 받을 수 없습니다' };
+  withdrawFrom(from, res, accepted);
+  depositInto(to, res, accepted);
+  recomputeStock(nation);
+  return { ok: true, moved: accepted };
+}
+
+/**
+ * 수동 운용 — 전력이 없어도 버튼을 누르고 있는 동안 1사이클씩 직접 돌린다.
+ * 생산량은 LOGISTICS.manualOperateRate 배율이 적용되고(사람 손이라 느리다),
+ * 산출 인벤토리가 가득 찼거나 재료가 없으면 실패한다.
+ */
+export function manualOperate(nation, structId) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  const def = STRUCTURES[s.key];
+  if (!def) return { ok: false, error: '알 수 없는 구조물' };
+  if (def.category !== 'extraction' && def.category !== 'production') {
+    return { ok: false, error: '수동으로 운용할 수 있는 구조물이 아닙니다' };
+  }
+
+  const rate = LOGISTICS.manualOperateRate;
+  const cap = getOutputCapacity(s.key, s.level);
+  s.outputBuffer = s.outputBuffer || {};
+  s.inputBuffer = s.inputBuffer || {};
+  const outUsed = Object.values(s.outputBuffer).reduce((a, b) => a + b, 0);
+  const room = cap - outUsed;
+  if (room <= 0) return { ok: false, error: '산출 인벤토리가 가득 찼습니다' };
+
+  if (def.category === 'extraction') {
+    const t = getTile(s.x, s.y);
+    if (!t.node) return { ok: false, error: '자원 노드가 없습니다' };
+    const amt = Math.max(1, Math.floor(def.baseProduction * s.level * rate));
+    const add = Math.min(amt, room);
+    s.outputBuffer[t.node.yields] = (s.outputBuffer[t.node.yields] || 0) + add;
+    return { ok: true, produced: { [t.node.yields]: add } };
+  }
+
+  // 가공 구조물 — 레시피 재료를 투입 버퍼에서 소모한다
+  if (s.key === 'farm' || s.key === 'barn') {
+    const res = s.key === 'farm' ? 'food' : 'livestock';
+    const amt = Math.max(1, Math.floor(def.baseProduction * s.level * rate));
+    const add = Math.min(amt, room);
+    s.outputBuffer[res] = (s.outputBuffer[res] || 0) + add;
+    return { ok: true, produced: { [res]: add } };
+  }
+  if (!def.recipes || !s.recipe) return { ok: false, error: '레시피를 먼저 선택하세요' };
+  const r = def.recipes[s.recipe];
+  const need = {};
+  for (const [res, amt] of Object.entries(r.in)) need[res] = amt * s.level;
+  const lacking = Object.entries(need).find(([res, amt]) => (s.inputBuffer[res] || 0) < amt);
+  if (lacking) return { ok: false, error: `재료가 부족합니다 (${lacking[0]})` };
+
+  for (const [res, amt] of Object.entries(need)) s.inputBuffer[res] -= amt;
+  const produced = {};
+  const outs = typeof r.out === 'number' ? { [s.recipe]: r.out } : r.out;
+  for (const [res, amt] of Object.entries(outs)) {
+    const add = Math.min(Math.max(1, Math.floor(amt * s.level * rate)), cap - Object.values(s.outputBuffer).reduce((a, b) => a + b, 0));
+    if (add > 0) {
+      s.outputBuffer[res] = (s.outputBuffer[res] || 0) + add;
+      produced[res] = add;
+    }
+  }
+  return { ok: true, produced };
 }
 
 /**
@@ -203,16 +521,29 @@ export function applyRaidResult(attacker, defender, raidResult, now = Date.now()
   const win = !!raidResult.perfectVictory || destructionPercent >= BATTLE.winDestructionPct;
   const { loot } = raidResult;
 
+  // 약탈은 실제 재고를 옮긴다. 실물 자원은 창고·수도에서 빼내 공격자 창고에 넣고,
+  // 골드 같은 비물질 자원만 수치로 주고받는다. (nation.resources는 창고 합계라서
+  // 여기에 직접 써 봐야 다음 틱의 recomputeStock에서 덮어써진다)
   const appliedLoot = {};
-  for (const [res, amt] of Object.entries(loot || {})) {
-    const have = defender.resources[res] || 0;
-    const take = Math.max(0, Math.min(have, Math.floor(amt)));
-    if (take > 0) appliedLoot[res] = take;
+  for (const [res, rawAmt] of Object.entries(loot || {})) {
+    const want = Math.max(0, Math.floor(Number(rawAmt) || 0));
+    if (want <= 0) continue;
+    if (VIRTUAL_RESOURCES.has(res)) {
+      const take = Math.min(want, defender.resources[res] || 0);
+      if (take <= 0) continue;
+      defender.resources[res] -= take;
+      attacker.resources[res] = (attacker.resources[res] || 0) + take;
+      appliedLoot[res] = take;
+      continue;
+    }
+    const taken = withdrawAnywhere(defender, res, Math.min(want, totalStock(defender, res)));
+    if (taken <= 0) continue;
+    const stored = depositAnywhere(attacker, res, taken);
+    // 공격자 창고가 가득 차 못 받은 몫은 그대로 소실된다(전장에 버려진 것으로 본다)
+    appliedLoot[res] = stored;
   }
-  for (const [res, amt] of Object.entries(appliedLoot)) {
-    defender.resources[res] = Math.max(0, (defender.resources[res] || 0) - amt);
-    attacker.resources[res] = (attacker.resources[res] || 0) + amt;
-  }
+  recomputeStock(defender);
+  recomputeStock(attacker);
 
   const { attackerTrophyDelta, defenderTrophyDelta } = tradeTrophies(win, attacker.trophies || 0, defender.trophies || 0);
   attacker.trophies = Math.max(0, (attacker.trophies || 0) + attackerTrophyDelta);
