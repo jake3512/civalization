@@ -780,17 +780,140 @@ export function applyRaidResult(attacker, defender, raidResult, now = Date.now()
   defender.trophies = Math.max(0, (defender.trophies || 0) + defenderTrophyDelta);
 
   // 배치했던 공격 유닛은 생존 여부와 무관하게 소모된다 (다시 모집해야 함)
-  attacker.units = attacker.units || { attack: {}, defense: {} };
-  for (const [key, rawCount] of Object.entries(raidResult.deployedUnits || {})) {
-    if (!UNITS.attack[key]) continue;
-    const count = Math.max(0, Math.floor(Number(rawCount) || 0));
-    attacker.units.attack[key] = Math.max(0, (attacker.units.attack[key] || 0) - count);
-  }
+  consumeDeployedUnits(attacker, raidResult.deployedUnits);
 
   attacker.shieldUntil = 0;                          // 공격하면 자신의 실드는 즉시 해제
   defender.shieldUntil = now + WAR.postAttackShieldMs; // 공격당한 쪽은 새 실드를 얻는다 (연쇄 공격 방지)
 
   return { win, destructionPercent, loot: appliedLoot, attackerTrophyDelta, defenderTrophyDelta };
+}
+
+/** 배치했던 공격 유닛을 로스터에서 뺀다 (생존 여부와 무관하게 소모) */
+function consumeDeployedUnits(attacker, deployedUnits) {
+  attacker.units = attacker.units || { attack: {}, defense: {} };
+  for (const [key, rawCount] of Object.entries(deployedUnits || {})) {
+    if (!UNITS.attack[key]) continue;
+    const count = Math.max(0, Math.floor(Number(rawCount) || 0));
+    attacker.units.attack[key] = Math.max(0, (attacker.units.attack[key] || 0) - count);
+  }
+}
+
+// ============================================================
+// 비동기 습격 (양쪽이 같은 순간에 접속해 있지 않은 멀티플레이)
+//
+// applyRaidResult는 공격자와 방어자 객체가 **둘 다 메모리에 있을 때** 쓴다
+// (로컬 플레이 / Cloud Functions 서버). 실제 멀티플레이에서는 방어자가
+// 접속해 있지 않을 수 있어서, 공격자가 자기 몫을 먼저 반영하고 "습격 리포트"를
+// 남기면, 방어자가 다음에 접속했을 때 자기 몫을 반영한다.
+//
+// 그래서 아래 두 함수는 applyRaidResult를 반으로 쪼갠 것이다:
+//   applyRaidToAttacker — 약탈품 획득 · 유닛 소모 · 트로피 · 실드 해제
+//   applyRaidToDefender — 약탈 손실 · 트로피 · 실드 획득 (리포트 id로 멱등)
+//
+// 방어자는 공격자가 보낸 숫자를 그대로 믿지 않는다. 파괴율에서 승패를 다시
+// 계산하고, 트로피 변동은 규칙상 가능한 범위로 자르고, 약탈은 지금 실제로
+// 가진 재고까지만 빠진다. 즉 조작된 리포트로 뺏을 수 있는 최대치는
+// "정직하게 완승했을 때"와 같다.
+// ============================================================
+
+/** 습격 리포트를 만든다 (공격자가 전투를 끝낸 직후). 그대로 직렬화해 전송한다. */
+export function buildRaidReport(attacker, defenderSnapshot, session, now = Date.now()) {
+  const result = session.result || {};
+  const destructionPercent = Math.max(0, Math.min(1, Number(result.destructionPercent) || 0));
+  const win = !!result.perfectVictory || destructionPercent >= BATTLE.winDestructionPct;
+  const { attackerTrophyDelta, defenderTrophyDelta } =
+    tradeTrophies(win, attacker.trophies || 0, defenderSnapshot.trophies || 0);
+  return {
+    id: `${attacker.id}_${now}_${Math.floor(Math.random() * 1e6)}`,
+    attackerId: attacker.id, attackerName: attacker.name, attackerColor: attacker.color,
+    defenderId: defenderSnapshot.id, defenderName: defenderSnapshot.name,
+    win, destructionPercent, perfectVictory: !!result.perfectVictory,
+    loot: { ...(result.loot || {}) },
+    deployedUnits: { ...(result.deployedUnits || {}) },
+    attackerTrophyDelta, defenderTrophyDelta,
+    // 방어자가 "어떻게 뚫렸는지" 그대로 재생해 볼 수 있는 기록 (battle.js).
+    // 무대가 된 기지 배치도 같이 담는다 — 그 뒤에 기지를 고쳐도 그때 그대로 재생된다.
+    replay: {
+      seed: session.seed,
+      deploys: (session.deployLog || []).map(d => ({ ...d })),
+      base: {
+        id: defenderSnapshot.id, name: defenderSnapshot.name, color: defenderSnapshot.color,
+        capital: defenderSnapshot.capital,
+        territory: Array.from(defenderSnapshot.territory || []),
+        structures: (defenderSnapshot.structures || []).map(s => ({ ...s })),
+        units: { defense: { ...((defenderSnapshot.units && defenderSnapshot.units.defense) || {}) } },
+      },
+    },
+    timestamp: now,
+  };
+}
+
+/** 공격자 쪽 반영 — 약탈품을 창고에 넣고, 배치한 유닛을 소모하고, 트로피를 받는다. */
+export function applyRaidToAttacker(attacker, report, now = Date.now()) {
+  const gained = {};
+  for (const [res, rawAmt] of Object.entries(report.loot || {})) {
+    const want = Math.max(0, Math.floor(Number(rawAmt) || 0));
+    if (want <= 0) continue;
+    if (VIRTUAL_RESOURCES.has(res)) {
+      attacker.resources[res] = (attacker.resources[res] || 0) + want;
+      gained[res] = want;
+      continue;
+    }
+    const stored = depositAnywhere(attacker, res, want);   // 창고가 모자라면 그만큼만 받는다
+    if (stored > 0) gained[res] = stored;
+  }
+  recomputeStock(attacker);
+  consumeDeployedUnits(attacker, report.deployedUnits);
+  attacker.trophies = Math.max(0, (attacker.trophies || 0) + (report.attackerTrophyDelta || 0));
+  attacker.shieldUntil = 0;                                 // 공격하면 내 실드는 사라진다
+  attacker.raidsSent = (attacker.raidsSent || 0) + 1;
+  return { gained };
+}
+
+/**
+ * 방어자 쪽 반영 — 같은 리포트를 두 번 받아도 한 번만 적용된다(멱등).
+ * 이미 반영한 리포트 id는 nation.seenRaids에 남는다.
+ */
+export function applyRaidToDefender(defender, report, now = Date.now()) {
+  defender.seenRaids = defender.seenRaids || [];
+  if (report.id && defender.seenRaids.includes(report.id)) return { applied: false, lost: {} };
+
+  // 승패는 파괴율에서 다시 계산한다 (공격자가 보낸 win 값을 믿지 않는다)
+  const destructionPercent = Math.max(0, Math.min(1, Number(report.destructionPercent) || 0));
+  const win = !!report.perfectVictory || destructionPercent >= BATTLE.winDestructionPct;
+
+  // 약탈 상한도 파괴율에서 다시 계산한다. 공격자가 부풀린 숫자를 보내도
+  // "그 파괴율로 가져갈 수 있는 최대치"를 넘지 못한다.
+  const lootMul = report.perfectVictory ? BATTLE.perfectVictoryLootMul : 1;
+  const maxFraction = Math.min(1, destructionPercent * BATTLE.lootRatePerHp * lootMul);
+
+  const lost = {};
+  for (const [res, rawAmt] of Object.entries(report.loot || {})) {
+    const want = Math.max(0, Math.floor(Number(rawAmt) || 0));
+    if (want <= 0) continue;
+    if (VIRTUAL_RESOURCES.has(res)) {
+      const held = defender.resources[res] || 0;
+      const take = Math.min(want, Math.floor(held * maxFraction));
+      if (take <= 0) continue;
+      defender.resources[res] -= take;
+      lost[res] = take;
+      continue;
+    }
+    const held = totalStock(defender, res);
+    const take = withdrawAnywhere(defender, res, Math.min(want, Math.floor(held * maxFraction)));
+    if (take > 0) lost[res] = take;
+  }
+  recomputeStock(defender);
+
+  // 트로피 변동도 규칙상 가능한 범위로 자른다
+  const raw = Number(report.defenderTrophyDelta) || 0;
+  const delta = win ? Math.max(-WAR.maxTrophyTrade, Math.min(0, raw)) : 0;
+  defender.trophies = Math.max(0, (defender.trophies || 0) + delta);
+  defender.shieldUntil = now + WAR.postAttackShieldMs;      // 연쇄 공격 방지
+
+  defender.seenRaids.push(report.id);
+  if (defender.seenRaids.length > 100) defender.seenRaids = defender.seenRaids.slice(-100);
+  return { applied: true, win, destructionPercent, lost, trophyDelta: delta };
 }
 
 /** 방어력: 수비 유닛 + 터렛(레벨 비례, 유휴 상태면 제외) + 방벽(레벨 비례)의 합 (전투 전 미리보기용) */
@@ -827,14 +950,42 @@ export function canAttack(attacker, defender, now = Date.now()) {
  */
 export function findMatch(myNation, candidates, now = Date.now()) {
   const myTrophies = myNation.trophies || 0;
-  const pool = candidates.filter(c =>
-    c.id !== myNation.id &&
-    !isShielded(c, now) &&
-    Math.abs((c.trophies || 0) - myTrophies) <= WAR.matchTrophyRange
-  );
-  if (!pool.length) return null;
-  pool.sort((a, b) => Math.abs((a.trophies || 0) - myTrophies) - Math.abs((b.trophies || 0) - myTrophies));
+  const attackable = candidates.filter(c => c.id !== myNation.id && !isShielded(c, now));
+  if (!attackable.length) return null;
+
+  const byTrophyGap = (a, b) =>
+    Math.abs((a.trophies || 0) - myTrophies) - Math.abs((b.trophies || 0) - myTrophies);
+
+  // 트로피가 비슷한 상대가 우선이지만, 접속자가 적을 때는 범위를 넘겨서라도
+  // 붙여준다. 상대가 분명히 있는데 "찾을 수 없다"고 하면 전쟁 자체가 막힌다.
+  const inRange = attackable.filter(c => Math.abs((c.trophies || 0) - myTrophies) <= WAR.matchTrophyRange);
+  const pool = (inRange.length ? inRange : attackable).sort(byTrophyGap);
   // 가장 비슷한 후보 몇 명 중 무작위로 하나 선택 (매번 같은 상대만 나오지 않도록)
   const topPool = pool.slice(0, Math.min(5, pool.length));
   return topPool[Math.floor(Math.random() * topPool.length)];
+}
+
+/**
+ * 다른 플레이어에게 공개하는 국가 스냅샷.
+ * 공격자가 이걸 그대로 battle.js에 넣어 전투를 돌리므로, 방어에 필요한 것만
+ * 담는다 — 기지 배치(구조물·영토), 수비 로스터, 약탈 대상이 되는 재고, 트로피.
+ * 연구 진행이나 레시피 같은 내정 정보는 넘기지 않는다.
+ */
+export function defenseSnapshot(nation, now = Date.now()) {
+  return {
+    id: nation.id,
+    name: nation.name,
+    color: nation.color,
+    capital: nation.capital,
+    trophies: nation.trophies || 0,
+    shieldUntil: nation.shieldUntil || 0,
+    territory: Array.from(nation.territory || []),
+    structures: (nation.structures || []).map(s => ({
+      id: s.id, key: s.key, x: s.x, y: s.y, level: s.level, dir: s.dir || 0, idle: !!s.idle,
+    })),
+    units: { defense: { ...((nation.units && nation.units.defense) || {}) } },
+    resources: { ...(nation.resources || {}) },
+    defensePower: getDefensePower(nation),
+    updatedAt: now,
+  };
 }

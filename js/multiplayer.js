@@ -65,6 +65,14 @@ export async function initFirebase() {
 export function getUid() { return uid; }
 export function isMultiplayer() { return FIREBASE_ENABLED && !!uid; }
 
+/**
+ * Firestore 핸들을 그대로 넘겨준다 (mpNet.js의 firestore 백엔드용).
+ * SDK를 두 번 import하지 않도록 여기서 만든 것을 공유한다.
+ */
+export function getFirestoreHandles() {
+  return uid && db ? { fx, db } : null;
+}
+
 // ---------------- Cloud Functions 호출 (건설/업그레이드/연구/전투) ----------------
 async function callFn(name, data) {
   if (!isMultiplayer()) return { error: '멀티플레이어(Firebase)가 연결되지 않았습니다.' };

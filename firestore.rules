@@ -2,15 +2,46 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 국가 상태는 Cloud Functions(Admin SDK)만 쓸 수 있다.
-    // Admin SDK는 보안 규칙을 우회하므로, 여기서는 "읽기만 공개 허용,
-    // 클라이언트 쓰기는 전면 금지"로 서버 권위를 강제한다.
+    // ========================================================
+    // 이 규칙은 **Cloud Functions를 아직 배포하지 않은 상태**(현재 기본값,
+    // js/firebase-config.js의 FUNCTIONS_DEPLOYED = false)에 맞춰져 있다.
+    // 이 상태에서는 클라이언트가 Firestore에 직접 붙어 전투 멀티플레이만
+    // 돌린다 (js/mpNet.js의 firestore 백엔드).
+    //
+    // Functions를 배포해 서버 권위 모드로 넘어가면, 아래 두 곳의
+    // allow write / allow create를 전부 `if false`로 바꿔라. Admin SDK는
+    // 보안 규칙을 우회하므로 서버는 그대로 쓸 수 있고, 클라이언트가 자기
+    // 자원·트로피를 직접 고치는 길만 막힌다.
+    // ========================================================
+
+    // 국가 공개 스냅샷 — 남의 기지를 공격하려면 읽을 수 있어야 한다.
+    // 쓰기는 본인 문서만, 그리고 문서 안의 id가 본인 uid일 때만 허용한다
+    // (남의 이름으로 스냅샷을 올리는 것을 막는다).
     match /nations/{uid} {
       allow read: if true;
-      allow write: if false;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.data.id == uid;
     }
 
-    // 전투 로그도 서버(Cloud Functions)만 기록한다.
+    // 습격 리포트 — 공격자가 만들고, 방어자가 읽어 자기 상태에 반영한다.
+    // 만들 수 있는 것은 "내가 공격자인 리포트"뿐이고, 한 번 쓰면 고치거나
+    // 지울 수 없다 (결과를 나중에 바꿔치기하지 못하게).
+    //
+    // 이 모드에는 심판이 없으므로 리포트 내용 자체는 방어자 클라이언트가
+    // 검증한다 (logic.js의 applyRaidToDefender — 파괴율에서 승패를 다시
+    // 계산하고, 트로피 변동을 규칙 범위로 자르고, 약탈은 실제 재고까지만).
+    match /raids/{raidId} {
+      allow read: if request.auth != null
+                  && (resource.data.defenderId == request.auth.uid
+                      || resource.data.attackerId == request.auth.uid);
+      allow create: if request.auth != null
+                    && request.resource.data.attackerId == request.auth.uid
+                    && request.resource.data.defenderId != request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // 전투 로그(서버 권위 모드에서 Cloud Functions가 기록한다)
     match /battles/{battleId} {
       allow read: if true;
       allow write: if false;

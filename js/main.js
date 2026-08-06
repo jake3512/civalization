@@ -11,15 +11,18 @@ import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WA
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
-import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
+import { createBattleSession, createReplaySession, deployUnit, stepBattle, stepReplay,
+         retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
          storedTotal, totalStock, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage, buriedNodes, canDemolish } from './logic.js';
+         hasGood, sellFromStorage, buriedNodes, canDemolish,
+         defenseSnapshot, buildRaidReport, applyRaidToAttacker, applyRaidToDefender, canAttack } from './logic.js';
 import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
+import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS } from './mpNet.js';
 import {
-  initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
+  initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
   callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish, callRotate,
 } from './multiplayer.js';
@@ -40,6 +43,15 @@ const renderer = new Renderer(canvas, game);
 
 const battleCanvas = document.getElementById('battle-field');
 const battleRenderer = new BattleRenderer(battleCanvas);
+
+// 다른 플레이어가 정한 문자열(국가 이름·색)은 그대로 innerHTML에 넣으면 안 된다.
+// 멀티플레이가 붙은 뒤로 화면에 남의 입력이 섞이므로 여기서 한 번 걸러 쓴다.
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const safeColor = (c) => (/^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '#888888');
+/** 자원 이름만 뽑아 쓰는 헬퍼 (아이콘 태그를 못 쓰는 자리 — flashMessage 등) */
+const resNames = (obj) => Object.entries(obj || {})
+  .map(([r, a]) => `${RESOURCES[r]?.name || r} ${a}`).join(', ');
 
 // 자원/상태 아이콘을 <img> 태그로 뽑아주는 헬퍼 (이모지 대신 assets/icons/*.svg 사용)
 const resIcon = (key) => `<img class="ic" src="${RESOURCES[key]?.icon || ''}" alt="${RESOURCES[key]?.name || key}">`;
@@ -127,11 +139,11 @@ document.getElementById('placement-confirm').addEventListener('click', () => {
 
 async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
+  const mode = pickMode();
 
-  if (!FUNCTIONS_DEPLOYED) {
-    statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (Cloud Functions 미배포)';
-    return; // Functions 배포 전에는 Firebase 연결 자체를 시도하지 않는다 (안전한 폴백)
-  }
+  // Cloud Functions가 배포돼 있으면 예전처럼 서버 권위 모드로 간다.
+  // 아니면 mpNet의 local/firestore 백엔드로 전투 멀티플레이만 켠다.
+  if (mode !== NET_MODE.FUNCTIONS) return startCombatNet(mode, statusEl);
 
   const ok = await initFirebase();
   if (!ok) { statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (firebase-config.js 미설정)'; return; }
@@ -153,6 +165,96 @@ async function initMultiplayer(name, color, cx, cy) {
     renderWarPanel(list);
   });
   watchBattles(renderBattleLog);
+}
+
+// ============================================================
+// 전투 멀티플레이 (mpNet)
+//
+// Cloud Functions 없이도 다른 플레이어와 싸울 수 있게 하는 경로다.
+//   1) 내 기지 스냅샷을 주기적으로 올린다 (defenseSnapshot)
+//   2) 다른 플레이어 스냅샷 목록을 받아 매치메이킹에 쓴다
+//   3) 공격은 내 브라우저에서 스냅샷 상대로 시뮬레이션하고(battle.js),
+//      결과를 습격 리포트로 상대 앞에 남긴다
+//   4) 나를 공격한 리포트가 오면 방어 측 반영(applyRaidToDefender)을 하고
+//      알림 + 리플레이를 띄운다
+// ============================================================
+let net = null;                 // 전송 계층 (mpNet)
+let netMode = null;
+let peers = [];                 // 다른 플레이어 국가 스냅샷
+let defenseReports = [];        // 나를 공격한 리포트 (최근 것 먼저)
+let attackReports = [];         // 내가 보낸 습격 (최근 것 먼저)
+let publishTimer = null;
+
+async function startCombatNet(mode, statusEl) {
+  let handles = null;
+  if (mode === NET_MODE.FIRESTORE) {
+    const ok = await initFirebase();
+    handles = ok ? getFirestoreHandles() : null;
+    if (handles) {
+      // 습격 리포트는 국가 id로 주고받으므로 로그인 uid를 그대로 쓴다
+      game.myNation.id = getUid();
+    } else {
+      mode = NET_MODE.LOCAL;    // Firebase 연결 실패 → 같은 기기 대전으로 폴백
+    }
+  }
+  netMode = mode;
+  net = createNet(mode, game.myNation.id, handles);
+
+  net.watchPeers((list) => {
+    peers = list;
+    game.otherNations.clear();
+    for (const p of list) game.otherNations.set(p.id, p);
+    renderWarPanel(list);
+    updateNetStatus(statusEl);
+  });
+  net.watchRaids(handleIncomingRaid);
+
+  publishMyNation();
+  if (publishTimer) clearInterval(publishTimer);
+  publishTimer = setInterval(publishMyNation, PUBLISH_INTERVAL_MS);
+  updateNetStatus(statusEl);
+  renderWarPanel(peers);
+  renderBattleLog();
+}
+
+function updateNetStatus(statusEl) {
+  if (!statusEl || !netMode) return;
+  const on = peers.length > 0;
+  statusEl.innerHTML = `<span class="dot ${on ? 'on' : 'off'}"></span> ${MODE_LABEL[netMode]} · 상대 ${peers.length}`;
+}
+
+/** 내 기지를 다른 플레이어가 공격할 수 있도록 공개한다 */
+function publishMyNation() {
+  if (!net || !game.myNation) return;
+  const snap = defenseSnapshot(game.myNation);
+  // 지역 버킷 — 서버 권위 모드의 주변 국가 쿼리와 같은 형식을 맞춰둔다
+  snap.region = regionKey(game.myNation.capital.x, game.myNation.capital.y);
+  net.publish(snap);
+}
+
+/**
+ * 나를 공격한 습격 리포트가 도착했을 때. 같은 리포트를 여러 번 받아도
+ * applyRaidToDefender가 한 번만 반영한다(멱등).
+ */
+function handleIncomingRaid(report) {
+  if (!game.myNation || !report || report.defenderId !== game.myNation.id) return;
+  if (defenseReports.some(r => r.id === report.id)) return;
+
+  const res = applyRaidToDefender(game.myNation, report);
+  defenseReports.unshift(report);
+  defenseReports.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  if (defenseReports.length > 30) defenseReports.length = 30;
+
+  if (res.applied) {
+    // flashMessage는 textContent라 아이콘 태그를 못 쓴다 (남의 국가 이름이 섞이는 자리라 그대로 둔다)
+    flashMessage(
+      `${report.attackerName || '누군가'}의 습격! 파괴율 ${Math.round(res.destructionPercent * 100)}%`
+      + ` · 약탈당함 ${resNames(res.lost) || '없음'}`,
+      true);
+    renderResourcePanel();
+    publishMyNation();          // 줄어든 재고를 바로 반영해 다시 공개한다
+  }
+  renderBattleLog();
 }
 
 // ---------- 건설 메뉴 ----------
@@ -998,25 +1100,47 @@ function renderLabHtml() {
 let knownNations = [];  // 최근 watchNations로 받은 주변 국가 목록 (원본 데이터, 매치메이킹 소스)
 let currentMatch = null; // 현재 화면에 표시 중인 매치 후보
 
+let attackDeck = null;   // 이번 출격에 데려갈 병력 (unitKey -> 수). null이면 전군
+
 function renderWarPanel(nations) {
   knownNations = nations;
   const el = document.getElementById('war-list');
+  if (!el || !game.myNation) return;
   if (currentMatch && !nations.some(n => n.id === currentMatch.id)) currentMatch = null;
+
+  const now = Date.now();
+  const shieldLeft = Math.max(0, (game.myNation.shieldUntil || 0) - now);
+  const shieldTxt = shieldLeft > 0
+    ? `<div class="pd shield-on">내 보호막 ${Math.ceil(shieldLeft / 60000)}분 남음 — 공격하면 즉시 풀립니다</div>`
+    : `<div class="pd">내 보호막 없음 — 다른 플레이어가 나를 공격할 수 있습니다</div>`;
+
   el.innerHTML = `
-    <div class="pd">주변 국가 ${nations.length}개 발견됨</div>
+    <div class="pd">접속한 상대 ${nations.length}명 · 내 트로피 ${statusIcon('trophy')} ${game.myNation.trophies || 0}</div>
+    ${shieldTxt}
     <button id="find-match-btn" class="find-match-btn">⚔️ 상대 찾기</button>
     <div id="match-card"></div>
   `;
   document.getElementById('find-match-btn').addEventListener('click', () => {
-    if (!game.myNation) return;
-    const now = Date.now();
-    if (isShielded(game.myNation, now)) {
-      flashMessage('내 보호막이 켜져 있는 동안은 공격하면 보호막이 사라집니다. 그래도 공격할까요?', false);
+    currentMatch = findMatch(game.myNation, knownNations, Date.now());
+    attackDeck = null;
+    if (!currentMatch && knownNations.length) {
+      flashMessage('지금은 공격할 수 있는 상대가 없습니다 (전부 보호막 상태)', true);
     }
-    currentMatch = findMatch(game.myNation, knownNations, now);
     renderMatchCard();
   });
   renderMatchCard();
+}
+
+/** 출격 편성 — 데려갈 유닛 수를 정한다. 기본값은 보유 전군. */
+function currentDeck() {
+  const roster = (game.myNation.units && game.myNation.units.attack) || {};
+  if (!attackDeck) return Object.fromEntries(Object.entries(roster).filter(([, c]) => c > 0));
+  const deck = {};
+  for (const [key, count] of Object.entries(attackDeck)) {
+    const capped = Math.min(count, roster[key] || 0);
+    if (capped > 0) deck[key] = capped;
+  }
+  return deck;
 }
 
 function renderMatchCard() {
@@ -1024,75 +1148,184 @@ function renderMatchCard() {
   if (!el) return;
   if (!currentMatch) {
     el.innerHTML = knownNations.length
-      ? '<div class="pd">상대 찾기 버튼을 눌러 트로피가 비슷한 국가를 찾아보세요.</div>'
-      : '<div class="pd">아직 발견된 다른 국가가 없습니다.</div>';
+      ? '<div class="pd">상대 찾기 버튼을 눌러 트로피가 비슷한 상대를 찾아보세요.</div>'
+      : `<div class="pd">아직 접속한 상대가 없습니다.</div>
+         <div class="pd dim">${netMode === NET_MODE.LOCAL
+            ? '이 게임을 <b>새 탭에서 하나 더 열어</b> 국가를 세우면 그 국가가 상대로 잡힙니다.'
+            : '상대가 접속하면 자동으로 목록에 올라옵니다.'}</div>`;
     return;
   }
   const n = currentMatch;
-  const myAttackUnits = Object.entries((game.myNation.units && game.myNation.units.attack) || {}).filter(([, c]) => c > 0);
-  const hasArmy = myAttackUnits.length > 0;
+  const roster = (game.myNation.units && game.myNation.units.attack) || {};
+  const deck = currentDeck();
+  const total = Object.values(deck).reduce((a, b) => a + b, 0);
+  const blocked = canAttack(game.myNation, n, Date.now());
+
   el.innerHTML = `
     <div class="match-card">
       <div class="match-head">
-        <span class="dot" style="background:${n.color}"></span>
-        <span class="nm">${n.name}</span>
-        <span class="trophy">${statusIcon('trophy')} ${n.trophies || 0}</span>
+        <span class="dot" style="background:${safeColor(n.color)}"></span>
+        <span class="nm">${esc(n.name)}</span>
+        <span class="trophy">${statusIcon('trophy')} ${Number(n.trophies) || 0}</span>
       </div>
-      <div class="pd">예상 방어력 ${getDefensePower(n)} · 약탈량은 실제 파괴율에 비례합니다</div>
+      <div class="pd">기지 ${(n.structures || []).length}동 · 예상 방어력 ${n.defensePower ?? getDefensePower(n)}
+        · 약탈량은 실제 파괴율에 비례합니다</div>
+      <div class="deck-edit">
+        <div class="deck-edit-head">출격 편성 <span class="dim">${total}기</span></div>
+        ${Object.entries(roster).filter(([, c]) => c > 0).map(([key, have]) => `
+          <div class="deck-edit-row">
+            ${unitArtIcon(key, 'deck-edit-art')}
+            <span class="nm">${UNITS.attack[key]?.name || key}</span>
+            <button class="deck-minus" data-unit="${key}">−</button>
+            <span class="cnt">${deck[key] || 0}/${have}</span>
+            <button class="deck-plus" data-unit="${key}">＋</button>
+          </div>`).join('') || '<div class="pd err">공격 유닛이 없습니다 — 전초기지에서 모집하세요</div>'}
+      </div>
       <div class="match-actions">
-        <button id="attack-match-btn" class="atk-btn" ${hasArmy ? '' : 'disabled title="전초기지에서 공격 유닛을 먼저 모집하세요"'}>공격</button>
+        <button id="attack-match-btn" class="atk-btn" ${total > 0 && !blocked ? '' : `disabled title="${blocked || '데려갈 유닛을 1기 이상 골라주세요'}"`}>공격</button>
         <button id="skip-match-btn" class="skip-btn">다른 상대</button>
       </div>
+      ${blocked ? `<div class="pd err">${blocked}</div>` : ''}
     </div>`;
+
+  const bump = (key, delta) => {
+    const base = currentDeck();
+    const have = roster[key] || 0;
+    attackDeck = { ...base, [key]: Math.max(0, Math.min(have, (base[key] || 0) + delta)) };
+    renderMatchCard();
+  };
+  el.querySelectorAll('.deck-plus').forEach(b => b.addEventListener('click', () => bump(b.dataset.unit, +1)));
+  el.querySelectorAll('.deck-minus').forEach(b => b.addEventListener('click', () => bump(b.dataset.unit, -1)));
+
   document.getElementById('attack-match-btn').addEventListener('click', () => {
-    if (!hasArmy) return;
-    openBattleScreen(currentMatch);
+    if (!Object.keys(currentDeck()).length) return;
+    openBattleScreen(currentMatch, currentDeck());
   });
   document.getElementById('skip-match-btn').addEventListener('click', () => {
     currentMatch = findMatch(game.myNation, knownNations, Date.now());
+    attackDeck = null;
     renderMatchCard();
   });
 }
 
-function renderBattleLog(list) {
+/**
+ * 전투 기록. 서버 권위 모드에서는 서버가 준 battles 목록을(list 인자),
+ * mpNet 모드에서는 내가 보낸 습격 + 나를 공격한 리포트를 함께 보여준다.
+ * 방어 기록에는 **리플레이**(어떻게 뚫렸는지 다시 보기)와 **복수** 버튼이 붙는다.
+ */
+function renderBattleLog(list = null) {
   const el = document.getElementById('battle-log');
-  el.innerHTML = list.map(b => {
-    const mine = b.attackerId === game.myNation.id;
-    const outcome = b.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '승리');
-    const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (${statusIcon('trophy')}${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
-    return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
-  }).join('') || '<div class="pd">전투 기록 없음</div>';
+  if (!el || !game.myNation) return;
+
+  if (list) {   // 서버 권위 모드
+    el.innerHTML = list.map(b => {
+      const mine = b.attackerId === game.myNation.id;
+      const outcome = b.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '승리');
+      const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (${statusIcon('trophy')}${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
+      return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
+    }).join('') || '<div class="pd">전투 기록 없음</div>';
+    return;
+  }
+
+  const rows = [
+    ...attackReports.map(r => ({ r, mine: true })),
+    ...defenseReports.map(r => ({ r, mine: false })),
+  ].sort((a, b) => (b.r.timestamp || 0) - (a.r.timestamp || 0)).slice(0, 30);
+
+  if (!rows.length) { el.innerHTML = '<div class="pd">전투 기록 없음</div>'; return; }
+
+  el.innerHTML = rows.map(({ r, mine }, i) => {
+    const outcome = r.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '방어 성공');
+    const delta = mine ? r.attackerTrophyDelta : r.defenderTrophyDelta;
+    const pct = Math.round((r.destructionPercent || 0) * 100);
+    const who = mine ? `→ ${esc(r.defenderName)}` : `← ${esc(r.attackerName)}`;
+    const lootTxt = Object.entries(r.loot || {}).slice(0, 4)
+      .map(([res, a]) => `${resIcon(res)}${a}`).join(' ');
+    return `<div class="log-row ${mine ? 'atk' : 'def'}">
+      <div class="log-line">
+        <b>${mine ? '공격' : '방어'}</b> ${who} · ${outcome} ${pct}%
+        <span class="trophy">${statusIcon('trophy')}${(delta || 0) >= 0 ? '+' : ''}${delta || 0}</span>
+      </div>
+      ${lootTxt ? `<div class="log-loot">${mine ? '약탈' : '피해'} ${lootTxt}</div>` : ''}
+      <div class="log-actions">
+        ${r.replay?.deploys?.length ? `<button class="log-btn" data-replay="${i}">리플레이</button>` : ''}
+        ${!mine ? `<button class="log-btn revenge" data-revenge="${i}">복수</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-replay]').forEach(btn => btn.addEventListener('click', () => {
+    openReplayScreen(rows[Number(btn.dataset.replay)].r, rows[Number(btn.dataset.replay)].mine);
+  }));
+  el.querySelectorAll('[data-revenge]').forEach(btn => btn.addEventListener('click', () => {
+    const report = rows[Number(btn.dataset.revenge)].r;
+    const target = peers.find(p => p.id === report.attackerId);
+    if (!target) { flashMessage('상대가 접속을 끊어 지금은 복수할 수 없습니다', true); return; }
+    currentMatch = target;
+    attackDeck = null;
+    renderWarPanel(peers);
+    flashMessage(`${target.name}에게 복수 준비 — 출격 편성을 확인하세요`, false);
+  }));
 }
 
 // ---------------- 실시간 습격 전투 화면 ----------------
-// 실시간 소켓 서버가 없는 프로토타입이라, 방어자의 스냅샷(구조물·영토·병력
-// 로스터·자원)을 그대로 가져와 공격자 브라우저에서 전투 전체를 시뮬레이션한다
-// (battle.js). 서버에는 최종 결과(파괴율·약탈량)만 제출해 검증 후 반영된다.
+// 실시간 소켓 서버가 없으므로, 방어자의 스냅샷(구조물·영토·병력 로스터·자원)을
+// 그대로 가져와 공격자 브라우저에서 전투 전체를 시뮬레이션한다 (battle.js).
+// 상대가 접속해 있지 않아도 공격할 수 있고(비동기 습격), 결과는 습격 리포트로
+// 상대 앞에 남아 다음 접속 때 반영된다.
 let battleSession = null;
 let battleDeployKey = null;      // 배치 모드로 선택된 유닛 key
 let battleRafId = null;
 let battleLastTs = null;
 let battleDragging = false, battleLastX = 0, battleLastY = 0, battleDragged = false;
 let battlePinching = false, battlePinchStartDist = 0;
+let battleIsReplay = false;      // 리플레이 재생 중이면 결과를 제출하지 않는다
+let battleTargetSnapshot = null; // 이번 전투에서 싸운 상대 스냅샷
 
-function openBattleScreen(defenderSnapshot) {
+function openBattleScreen(defenderSnapshot, deck = null) {
   closeStructModal(); // 팝업이 전투 화면 위에 남지 않도록
-  const deck = { ...((game.myNation.units && game.myNation.units.attack) || {}) };
-  battleSession = createBattleSession(defenderSnapshot, deck);
+  const useDeck = deck || { ...((game.myNation.units && game.myNation.units.attack) || {}) };
+  battleSession = createBattleSession(defenderSnapshot, useDeck);
+  battleIsReplay = false;
+  battleTargetSnapshot = defenderSnapshot;
+  showBattleScreen(`습격 중: ${defenderSnapshot.name}`);
+}
+
+/**
+ * 리플레이 재생. 방어 기록에서는 "내 기지가 어떻게 뚫렸는지",
+ * 공격 기록에서는 "내가 어떻게 밀었는지"를 그대로 다시 본다.
+ * 결과는 이미 반영된 것이라 다시 제출하지 않는다.
+ */
+function openReplayScreen(report, mine) {
+  closeStructModal();
+  // 무대는 리포트에 함께 담긴 그때의 기지 배치다 (그 뒤에 기지를 고쳐도 그때 그대로 재생된다).
+  // 옛 기록이라 배치가 없으면 지금 알고 있는 기지로 대신한다.
+  const base = report.replay?.base
+    || (mine ? peers.find(p => p.id === report.defenderId) : null)
+    || defenseSnapshot(game.myNation);
+  battleSession = createReplaySession(base, report.replay);
+  battleIsReplay = true;
+  battleTargetSnapshot = base;
+  showBattleScreen(`리플레이: ${mine ? report.defenderName : report.attackerName}의 습격`);
+}
+
+function showBattleScreen(title) {
   battleDeployKey = null;
   battleLastTs = null;
 
   document.getElementById('app').classList.add('hidden');
   document.getElementById('battle-screen').classList.remove('hidden');
-  document.getElementById('battle-defender-name').textContent = defenderSnapshot.name;
+  document.getElementById('battle-defender-name').textContent = title.replace(/^[^:]*: /, '');
+  document.querySelector('.battle-title').firstChild.textContent = title.includes('리플레이') ? '리플레이: ' : '습격 중: ';
   document.getElementById('battle-result').classList.add('hidden');
-  document.getElementById('battle-hint').classList.remove('hidden');
+  document.getElementById('battle-hint').classList.toggle('hidden', battleIsReplay);
+  document.getElementById('battle-deck-tray').classList.toggle('hidden', battleIsReplay);
 
   battleRenderer.resize();
   const capital = battleSession.structures.find(s => s.key === 'capital');
   battleRenderer.centerOn(capital ? capital.cx : 0, capital ? capital.cy : 0);
 
-  renderDeckTray();
+  if (!battleIsReplay) renderDeckTray();
   if (battleRafId) cancelAnimationFrame(battleRafId);
   battleRafId = requestAnimationFrame(battleLoop);
 }
@@ -1103,7 +1336,10 @@ function battleLoop(ts) {
   const dt = Math.min(0.1, Math.max(0, (ts - battleLastTs) / 1000)); // 탭 비활성 등으로 인한 큰 시간 점프 방지
   battleLastTs = ts;
 
-  if (!battleSession.ended) stepBattle(battleSession, dt);
+  if (!battleSession.ended) {
+    if (battleIsReplay) stepReplay(battleSession, dt);
+    else stepBattle(battleSession, dt);
+  }
 
   battleRenderer.resize();
   battleRenderer.draw(battleSession);
@@ -1227,36 +1463,68 @@ async function finishBattle() {
 
   const title = document.getElementById('battle-result-title');
   const body = document.getElementById('battle-result-body');
-  title.textContent = result.win ? (result.perfectVictory ? '완벽한 승리!' : '승리') : '패배';
-  title.className = `battle-result-title ${result.win ? 'win' : 'lose'}`;
+  const closeBtn = document.getElementById('battle-result-close');
   const lootTxt = Object.entries(result.loot).map(([r, a]) => `${resIcon(r)}${a}`).join(' ') || '없음';
-  body.innerHTML = `
-    파괴율 <b>${Math.round(result.destructionPercent * 100)}%</b><br>
-    약탈(예상) ${lootTxt}<br>
-    서버에 결과를 제출하는 중...`;
-  document.getElementById('battle-result').classList.remove('hidden');
+  const pct = Math.round(result.destructionPercent * 100);
 
-  const res = await callRaidResult(defenderId, result);
-  if (res.error) {
-    body.innerHTML = `
-      파괴율 <b>${Math.round(result.destructionPercent * 100)}%</b><br>
-      약탈(예상) ${lootTxt}<br>
-      <span style="color:var(--danger)">서버 반영 실패: ${res.error}</span>`;
-  } else {
-    const trophyTxt = typeof res.trophyDelta === 'number' ? `${statusIcon('trophy')}${res.trophyDelta >= 0 ? '+' : ''}${res.trophyDelta}` : '';
-    body.innerHTML = `
-      파괴율 <b>${Math.round((res.destructionPercent ?? result.destructionPercent) * 100)}%</b><br>
-      약탈 ${lootTxt}<br>
-      트로피 ${trophyTxt}`;
-  }
-
-  document.getElementById('battle-result-close').onclick = () => {
+  closeBtn.onclick = () => {
     document.getElementById('battle-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    document.getElementById('battle-deck-tray').classList.remove('hidden');
     battleSession = null;
-    currentMatch = null;
-    renderMatchCard();
+    if (!battleIsReplay) { currentMatch = null; attackDeck = null; }
+    battleIsReplay = false;
+    renderWarPanel(peers);
+    renderBattleLog(null);
   };
+  document.getElementById('battle-result').classList.remove('hidden');
+
+  // 리플레이는 이미 끝난 전투를 다시 본 것이라 아무것도 반영하지 않는다
+  if (battleIsReplay) {
+    title.textContent = '리플레이 종료';
+    title.className = 'battle-result-title';
+    body.innerHTML = `파괴율 <b>${pct}%</b><br><span class="dim">지난 전투를 다시 본 것이라 결과는 반영되지 않습니다</span>`;
+    return;
+  }
+
+  title.textContent = result.win ? (result.perfectVictory ? '완벽한 승리!' : '승리') : '패배';
+  title.className = `battle-result-title ${result.win ? 'win' : 'lose'}`;
+  body.innerHTML = `파괴율 <b>${pct}%</b><br>약탈(예상) ${lootTxt}<br>결과를 반영하는 중...`;
+
+  // 서버 권위 모드: 예전처럼 Cloud Function이 양쪽을 다 반영한다
+  if (game.serverAuthoritative) {
+    const res = await callRaidResult(defenderId, result);
+    if (res.error) {
+      body.innerHTML = `파괴율 <b>${pct}%</b><br>약탈(예상) ${lootTxt}<br>
+        <span style="color:var(--danger)">서버 반영 실패: ${res.error}</span>`;
+    } else {
+      const trophyTxt = typeof res.trophyDelta === 'number' ? `${statusIcon('trophy')}${res.trophyDelta >= 0 ? '+' : ''}${res.trophyDelta}` : '';
+      body.innerHTML = `파괴율 <b>${Math.round((res.destructionPercent ?? result.destructionPercent) * 100)}%</b><br>
+        약탈 ${lootTxt}<br>트로피 ${trophyTxt}`;
+    }
+    return;
+  }
+
+  // mpNet 모드(local/firestore): 내 몫을 먼저 반영하고, 상대 앞으로 리포트를 남긴다.
+  // 상대가 접속해 있지 않아도 다음에 접속할 때 자기 몫을 반영한다.
+  const report = buildRaidReport(game.myNation, battleTargetSnapshot || { id: defenderId }, battleSession);
+  const { gained } = applyRaidToAttacker(game.myNation, report);
+  attackReports.unshift(report);
+  if (attackReports.length > 30) attackReports.length = 30;
+
+  let sendErr = null;
+  if (net) {
+    try { await net.sendRaid(report); } catch (e) { sendErr = e.message || '전송 실패'; }
+  }
+  publishMyNation();
+  renderResourcePanel();
+
+  const gainTxt = Object.entries(gained).map(([r, a]) => `${resIcon(r)}${a}`).join(' ') || '없음';
+  body.innerHTML = `파괴율 <b>${pct}%</b><br>
+    획득 ${gainTxt}<br>
+    트로피 ${statusIcon('trophy')}${report.attackerTrophyDelta >= 0 ? '+' : ''}${report.attackerTrophyDelta}
+    ${sendErr ? `<br><span style="color:var(--danger)">상대에게 결과 전달 실패: ${sendErr}</span>`
+              : '<br><span class="dim">상대에게 습격 기록을 남겼습니다</span>'}`;
 }
 
 // ---------- 여행(원정) 패널 ----------
@@ -1440,3 +1708,16 @@ window.addEventListener('resize', () => renderer.resize());
 window.__game = game;
 window.__showStruct = showStructPanel;
 window.__renderer = renderer;
+// 전투 멀티플레이 훅 — 두 탭이 실제로 싸우는지 자동 테스트에서 확인한다
+window.__mp = {
+  get net() { return net; },
+  get mode() { return netMode; },
+  get peers() { return peers; },
+  get session() { return battleSession; },
+  get defenseReports() { return defenseReports; },
+  get attackReports() { return attackReports; },
+  publish: publishMyNation,
+  refreshWar: () => renderWarPanel(peers),
+  deploy: (key, x, y) => deployUnit(battleSession, key, x, y),
+  endNow: () => retreatBattle(battleSession),
+};
