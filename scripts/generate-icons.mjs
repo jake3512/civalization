@@ -256,6 +256,37 @@ const resArt = {
     ${fd('M32 20 L46 12 L52 22 L46 25 V54 H36 V36 H32 Z', P.wheatD, 0.45)}
     ${fr(20, 30, 6, 12, P.darkD, 1)}${fr(38, 30, 6, 12, P.darkD, 1)}`,
 
+  // ---- 필드에서 구조물 위에 띄우는 경고 배지 ----
+  // 말풍선 꼬리가 아래를 가리켜서 "이 건물의 문제"라는 게 바로 읽힌다.
+  // 바탕은 항상 같고 안쪽 기호만 달라서 멀리서도 종류가 구분된다.
+  ...(() => {
+    const bubble = (bg, inner) => `
+      ${sh('M12 4 h40 a8 8 0 0 1 8 8 v22 a8 8 0 0 1 -8 8 H38 l-6 10 l-6 -10 H12 a8 8 0 0 1 -8 -8 V12 a8 8 0 0 1 8 -8 Z', bg)}
+      ${fd('M12 30 h40 a8 8 0 0 1 -8 8 H38 l-6 10 l-6 -10 H12 a8 8 0 0 1 -8 -8 Z', INK, 0.14)}
+      ${inner}`;
+    return {
+      // 전력 없음 — 번개에 빗금
+      warn_power: bubble('#ffd24a', `
+        ${sh('M35 8 L20 26 h9 l-3 16 L45 22 H34 l3 -14 Z', '#3a2c05', 2)}
+        <path d="M12 38 L52 6" stroke="#c1443c" stroke-width="6" stroke-linecap="round"/>
+        <path d="M12 38 L52 6" stroke="#ffe9a8" stroke-width="2.4" stroke-linecap="round"/>`),
+      // 산출 인벤토리 가득 참 — 넘치는 상자
+      warn_full: bubble('#ff8a3d', `
+        ${sh('M16 20 h32 v18 H16 Z', '#3a1f05', 2)}
+        ${fd('M18 24 h28 v12 h-28 Z', '#ffd7a8', 0.9)}
+        <path d="M22 14 V6 M32 12 V4 M42 14 V6" stroke="#3a1f05" stroke-width="4" stroke-linecap="round"/>`),
+      // 재료 부족 — 빈 접시 / 빠진 조각
+      warn_input: bubble('#6fd4ff', `
+        ${sh('M14 30 h36 v6 H14 Z', '#062b3d', 2)}
+        <path d="M20 28 V16 h9 v12 M36 28 V16" stroke="#062b3d" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+        <path d="M36 12 h10" stroke="#062b3d" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="3 5"/>`),
+      // 설정 안 됨 / 기타 — 느낌표
+      warn_idle: bubble('#ff4d3d', `
+        ${sh('M28 8 h8 v18 h-8 Z', '#2c0603', 2)}
+        ${ci(32, 33, 4.5, '#2c0603', 2)}`),
+    };
+  })(),
+
   // HUD 상태 아이콘
   trophy: `${groundSm}
     ${sh('M20 8 H44 V24 C44 34 38 40 32 40 C26 40 20 34 20 24 Z', P.gold)}

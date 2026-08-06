@@ -82,6 +82,8 @@ function pushIntoBeltChain(nation, startBelt, res, amt) {
     const [dx, dy] = DIR_VECT[cur.dir];
     const nx = cur.x + dx, ny = cur.y + dy;
     const moved = Math.min(amt, beltThroughput(cur.level));
+    // 지나간 자원을 벨트에 표시해 둔다 (화면에서 무엇이 흐르는지 보이도록)
+    cur._carry = res; cur._carryTtl = 2;
 
     const targetStruct = structureAt(nation, nx, ny);
     if (targetStruct && targetStruct.key !== 'belt') {
@@ -174,8 +176,12 @@ function processRecruitQueue(nation, s) {
 
 // ---------------- 메인 틱 ----------------
 export function tickNation(nation) {
-  // 0) 초기화
-  for (const s of nation.structures) { s.idle = false; s._fueled = false; s.idleReason = null; }
+  // 0) 초기화. 벨트가 "지금 무엇을 나르는 중인지"는 이 틱 동안만 유효한 표시라
+  //    (벨트는 자원을 담아두지 않고 즉시 통과시킨다) 몇 틱 뒤 저절로 사라진다.
+  for (const s of nation.structures) {
+    s.idle = false; s._fueled = false; s.idleReason = null;
+    if (s._carryTtl > 0 && --s._carryTtl === 0) s._carry = null;
+  }
 
   // 1) 발전소 연료 소모 — 연료는 벨트나 수동 이송으로 발전소에 직접 넣어줘야 한다
   //    (국고는 창고 재고의 합계일 뿐이라 원격으로 끌어다 쓸 수 없다)

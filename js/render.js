@@ -9,7 +9,7 @@
 // 뒤쪽(y가 작은) 것부터 그리면 앞 건물이 뒤 건물을 자연스럽게 가린다.
 // ============================================================
 import { getTileRange } from './world.js';
-import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, structureIcon } from './data.js';
+import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon } from './data.js';
 
 // 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
@@ -19,8 +19,16 @@ const TERRAIN_COLORS = {
 
 /** 바닥 평면의 세로 압축 비율 — 1이면 정투영(위에서 수직), 작을수록 더 눕는다 */
 export const TILT = 0.58;
-/** 구조물 받침(플린스)의 높이 — 타일 크기 대비 */
-const PLINTH = 0.22;
+/**
+ * 구조물 받침(플린스)의 높이 — 타일 크기 대비.
+ * 낮게 둬야 건물이 땅에 붙어 보인다 (높으면 공중에 뜬 것처럼 보인다).
+ */
+const PLINTH = 0.09;
+/**
+ * 건물이 자기 발판 위로 솟을 수 있는 최대 높이 (타일 가로 크기 대비).
+ * 한 줄 높이(tile * TILT)보다 살짝 크게 잡아, 뒤쪽 타일이 통째로 가려지지 않게 한다.
+ */
+const MAX_RISE = 0.6;
 
 /**
  * 구조물 그림을 발판 대비 얼마나 크게 세울지.
@@ -37,6 +45,19 @@ const STRUCT_SCALE = {
 };
 export const structScale = (key) => STRUCT_SCALE[key] ?? 1.0;
 
+/**
+ * 구조물 그림을 어디에 얼마나 크게 세울지 (필드·전투 화면 공용).
+ * 그림은 (1) 발판 가로 폭을 넘지 않고 (2) 발판 위로 MAX_RISE 이상 솟지 않는다.
+ * 두 상한 덕분에 옆 타일로 삐져나가지도, 뒤 타일을 통째로 덮지도 않는다.
+ * footY / plinth는 발판 좌상단(sy)을 기준으로 한 상대 좌표다.
+ */
+export function structArtMetrics(tile, w, h, key) {
+  const bh = h * tile * TILT;
+  const lift = PLINTH * tile;
+  const art = Math.min(w * tile * structScale(key), bh + tile * MAX_RISE);
+  return { art, lift, footY: bh - lift * 0.4 };
+}
+
 // ---- 아이콘 이미지 캐시 ----
 // data.js의 아이콘은 이제 이모지 문자가 아니라 assets/icons/*.svg 경로다.
 // 캔버스에는 fillText 대신 미리 로드해 둔 Image를 drawImage로 그린다
@@ -50,6 +71,32 @@ export function getIconImage(src) {
     iconImageCache.set(src, img);
   }
   return img;
+}
+
+/**
+ * 그림 안에서 실제로 잉크가 시작되는 높이(0~1). 예를 들어 농지 그림은 위쪽
+ * 40%가 비어 있어서, 이걸 모르면 머리 위 표시가 허공에 뜬다.
+ * 오프스크린 캔버스로 한 번만 훑어 캐시한다 (아트가 바뀌어도 자동으로 맞는다).
+ */
+const inkTopCache = new Map();
+function getInkTop(img, src) {
+  if (inkTopCache.has(src)) return inkTopCache.get(src);
+  let t = 0;
+  try {
+    const N = 32;
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, N, N);
+    const d = g.getImageData(0, 0, N, N).data;
+    let row = 0;
+    scan: for (; row < N; row++) {
+      for (let x = 0; x < N; x++) if (d[(row * N + x) * 4 + 3] > 12) break scan;
+    }
+    t = row / N;
+  } catch { t = 0; } // 캔버스를 못 읽으면 그냥 그림 상단을 쓴다
+  inkTopCache.set(src, t);
+  return t;
 }
 
 export class Renderer {
@@ -138,12 +185,12 @@ export class Renderer {
     const { sx, sy } = this.proj(s.x, s.y);
     const bw = w * this.tile, bh = h * this.tileY;
     if (s.key === 'belt') return { left: sx, right: sx + bw, top: sy, bottom: sy + bh, sx, sy, bw, bh };
-    const lift = PLINTH * this.tile;
-    const art = Math.min(w, h) * this.tile * 1.15 * structScale(s.key); // 정사각형 (비율 유지)
-    const footY = sy + bh * 0.72 - lift;            // 그림이 서 있는 바닥선
+    const m = structArtMetrics(this.tile, w, h, s.key);
+    const lift = m.lift, art = m.art;
+    const footY = sy + m.footY;                     // 그림이 서 있는 바닥선 = 발판 앞쪽 모서리
     return {
-      left: Math.min(sx, sx + bw / 2 - art / 2),
-      right: Math.max(sx + bw, sx + bw / 2 + art / 2),
+      left: sx + (bw - art) / 2,
+      right: sx + (bw + art) / 2,
       top: Math.min(sy - lift, footY - art),
       bottom: sy + bh,
       sx, sy, bw, bh, lift, art, footY,
@@ -201,6 +248,10 @@ export class Renderer {
       if (item.kind === 'node') this._drawNode(item.t);
       else this._drawStructure(item.s, item.color);
     }
+
+    // ---- 3) 머리 위 표시 (보관 중인 아이템 · 경고) ----
+    // 건물보다 항상 위에 떠야 하므로 구조물을 다 그린 뒤 한 번에 얹는다.
+    if (nation) for (const s of nation.structures) this._drawOverlay(s);
 
     // 건설 미리보기(고스트) — 건설 모드일 때는 단순 호버 테두리 대신 이걸 그린다
     if (this.buildPreview) this._drawBuildPreview();
@@ -324,8 +375,9 @@ export class Renderer {
 
   /** 구조물 하나를 그린다 — 소속 색 받침(입체) 위에 그림을 세운다 */
   _drawStructure(s, color) {
-    const { ctx, tile, tileY } = this;
+    const { ctx, tile, tileY, canvas } = this;
     const b = this.structBounds(s);
+    if (b.right < 0 || b.left > canvas.width || b.bottom < 0 || b.top > canvas.height) return;
 
     if (s.key === 'belt') {
       // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다
@@ -338,6 +390,14 @@ export class Renderer {
       ctx.font = `bold ${tile * 0.55}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(DIR_ARROW[s.dir ?? 0], b.sx + tile / 2, b.sy + tileY / 2);
+      // 방금 이 벨트를 지나간 자원을 얹어 무엇이 흐르는지 보여준다
+      if (s._carry && tile >= 12) {
+        const img = getIconImage(RESOURCES[s._carry]?.icon || '');
+        if (img.complete && img.naturalWidth > 0) {
+          const size = tile * 0.62;
+          ctx.drawImage(img, b.sx + (tile - size) / 2, b.sy + tileY / 2 - size * 0.8, size, size);
+        }
+      }
       return;
     }
 
@@ -364,7 +424,7 @@ export class Renderer {
     ctx.fill();
 
     // 그림을 받침 위에 세운다 (일러스트가 정면 + 윗면이라 그대로 건물이 된다)
-    this._drawStandingArt(structureIcon(s.key), sx + bw / 2, b.footY, b.art, s.idle ? 0.55 : 1);
+    this._drawStandingArt(structureIcon(s.key), sx + bw / 2, b.footY, b.art, s.idle ? 0.6 : 1);
 
     // 굵은 검은 외곽선 + 정지 상태면 빨간 테두리 (아케이드풍 대비)
     ctx.strokeStyle = '#120e14';
@@ -388,6 +448,76 @@ export class Renderer {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(s.level), bx + badgeW / 2, by + badgeH / 2 + 0.5);
     }
+  }
+
+  /**
+   * 구조물 머리 위에 띄우는 표시.
+   *  · 창고/수도처럼 자원을 보관하는 곳은 무엇이 얼마나 들었는지
+   *  · 멈춰 있는 구조물은 왜 멈췄는지(전력 없음·산출 가득 참 …)
+   * 둘 다 있으면 경고를 위에 올려서 먼저 눈에 띄게 한다.
+   */
+  _drawOverlay(s) {
+    const { ctx, tile, canvas } = this;
+    if (tile < 11 || s.key === 'belt') return;      // 너무 축소된 상태에서는 생략
+    const def = STRUCTURES[s.key];
+    const b = this.structBounds(s);
+    // 화면 밖 구조물은 건너뛴다 (나라가 커져도 프레임마다 헛일하지 않도록)
+    if (b.right < 0 || b.left > canvas.width || b.bottom < -40 || b.top > canvas.height) return;
+    const cx = b.sx + b.bw / 2;
+    // 그림 상자의 위쪽이 아니라 "실제로 그려진 부분"의 꼭대기에 붙인다
+    const src = structureIcon(s.key);
+    const img0 = getIconImage(src);
+    const inkTop = (img0.complete && img0.naturalWidth > 0) ? getInkTop(img0, src) : 0;
+    let y = b.footY - b.art * (1 - inkTop) + tile * 0.12;
+
+    // 보관 중인 자원 — 가장 많이 든 것 하나만 (창고는 한 종류라 그게 전부다)
+    if (def.storageCapacity) {
+      const entries = Object.entries(s.store || {}).filter(([, n]) => n > 0);
+      if (entries.length) {
+        entries.sort((a2, b2) => b2[1] - a2[1]);
+        const [res, amount] = entries[0];
+        const extra = entries.length > 1 ? entries.length - 1 : 0;
+        y = this._drawChip(cx, y, RESOURCES[res]?.icon, fmtCount(amount) + (extra ? ` +${extra}` : ''));
+      }
+    }
+
+    // 멈춤 사유 — 아이콘만 띄우고 자세한 설명은 구조물 팝업에서 본다
+    if (s.idle && s.idleReason) {
+      const size = Math.max(13, tile * 0.78);
+      const img = getIconImage(alertIcon(s.idleReason));
+      if (img.complete && img.naturalWidth > 0) {
+        // 살짝 위아래로 흔들려서 정지 상태가 눈에 걸린다
+        const bob = Math.sin(Date.now() / 320 + s.id) * size * 0.06;
+        ctx.drawImage(img, cx - size / 2, y - size + bob, size, size);
+      }
+    }
+  }
+
+  /** 아이콘 + 숫자를 담은 작은 칩. 다음 표시가 놓일 y를 돌려준다 */
+  _drawChip(cx, bottomY, iconSrc, label) {
+    const { ctx, tile } = this;
+    const h = Math.max(11, tile * 0.44);
+    const icon = h * 0.82;
+    ctx.font = `bold ${Math.max(8, h * 0.62)}px 'IBM Plex Mono', monospace`;
+    const textW = ctx.measureText(label).width;
+    const w = icon + textW + h * 0.5;
+    const x = cx - w / 2, y = bottomY - h;
+
+    ctx.fillStyle = 'rgba(10,12,10,0.82)';
+    ctx.strokeStyle = '#120e14'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, h * 0.3);
+    ctx.fill(); ctx.stroke();
+    ctx.lineWidth = 1;
+
+    const img = getIconImage(iconSrc || '');
+    if (img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, x + h * 0.14, y + (h - icon) / 2, icon, icon);
+    }
+    ctx.fillStyle = '#f0e8de';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + h * 0.14 + icon + h * 0.12, y + h / 2 + 0.5);
+    return y - 2;
   }
 
   /**
@@ -419,6 +549,11 @@ export class Renderer {
     }
   }
 
+}
+
+/** 1000 이상은 1.2k처럼 줄여 칩이 길어지지 않게 한다 */
+function fmtCount(n) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n));
 }
 
 /** 색을 밝게(+)/어둡게(-) — 받침 앞면과 윗면을 구분하는 데 쓴다 */

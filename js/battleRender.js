@@ -5,12 +5,11 @@
 import { getTileRange } from './world.js';
 import { STRUCTURES, UNITS, structureIcon } from './data.js';
 import { tileKey } from './logic.js';
-import { TILT, getIconImage, structScale } from './render.js';
+import { TILT, getIconImage, structArtMetrics } from './render.js';
 
 const TERRAIN_COLORS = { plain: '#1a201c', water: '#15303a' };
 
 // 전투 화면도 필드와 같은 기울어진 카메라·크기 규칙을 쓴다 (화면이 바뀌어도 감각이 유지되도록)
-const PLINTH = 0.22;
 
 export class BattleRenderer {
   constructor(canvas) {
@@ -113,7 +112,7 @@ export class BattleRenderer {
     const [w, h] = def.footprint;
     const { sx, sy } = this.proj(s.x, s.y);
     const bw = w * tile, bh = h * tileY;
-    const lift = PLINTH * tile;
+    const { art, lift, footY } = structArtMetrics(tile, w, h, s.key);
 
     if (!s.alive) {
       // 파괴된 건물은 세우지 않고 잔해로 납작하게 남긴다
@@ -139,9 +138,8 @@ export class BattleRenderer {
 
     const img = getIconImage(structureIcon(s.key));
     if (img.complete && img.naturalWidth > 0) {
-      const art = Math.min(w, h) * tile * 1.15 * structScale(s.key);
       ctx.globalAlpha = unpowered ? 0.6 : 1;
-      ctx.drawImage(img, sx + bw / 2 - art / 2, sy + bh * 0.72 - lift - art, art, art);
+      ctx.drawImage(img, sx + bw / 2 - art / 2, sy + footY - art, art, art);
       ctx.globalAlpha = 1;
     }
 

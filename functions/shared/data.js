@@ -104,6 +104,18 @@ export const STATUS_ICONS = {
   shield: iconPath('shield_status'),
 };
 
+/**
+ * 구조물이 멈춘 이유(simulate.js가 s.idleReason에 넣는 문자열) → 필드에 띄울 경고 배지.
+ * 목록에 없는 사유는 warn_idle(느낌표)로 떨어진다.
+ */
+export const ALERT_ICONS = {
+  '전력 없음': iconPath('warn_power'),
+  '연료 없음': iconPath('warn_power'),
+  '산출 가득 참': iconPath('warn_full'),
+  '재료 부족': iconPath('warn_input'),
+};
+export const alertIcon = (reason) => ALERT_ICONS[reason] || iconPath('warn_idle');
+
 // ---- 지형 위 자원 노드 (필드에 균일 분포로 생성됨) ----
 // key 는 world.js 의 지형 생성기에서 사용
 // (밀도를 낮게 잡아 필드 전체에서 자원이 희소하게 분포하도록 함)
