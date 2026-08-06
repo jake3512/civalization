@@ -140,4 +140,20 @@ assert.deepStrictEqual(Array.from(round.unlockedGoods).sort(), Array.from(n.unlo
 assert.strictEqual(round.structures.find(s => s.id === placed.id).crop, placed.crop);
 console.log('✓ 직렬화 왕복 (작물/해금 유지)');
 
+// --- 그림 리소스가 빠진 게 없는지 ---
+{
+  const { existsSync } = await import('node:fs');
+  const { UNITS } = await import('../js/data.js');
+  const root = new URL('../', import.meta.url).pathname;
+  const miss = [];
+  for (const k of Object.keys(RESOURCES)) if (!existsSync(root + 'assets/icons/' + k + '.svg')) miss.push('자원 ' + k);
+  for (const k of Object.keys(STRUCTURES)) if (!existsSync(root + 'assets/icons/struct/' + k + '.svg')) miss.push('구조물 ' + k);
+  for (const g of ['attack', 'defense']) {
+    for (const k of Object.keys(UNITS[g])) if (!existsSync(root + 'assets/icons/unit/' + k + '.svg')) miss.push('유닛 ' + k);
+  }
+  assert.strictEqual(miss.length, 0, '그림 없음: ' + miss.join(', ') + ' (node scripts/generate-icons.mjs 실행 필요)');
+  const nUnits = Object.keys(UNITS.attack).length + Object.keys(UNITS.defense).length;
+  console.log(`✓ 그림 리소스 전부 존재 (자원 ${Object.keys(RESOURCES).length} · 구조물 ${Object.keys(STRUCTURES).length} · 유닛 ${nUnits})`);
+}
+
 console.log('\n✅ 회귀 테스트 전부 통과');

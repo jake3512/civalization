@@ -729,5 +729,179 @@ for (const [key, body] of Object.entries(STRUCT_SPEC)) {
   writeFileSync(path.join(STRUCT_DIR, `${key}.svg`), svg, 'utf-8');
 }
 
+// ============================================================
+// 유닛 그림 (assets/icons/unit/*.svg)
+//
+// 전투 화면에서 20px 안팎으로 줄어들기 때문에, 얼굴 디테일보다 **실루엣과
+// 장비**로 구분되게 그린다 (창/방패 / 총 / 로터 / 궤도 …).
+// 구조물과 같은 규칙 — 정면에서 살짝 내려다본 시점, 빛은 왼쪽 위, 굵은 외곽선.
+// ============================================================
+const UNIT_DIR = path.join(OUT_DIR, 'unit');
+mkdirSync(UNIT_DIR, { recursive: true });
+
+const SKIN = '#f0c9a0', SKIN_D = '#c99a70';
+
+/**
+ * 사람 유닛 공통 몸체. 장비(뒤/앞에 겹칠 그림)만 갈아 끼우면 다른 병종이 된다.
+ *  back  — 몸 뒤에 그릴 것 (등에 멘 창, 망토 등)
+ *  front — 몸 앞에 그릴 것 (방패, 총 등)
+ *  helm  — 머리 위 투구
+ */
+const trooper = ({ armor, armorD, back = '', front = '', helm = '', accent = '' }) => `${groundSm}
+  ${back}
+  ${sh('M25 42 h5 v12 h-5 Z', armorD, 2.5)}${sh('M34 42 h5 v12 h-5 Z', armorD, 2.5)}
+  ${sh('M23 26 h18 v18 a4 4 0 0 1 -4 4 H27 a4 4 0 0 1 -4 -4 Z', armor)}
+  ${fd('M32 26 h9 v18 a4 4 0 0 1 -4 4 h-5 Z', armorD, 0.45)}
+  ${ci(32, 17, 8, SKIN)}
+  ${fd('M32 9 a8 8 0 0 1 0 16 Z', SKIN_D, 0.45)}
+  ${helm}
+  ${accent}
+  ${front}`;
+
+/** 등에 멘 무기 자루 */
+const shaft = (color) => `<path d="M44 8 L22 52" stroke="${INK}" stroke-width="7" stroke-linecap="round"/>
+  <path d="M44 8 L22 52" stroke="${color}" stroke-width="3.5" stroke-linecap="round"/>`;
+/** 손에 든 둥근 방패 */
+const roundShield = (light, base, dark) => `${ci(20, 38, 11, base)}
+  ${fd('M20 27 a11 11 0 0 1 0 22 Z', dark, 0.45)}
+  ${ci(20, 38, 4, light, 2)}`;
+/** 궤도 차량 공통 — 사람 대신 차체를 그린다 */
+const vehicle = (body, bodyD, turret) => `${ground}
+  ${sh('M8 40 h48 a6 6 0 0 1 0 14 H8 a6 6 0 0 1 0 -14 Z', P.darkL)}
+  ${[14, 24, 34, 44, 52].map(x => `<circle cx="${x}" cy="47" r="4" fill="${P.dark}" stroke="${INK}" stroke-width="2"/>`).join('')}
+  ${topFace(12, 40, 40, 6, bodyD)}
+  ${sh('M12 26 h40 v14 h-40 Z', body)}
+  ${fd('M32 26 h20 v14 h-20 Z', bodyD, 0.4)}
+  ${turret}`;
+
+const unitArt = {
+  // ---- 공격 유닛 ----
+  recruit_01: trooper({                       // 기초 돌격병 — 나무창 + 나무방패
+    armor: '#8fa36b', armorD: '#5d6f42',
+    back: shaft(P.wood) + sh('M40 4 L50 14 L44 18 L36 10 Z', P.stoneL, 2.5),
+    front: roundShield(P.woodL, P.wood, P.woodD),
+    helm: sh('M23 15 a9 9 0 0 1 18 0 Z', P.woodD, 2.5),
+  }),
+  recruit_02: `${ground}                       <!-- 정찰 기병 — 말 실루엣으로 속도를 알린다 -->
+    ${sh('M10 44 q2 -14 16 -15 h14 q10 1 12 10 v9 h-6 v-6 h-6 v6 h-6 v-6 h-8 v6 h-6 v-6 q-4 2 -4 8 Z', '#b07a45')}
+    ${fd('M40 29 q10 1 12 10 v9 h-6 v-6 h-6 v6 h-6 Z', '#7d5228', 0.42)}
+    ${sh('M46 30 L56 14 q6 -2 6 4 l-4 12 Z', '#b07a45', 2.5)}
+    ${sh('M56 14 l4 -6 l2 8 Z', '#7d5228', 2)}
+    ${sh('M8 34 q-6 6 -2 14 q4 -4 6 -10 Z', '#7d5228', 2.5)}
+    ${ci(38, 20, 6, SKIN, 2.5)}
+    ${sh('M32 24 h12 v9 h-12 Z', '#8fa36b', 2.5)}
+    <path d="M50 6 L28 34" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>
+    <path d="M50 6 L28 34" stroke="${P.wood}" stroke-width="3" stroke-linecap="round"/>`,
+  recruit_03: trooper({                       // 중갑 공성병 — 철갑 + 큰 철방패
+    armor: P.metal, armorD: P.metalD,
+    back: shaft(P.woodD) + sh('M42 2 L52 14 L45 19 L36 9 Z', P.metalL, 2.5),
+    front: `${sh('M12 24 h18 v20 q0 8 -9 12 q-9 -4 -9 -12 Z', P.metalL)}
+      ${fd('M21 24 h9 v20 q0 8 -9 12 Z', P.metalD, 0.45)}
+      ${ci(21, 36, 4, P.gold, 2)}`,
+    helm: `${sh('M22 16 a10 10 0 0 1 20 0 v4 h-20 Z', P.metalL)}
+      ${fr(25, 15, 14, 4, INK)}`,
+  }),
+  recruit_04: trooper({                       // 마도 폭파 특공대 — 빛나는 마석 폭탄
+    armor: '#6b4a8f', armorD: '#3d2657',
+    front: `${ci(20, 40, 10, P.dark)}
+      ${fd('M20 30 a10 10 0 0 1 0 20 Z', P.darkD, 0.5)}
+      ${sh('M20 30 L24 24 l4 4', 'none', 2.5)}
+      <path d="M20 30 q2 -8 8 -9" fill="none" stroke="${INK}" stroke-width="3"/>
+      ${ci(29, 20, 4, P.purpleL, 2)}
+      ${ci(20, 40, 4, P.purpleL, 2)}`,
+    helm: sh('M23 15 a9 9 0 0 1 18 0 Z', '#3d2657', 2.5),
+    accent: `${ci(44, 22, 6, P.purple, 2.5)}${ci(44, 22, 2.5, P.purpleL)}`,
+  }),
+  recruit_05: trooper({                       // 화염방사병 — 등에 연료통, 앞에 불꽃
+    armor: '#a8622f', armorD: '#6b3512',
+    back: `${rc(40, 22, 12, 22, P.oil, 3)}${fd('M46 22 h6 v22 h-6 Z', P.oilD, 0.5)}`,
+    front: `<path d="M40 34 H22 q-6 0 -6 6" fill="none" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 34 H22 q-6 0 -6 6" fill="none" stroke="${P.metalL}" stroke-width="3" stroke-linecap="round"/>
+      ${sh('M16 42 q-8 6 -4 14 q6 -2 8 -8 q4 6 0 10 q10 -4 8 -14 q-6 2 -12 -2 Z', P.roofL, 2.5)}
+      ${fd('M14 50 q4 4 2 8 q4 -2 4 -6 Z', P.goldL, 0.9)}`,
+    helm: `${sh('M22 16 a10 10 0 0 1 20 0 v3 h-20 Z', P.roofD)}${fr(25, 14, 14, 5, P.glass)}`,
+  }),
+  recruit_06: trooper({                       // 현대 소총병 — 방탄조끼 + 소총
+    armor: '#4a5f4a', armorD: '#26361f',
+    front: `${sh('M20 27 h16 v14 h-16 Z', P.wheat)}${fd('M32 27 h4 v14 h-4 Z', P.wheatD, 0.5)}
+      <path d="M12 40 H46" stroke="${INK}" stroke-width="7" stroke-linecap="round"/>
+      <path d="M12 40 H46" stroke="${P.darkL}" stroke-width="3.5" stroke-linecap="round"/>
+      ${rc(26, 40, 6, 9, P.darkD, 1)}
+      ${fr(16, 36, 10, 3, P.metalL, 1)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v3 h-22 Z', '#3c4a35')}`,
+  }),
+  recruit_07: `${groundSm}                     <!-- 공중 침투 드론 — 하늘을 나는 유일한 유닛 -->
+    <ellipse cx="32" cy="56" rx="9" ry="3" fill="#000" opacity="0.25"/>
+    ${[[12, 18], [52, 18]].map(([x, y]) => `<ellipse cx="${x}" cy="${y}" rx="13" ry="3.4" fill="${P.plasticL}" opacity="0.55"/>
+      <ellipse cx="${x}" cy="${y}" rx="13" ry="3.4" fill="none" stroke="${INK}" stroke-width="2"/>`).join('')}
+    <path d="M16 20 L26 28 M48 20 L38 28" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>
+    <path d="M16 20 L26 28 M48 20 L38 28" stroke="${P.metalL}" stroke-width="2.4" stroke-linecap="round"/>
+    ${sh('M22 26 h20 a6 6 0 0 1 6 6 v6 a10 10 0 0 1 -16 8 a10 10 0 0 1 -16 -8 v-6 a6 6 0 0 1 6 -6 Z', P.darkL)}
+    ${fd('M32 26 h10 a6 6 0 0 1 6 6 v6 a10 10 0 0 1 -16 8 Z', P.darkD, 0.45)}
+    ${ci(32, 38, 6, P.cyanL, 2.5)}${ci(32, 38, 2.5, '#ffffff')}
+    <path d="M22 48 H42" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>`,
+  recruit_08: vehicle(P.stone, P.stoneD, `     <!-- 공성 투석/전차 — 긴 포신 -->
+    ${sh('M24 16 h16 v10 h-16 Z', P.stoneL)}
+    <path d="M34 21 H60" stroke="${INK}" stroke-width="9" stroke-linecap="round"/>
+    <path d="M34 21 H60" stroke="${P.metal}" stroke-width="5" stroke-linecap="round"/>
+    ${fr(56, 17, 5, 8, P.metalL, 1)}`),
+  recruit_09: vehicle('#5c4a7a', '#33254a', `  <!-- 마도 중갑 전차 — 마석 포탑 -->
+    ${sh('M22 14 h20 v12 h-20 Z', '#7a63a0')}
+    ${fd('M32 14 h10 v12 h-10 Z', '#33254a', 0.45)}
+    <path d="M36 20 H60" stroke="${INK}" stroke-width="10" stroke-linecap="round"/>
+    <path d="M36 20 H60" stroke="${P.purple}" stroke-width="5.5" stroke-linecap="round"/>
+    ${ci(58, 20, 5, P.purpleL, 2.5)}
+    ${ci(26, 10, 4, P.purpleL, 2)}`),
+  recruit_10: `${ground}                       <!-- 마도 돌격 거인 — 화면에서 가장 큰 실루엣 -->
+    ${sh('M18 46 h9 v12 h-9 Z', '#4a3a5f', 2.5)}${sh('M37 46 h9 v12 h-9 Z', '#4a3a5f', 2.5)}
+    ${sh('M14 24 h36 v22 a6 6 0 0 1 -6 6 H20 a6 6 0 0 1 -6 -6 Z', '#6b5590')}
+    ${fd('M32 24 h18 v22 a6 6 0 0 1 -6 6 H32 Z', '#3d2c57', 0.45)}
+    ${sh('M6 26 h10 v18 h-10 Z', '#6b5590', 2.5)}${sh('M48 26 h10 v18 h-10 Z', '#6b5590', 2.5)}
+    ${ci(32, 15, 10, SKIN)}
+    ${fd('M32 5 a10 10 0 0 1 0 20 Z', SKIN_D, 0.45)}
+    ${sh('M21 14 a11 11 0 0 1 22 0 v3 h-22 Z', P.metalD)}
+    <circle cx="27" cy="17" r="2.4" fill="${P.redL}"/><circle cx="37" cy="17" r="2.4" fill="${P.redL}"/>
+    ${ci(32, 34, 7, P.purpleL, 2.5)}${ci(32, 34, 3, '#ffffff')}`,
+
+  // ---- 수비 유닛 ----
+  def_01: trooper({                           // 방어 진형병 — 몸을 가리는 큰 방패
+    armor: '#5a6d8a', armorD: '#2f3d54',
+    front: `${sh('M10 20 h24 v22 q0 10 -12 16 q-12 -6 -12 -16 Z', P.woodL)}
+      ${fd('M22 20 h12 v22 q0 10 -12 16 Z', P.woodD, 0.45)}
+      <path d="M22 20 V58" stroke="${INK}" stroke-width="2.5"/>
+      ${ci(22, 36, 4, P.stoneL, 2)}`,
+    helm: sh('M22 16 a10 10 0 0 1 20 0 Z', '#2f3d54', 2.5),
+  }),
+  def_02: trooper({                           // 수리 공병 — 렌치와 작업모
+    armor: '#c98a2f', armorD: '#8a5810',
+    front: `<path d="M18 48 L34 30" stroke="${INK}" stroke-width="8" stroke-linecap="round"/>
+      <path d="M18 48 L34 30" stroke="${P.metalL}" stroke-width="4.5" stroke-linecap="round"/>
+      ${sh('M32 26 a7 7 0 1 1 8 8 l-5 -3 Z', P.metal, 2.5)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v2 h-22 Z', P.goldL)}${fr(24, 8, 16, 4, P.goldD, 1)}`,
+  }),
+  def_03: trooper({                           // 저격 수비병 — 아주 긴 총열
+    armor: '#3f5a3f', armorD: '#1f3320',
+    front: `<path d="M6 42 H52" stroke="${INK}" stroke-width="7" stroke-linecap="round"/>
+      <path d="M6 42 H52" stroke="${P.darkL}" stroke-width="3.5" stroke-linecap="round"/>
+      ${rc(22, 42, 6, 8, P.darkD, 1)}
+      ${rc(26, 34, 14, 5, P.blueD, 2)}
+      ${ci(40, 36, 3, P.blueL, 2)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v3 h-22 Z', '#2b3d2b')}${fr(24, 14, 16, 4, P.greenL)}`,
+  }),
+  def_04: trooper({                           // 마도 결계병 — 몸을 감싼 반투명 결계
+    armor: '#3f6f8a', armorD: '#1d3b4d',
+    front: `${ci(32, 34, 8, P.cyan, 2.5)}${ci(32, 34, 3.5, '#eafffd')}`,
+    helm: sh('M23 15 a9 9 0 0 1 18 0 Z', '#1d3b4d', 2.5),
+    accent: `<path d="M6 36 a26 26 0 0 1 52 0 a26 26 0 0 1 -52 0 Z" fill="${P.cyanL}" opacity="0.16"/>
+      <path d="M6 36 a26 26 0 0 1 52 0 a26 26 0 0 1 -52 0 Z" fill="none" stroke="${P.cyanL}" stroke-width="2.5" opacity="0.85"/>`,
+  }),
+};
+
+for (const [key, body] of Object.entries(unitArt)) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}">\n  ${body}\n</svg>`;
+  writeFileSync(path.join(UNIT_DIR, `${key}.svg`), svg, 'utf-8');
+}
+
 console.log(`Generated ${Object.keys(SPEC).length} resource icons in ${OUT_DIR}`);
 console.log(`Generated ${Object.keys(STRUCT_SPEC).length} structure illustrations in ${STRUCT_DIR}`);
+console.log(`Generated ${Object.keys(unitArt).length} unit illustrations in ${UNIT_DIR}`);

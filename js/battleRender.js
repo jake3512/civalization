@@ -3,7 +3,7 @@
 // (js/render.js와 같은 팬/줌 관례를 따르되, 전투 세션(battle.js) 상태를 그린다)
 // ============================================================
 import { getTileRange } from './world.js';
-import { STRUCTURES, UNITS, structureIcon } from './data.js';
+import { STRUCTURES, UNITS, structureIcon, unitIcon } from './data.js';
 import { tileKey } from './logic.js';
 import { TILT, getIconImage, structArtMetrics } from './render.js';
 
@@ -151,24 +151,42 @@ export class BattleRenderer {
     this._drawHpBar(sx + 2, sy - lift - 6, bw - 4, s.hp, s.maxHp);
   }
 
-  /** 유닛 하나 — 바닥 그림자 + 그 위에 뜬 몸통으로 서 있는 느낌을 준다 */
+  /**
+   * 유닛 하나 — 소속 색 발판 고리 위에 유닛 그림을 세운다.
+   * 그림만으로는 아군/적군이 헷갈리므로 발밑 고리로 진영을 구분한다
+   * (그림은 병종을, 색은 편을 알려준다).
+   */
   _drawUnit(u, color) {
-    const { ctx, tile, tileY } = this;
+    const { ctx, tile } = this;
     const { sx, sy } = this.proj(u.x, u.y);
-    const r = Math.max(3, tile * 0.24);
+    const def = (UNITS.attack[u.key] || UNITS.defense[u.key] || {});
+    const r = Math.max(3.5, tile * 0.26);
+    // 드론처럼 나는 유닛은 그림자를 남기고 몸만 위로 띄운다
+    const hover = def.flying ? r * 1.5 : 0;
+
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(0,0,0,0.38)';
-    ctx.ellipse(sx, sy, r * 0.95, r * 0.95 * TILT, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.40)';
+    ctx.ellipse(sx, sy, r * 1.05, r * 1.05 * TILT, 0, 0, Math.PI * 2);
     ctx.fill();
-    const bodyY = sy - r * 0.9;                 // 그림자 위로 띄운 몸통
     ctx.beginPath();
-    ctx.fillStyle = color;
-    ctx.arc(sx, bodyY, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.8, r * 0.34);
+    ctx.ellipse(sx, sy, r * 1.05, r * 1.05 * TILT, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.lineWidth = 1;
-    this._drawHpBar(sx - r, bodyY - r - 6, r * 2, u.hp, u.maxHp);
+
+    const size = r * 3.8;   // 그림이 작으면 병종이 구분되지 않아 발판보다 크게 세운다
+    const img = getIconImage(unitIcon(u.key));
+    const footY = sy + r * 0.3 - hover;
+    if (img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, sx - size / 2, footY - size, size, size);
+    } else {
+      // 그림이 아직 안 실렸을 때만 쓰는 임시 표시
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.arc(sx, footY - r, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    this._drawHpBar(sx - r * 1.3, footY - size * 0.86 - 4, r * 2.6, u.hp, u.maxHp);
   }
 
   _drawHpBar(x, y, w, hp, maxHp) {

@@ -7,7 +7,7 @@
 // ============================================================
 import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
          LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput,
-         CROPS, ANIMALS, EXPEDITIONS, getSellPrice } from './data.js';
+         CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
@@ -43,6 +43,7 @@ const battleRenderer = new BattleRenderer(battleCanvas);
 // 자원/상태 아이콘을 <img> 태그로 뽑아주는 헬퍼 (이모지 대신 assets/icons/*.svg 사용)
 const resIcon = (key) => `<img class="ic" src="${RESOURCES[key]?.icon || ''}" alt="${RESOURCES[key]?.name || key}">`;
 const statusIcon = (key) => `<img class="ic" src="${STATUS_ICONS[key]}" alt="${key}">`;
+const unitArtIcon = (key, cls = 'uic') => `<img class="${cls}" src="${unitIcon(key)}" alt="">`;
 
 let selectedStruct = null;   // 현재 건설 모드로 선택된 구조물 key
 let beltDir = 0;              // 벨트 건설 시 방향 (회전 버튼 / R키)
@@ -764,18 +765,18 @@ function renderOutpostHtml(struct) {
 
   const roster = nation.units || { attack: {}, defense: {} };
   const rosterTxt = [
-    ...Object.entries(roster.attack || {}).map(([k, c]) => `${UNITS.attack[k]?.name || k} ×${c}`),
-    ...Object.entries(roster.defense || {}).map(([k, c]) => `${UNITS.defense[k]?.name || k} ×${c}`),
+    ...Object.entries(roster.attack || {}).map(([k, c]) => `${unitArtIcon(k)}${UNITS.attack[k]?.name || k} ×${c}`),
+    ...Object.entries(roster.defense || {}).map(([k, c]) => `${unitArtIcon(k)}${UNITS.defense[k]?.name || k} ×${c}`),
   ].join(', ');
   html += `<div class="pd">보유 병력: ${rosterTxt || '없음'}</div>`;
 
   html += `<div class="pd">공격 유닛 모집:</div><div class="recipe-list">`;
   for (const [key, unit] of Object.entries(UNITS.attack)) {
-    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="0">${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
+    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="0">${unitArtIcon(key)} ${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
   }
   html += `</div><div class="pd">수비 유닛 모집:</div><div class="recipe-list">`;
   for (const [key, unit] of Object.entries(UNITS.defense)) {
-    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="1">${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
+    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="1">${unitArtIcon(key)} ${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
   }
   html += `</div>`;
   return html;
@@ -961,6 +962,7 @@ function renderDeckTray() {
     if (!unit) return '';
     const active = battleDeployKey === key;
     return `<button class="deck-unit-btn${active ? ' active' : ''}" data-unit="${key}" ${count <= 0 ? 'disabled' : ''}>
+      ${unitArtIcon(key, 'deck-unit-art')}
       <span class="nm">${unit.name}</span><span class="cnt">${count}기 남음</span>
     </button>`;
   }).join('') : '<div class="pd">배치할 공격 유닛이 없습니다</div>';

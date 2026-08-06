@@ -12,6 +12,8 @@ const iconPath = (key) => `${ICON_DIR}/${key}.svg`;
 // 구조물 아이콘은 assets/icons/struct/<구조물 key>.svg 로 1:1 대응된다
 // (STRUCTURES 항목마다 경로를 적지 않고 key로 바로 유도한다).
 export const structureIcon = (structKey) => `${ICON_DIR}/struct/${structKey}.svg`;
+/** 유닛 그림 (전투 화면 · 덱 트레이 · 모병 버튼 공용) */
+export const unitIcon = (unitKey) => `${ICON_DIR}/unit/${unitKey}.svg`;
 
 // ---- 원자재 / 가공자원 / 부품 / 화폐 정의 ----
 export const RESOURCES = {

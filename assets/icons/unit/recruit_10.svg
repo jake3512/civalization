@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>                       <!-- 마도 돌격 거인 — 화면에서 가장 큰 실루엣 -->
+    <path d="M18 46 h9 v12 h-9 Z" fill="#4a3a5f" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M37 46 h9 v12 h-9 Z" fill="#4a3a5f" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M14 24 h36 v22 a6 6 0 0 1 -6 6 H20 a6 6 0 0 1 -6 -6 Z" fill="#6b5590" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 24 h18 v22 a6 6 0 0 1 -6 6 H32 Z" fill="#3d2c57" opacity="0.45"/>
+    <path d="M6 26 h10 v18 h-10 Z" fill="#6b5590" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M48 26 h10 v18 h-10 Z" fill="#6b5590" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="32" cy="15" r="10" fill="#f0c9a0" stroke="#161018" stroke-width="3"/>
+    <path d="M32 5 a10 10 0 0 1 0 20 Z" fill="#c99a70" opacity="0.45"/>
+    <path d="M21 14 a11 11 0 0 1 22 0 v3 h-22 Z" fill="#5f7080" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <circle cx="27" cy="17" r="2.4" fill="#ff8f6b"/><circle cx="37" cy="17" r="2.4" fill="#ff8f6b"/>
+    <circle cx="32" cy="34" r="7" fill="#c9a6ff" stroke="#161018" stroke-width="2.5"/><circle cx="32" cy="34" r="3" fill="#ffffff" stroke="#161018" stroke-width="3"/>
+</svg>

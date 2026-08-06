@@ -115,6 +115,11 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
 }
 .recipe-btn .ic, .pd .ic, .cost-preview .ic { width: 14px; height: 14px; vertical-align: -3px; }
+/* 유닛 그림 — 자원 아이콘보다 크게 잡아야 병종이 구분된다 */
+.uic {
+  width: 26px; height: 26px; flex: none; vertical-align: -8px; margin-right: 2px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+}
 .trophy .ic, .match-head .ic { width: 15px; height: 15px; vertical-align: -3px; }
 
 /* ---- 연결 상태 점 (로컬/온라인) ---- */
@@ -360,6 +365,7 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   color: var(--text); border-radius: 4px; padding: 8px 10px; text-align: center;
   font-size: 11px; line-height: 1.4;
 }
+.deck-unit-art { display: block; width: 40px; height: 40px; margin: 0 auto 3px; }
 .deck-unit-btn .nm { display: block; font-family: var(--font-display); font-size: 12px; margin-bottom: 2px; }
 .deck-unit-btn .cnt { display: block; font-family: var(--font-mono); color: var(--accent); }
 .deck-unit-btn.active { border-color: var(--teal); background: rgba(74,157,143,0.14); }
