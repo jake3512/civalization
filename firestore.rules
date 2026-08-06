@@ -17,11 +17,15 @@ service cloud.firestore {
     // 국가 공개 스냅샷 — 남의 기지를 공격하려면 읽을 수 있어야 한다.
     // 쓰기는 본인 문서만, 그리고 문서 안의 id가 본인 uid일 때만 허용한다
     // (남의 이름으로 스냅샷을 올리는 것을 막는다).
+    // create/update와 delete를 나눠 쓴다. 하나로 묶어(allow write) 문서 내용을
+    // 검사하면, 삭제할 때는 request.resource가 없어서 조건이 절대 참이 되지 않는다
+    // — 자기 기지를 영영 못 지우게 된다.
     match /nations/{uid} {
       allow read: if true;
-      allow write: if request.auth != null
-                   && request.auth.uid == uid
-                   && request.resource.data.id == uid;
+      allow create, update: if request.auth != null
+                            && request.auth.uid == uid
+                            && request.resource.data.id == uid;
+      allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
     // 습격 리포트 — 공격자가 만들고, 방어자가 읽어 자기 상태에 반영한다.

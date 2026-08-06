@@ -93,14 +93,35 @@ export function getFirestoreHandles() {
 }
 
 // ---------------- Cloud Functions 호출 (건설/업그레이드/연구/전투) ----------------
+/**
+ * Cloud Functions 호출.
+ *
+ * 실패했을 때 SDK가 주는 message는 사람이 읽으라고 만든 문자열이 아니다 —
+ * 함수가 배포돼 있지 않거나 닿지 않으면 message가 그냥 **"internal"**이다.
+ * 예전에는 그걸 그대로 화면에 띄워서, 건물을 지을 때마다 "internal"이라는
+ * 정체불명의 오류만 보였다. 이제 사유를 풀어 쓰고, "서버가 없는 것 같다"는
+ * 판단(serverMissing)을 함께 돌려준다 — 호출한 쪽에서 로컬 판정으로
+ * 내려갈 수 있도록.
+ */
 async function callFn(name, data) {
-  if (!isMultiplayer()) return { error: '멀티플레이어(Firebase)가 연결되지 않았습니다.' };
+  if (!isMultiplayer()) {
+    return { error: '멀티플레이어(Firebase)가 연결되지 않았습니다.', serverMissing: true };
+  }
   try {
     const fn = fnFx.httpsCallable(functionsInstance, name);
     const result = await fn(data);
     return result.data;
   } catch (e) {
-    return { error: e.message || '서버 요청에 실패했습니다.' };
+    const code = ((e && e.code) || '').replace('functions/', '');
+    const raw = (e && e.message) || '';
+    // 함수가 없거나(미배포) 네트워크가 막힌 경우
+    const missing = ['internal', 'not-found', 'unavailable', 'deadline-exceeded']
+      .includes(code || raw);
+    const error = missing
+      ? `Cloud Functions에 닿지 못했습니다 (${code || raw}) — 배포되지 않았을 수 있습니다`
+      : (raw || '서버 요청에 실패했습니다.');
+    console.warn(`[multiplayer] ${name} 실패:`, code || raw, e);
+    return { error, serverMissing: missing };
   }
 }
 

@@ -169,6 +169,11 @@ export const WATER = { name: '강/호수', icon: iconPath('water'), density: 0.0
 // 시작할 수 있는 자리에서만 나라를 세우도록 강제하는 규칙.
 export const CAPITAL_REQUIRED_NODES = ['forest', 'quarry'];
 
+// 멀티플레이에서 다른 플레이어의 수도와 최소한 이만큼은 떨어져 있어야 한다.
+// 수도 영토 반경이 10레벨에서 20칸을 넘고 중심지로 더 넓히기 때문에, 이보다
+// 가까우면 영토가 겹쳐 서로의 자원 노드를 빼앗고 건설 자리가 막힌다.
+export const MIN_CAPITAL_DISTANCE = 100;
+
 // ---- 구조물 정의 ----
 // footprint: [가로, 세로] 격자 칸 수 (부피값에서 파생)
 // 레벨업 비용은 구조물마다 baseCost * upgradeCostMul^레벨 로 개별 산정된다

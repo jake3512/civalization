@@ -317,6 +317,33 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   console.log('✓ 전투 멀티플레이 (비동기 습격 · 리플레이 재현 · 멱등 · 조작 방어)');
 }
 
+// --- 멀티플레이 수도 최소 거리 ---
+{
+  const { MIN_CAPITAL_DISTANCE } = await import('../js/data.js');
+  const site = findNearestCapitalSite(0, 0, 200);
+  const mine = { name: '이웃국', capital: { x: site.x, y: site.y } };
+
+  // 남이 없으면 그대로 가능해야 한다
+  assert.strictEqual(L.capitalSiteReport(site.x, site.y).ok, true, '혼자면 세울 수 있어야 한다');
+
+  // 바로 옆은 거부
+  const close = L.capitalSiteReport(site.x, site.y, [mine]);
+  assert.strictEqual(close.ok, false, '남의 수도 바로 옆에는 세울 수 없어야 한다');
+  assert.ok(close.tooClose && close.tooClose.name === '이웃국', '누구와 가까운지 알려줘야 한다');
+
+  // 딱 최소 거리 밖이면 (입지 요건만 맞으면) 거리로는 막히지 않는다
+  const far = L.capitalSiteReport(site.x + MIN_CAPITAL_DISTANCE, site.y, [mine]);
+  assert.strictEqual(far.tooClose, null, `${MIN_CAPITAL_DISTANCE}칸 밖은 거리로 막히면 안 된다`);
+
+  // 추천 위치도 같은 규칙을 지킨다
+  const suggested = L.findNearestCapitalSite(site.x, site.y, 260, [mine]);
+  assert.ok(suggested, '남이 있어도 추천 자리를 찾아야 한다');
+  const d = Math.hypot(suggested.x - site.x, suggested.y - site.y);
+  assert.ok(d >= MIN_CAPITAL_DISTANCE, `추천 자리가 ${Math.round(d)}칸 — 최소 거리를 지켜야 한다`);
+
+  console.log(`✓ 수도 최소 거리 (${MIN_CAPITAL_DISTANCE}칸 · 추천 위치도 준수 · 실제 ${Math.round(d)}칸)`);
+}
+
 // --- 저장/불러오기: 무엇 하나 빠지면 이어하기가 반쪽이 된다 ---
 {
   // localStorage가 없는 node에서도 storage.js를 그대로 돌려보기 위한 최소 구현
