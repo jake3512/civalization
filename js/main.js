@@ -15,7 +15,7 @@ import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, 
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
          storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage } from './logic.js';
+         hasGood, sellFromStorage, buriedNodes } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
@@ -1270,6 +1270,11 @@ function updateBuildPreview() {
     powerRadius: def.powerRadius || 0,
   };
 
+  // 자원 노드를 깔고 앉으면 그 노드는 영영 못 쓴다 (철거 수단이 없다).
+  // 막지는 않되 반드시 알려준다 — 광산 자리를 창고로 덮는 실수가 흔하다.
+  const buried = def.requiresNode ? [] : buriedNodes(x, y, def.footprint);
+  const buriedNames = buried.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+
   // 필드 위 설치 바 — 무엇을 어디에 짓는지와 지금 지을 수 있는지를 보여준다
   if (bar) {
     bar.classList.remove('hidden');
@@ -1277,15 +1282,18 @@ function updateBuildPreview() {
     document.getElementById('build-bar-name').textContent =
       `${def.name}${selectedStruct === 'belt' ? ` ${DIR_ARROW[beltDir]}` : ''} (${x}, ${y})`;
     const st = document.getElementById('build-bar-status');
-    st.textContent = check.ok ? '설치할 수 있습니다' : check.error;
-    st.className = `build-bar-status ${check.ok ? 'ok' : 'err'}`;
+    if (!check.ok) { st.textContent = check.error; st.className = 'build-bar-status err'; }
+    else if (buried.length) { st.textContent = `⚠ ${buriedNames}을(를) 덮습니다 (되돌릴 수 없음)`; st.className = 'build-bar-status warn'; }
+    else { st.textContent = '설치할 수 있습니다'; st.className = 'build-bar-status ok'; }
     document.getElementById('build-confirm').disabled = !check.ok;
   }
 
   // 좌측 패널 비용 줄에도 같은 사유를 남긴다
   if (hintEl) {
-    hintEl.textContent = check.ok ? `(${x}, ${y}) 건설 가능` : `(${x}, ${y}) ${check.error}`;
-    hintEl.className = `preview-hint ${check.ok ? 'ok' : 'err'}`;
+    hintEl.textContent = !check.ok ? `(${x}, ${y}) ${check.error}`
+      : (buried.length ? `(${x}, ${y}) ⚠ ${buriedNames} 위 — 그 자원을 못 쓰게 됩니다`
+                       : `(${x}, ${y}) 건설 가능`);
+    hintEl.className = `preview-hint ${!check.ok ? 'err' : (buried.length ? 'warn' : 'ok')}`;
   }
 }
 

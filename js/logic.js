@@ -200,7 +200,25 @@ export function capitalSiteReport(x, y) {
     }
   }
   const missing = CAPITAL_REQUIRED_NODES.filter(k => !found.has(k));
-  return { ok: missing.length === 0, found, missing, radius, center: [cx, cy] };
+  // 수도 발판(3x3)이 자원 노드를 깔고 앉으면 그 노드는 영영 못 쓴다.
+  // 구조물을 철거하는 수단이 없고 수도는 옮길 수도 없어서, 하필 그게 구리
+  // 광산이면 수도 4레벨(구리 주괴 필요)에서 되돌릴 수 없이 막힌다.
+  // 그래서 아예 그런 자리에는 수도를 못 세우게 막는다.
+  const buried = buriedNodes(x, y, def.footprint);
+  return {
+    ok: missing.length === 0 && buried.length === 0,
+    found, missing, buried, radius, center: [cx, cy],
+  };
+}
+
+/** 이 발판이 깔고 앉게 되는 자원 노드 종류 (되돌릴 수 없으므로 미리 알려준다) */
+export function buriedNodes(x, y, footprint) {
+  const out = new Set();
+  for (const [tx, ty] of footprintTiles(x, y, footprint)) {
+    const t = getTile(tx, ty);
+    if (t.node) out.add(t.terrain);
+  }
+  return Array.from(out);
 }
 
 /**
@@ -228,7 +246,8 @@ export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
       const [cx, cy] = footprintCenter(x, y, def.footprint);
       const all = CAPITAL_REQUIRED_NODES.every(k =>
         nodes[k].some(([nx, ny]) => Math.hypot(nx - cx, ny - cy) <= radius));
-      if (all) sites.push([x, y]);
+      // 노드를 깔고 앉는 자리는 후보에서 뺀다 (capitalSiteReport와 같은 규칙)
+      if (all && buriedNodes(x, y, def.footprint).length === 0) sites.push([x, y]);
     }
   }
   return sites;
@@ -271,6 +290,10 @@ export function validatePlacement(nation, structKey, x, y) {
     if (!clear) return { ok: false, error: '이 위치에는 건설할 수 없습니다 (이미 점유됨)' };
     const site = capitalSiteReport(x, y);
     if (!site.ok) {
+      if (site.buried && site.buried.length) {
+        const names = site.buried.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+        return { ok: false, error: `수도가 ${names} 위에 놓입니다 — 그 자원을 영영 못 쓰게 되니 한 칸 옮겨주세요` };
+      }
       const names = site.missing.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
       return { ok: false, error: `수도 주변 영토에 ${names}이(가) 없습니다` };
     }
