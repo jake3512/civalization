@@ -15,12 +15,12 @@ import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, 
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
          storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage, buriedNodes } from './logic.js';
+         hasGood, sellFromStorage, buriedNodes, canDemolish } from './logic.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
-  callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate,
+  callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish,
 } from './multiplayer.js';
 
 const game = new Game();
@@ -620,6 +620,32 @@ document.querySelector('.struct-modal-backdrop').addEventListener('click', close
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeStructModal(); });
 
 /**
+ * 철거 블록 — 되돌릴 수 없는 조작이라 "무엇을 잃는지"를 먼저 보여주고,
+ * 한 번 더 눌러야 실제로 철거되게 한다 (오탭 방지).
+ */
+function renderDemolishHtml(struct, def) {
+  if (struct.key === 'capital') {
+    return `<div class="dem-block"><div class="pd dim">수도는 철거할 수 없습니다</div></div>`;
+  }
+  const check = canDemolish(game.myNation, struct.id);
+  // 철거하면 사라지는 자원 (보관함 + 투입/산출 인벤토리)
+  const lost = {};
+  for (const bag of [struct.store, struct.inputBuffer, struct.outputBuffer]) {
+    for (const [res, amt] of Object.entries(bag || {})) if (amt > 0) lost[res] = (lost[res] || 0) + amt;
+  }
+  const lostTxt = Object.entries(lost).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
+  const queued = (struct.recruitQueue || []).length;
+
+  let html = `<div class="dem-block"><div class="dem-head">철거</div>`;
+  html += `<div class="pd dim">건설비는 돌려받지 못하고, 안에 있는 자원은 모두 사라집니다.</div>`;
+  if (lostTxt) html += `<div class="dem-lost">사라짐: ${lostTxt}</div>`;
+  if (queued) html += `<div class="dem-lost">모집 대기 ${queued}건도 함께 사라집니다</div>`;
+  if (!check.ok) html += `<div class="pd err">${check.error}</div>`;
+  html += `<button id="demolish-btn" class="demolish-btn" ${check.ok ? '' : 'disabled'}>철거</button></div>`;
+  return html;
+}
+
+/**
  * 레벨업 정보 — 다음 레벨에서 실제로 무엇이 얼마나 좋아지는지와 비용을 보여준다.
  * (숫자를 직접 비교해 보여주므로 "올릴 가치가 있는지" 판단할 수 있다)
  */
@@ -706,6 +732,7 @@ function showStructPanel(struct, x, y) {
   if (def.recipes) html += renderRecipeHtml(struct, def);
 
   html += renderUpgradeHtml(struct, def);
+  html += renderDemolishHtml(struct, def);
 
   const body = document.getElementById('struct-modal-body');
   body.innerHTML = html;
@@ -726,6 +753,27 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
+  // 철거는 되돌릴 수 없어서 두 번 눌러야 실행된다 (첫 탭은 확인 요청)
+  const db2 = document.getElementById('demolish-btn');
+  if (db2) {
+    let armed = false;
+    db2.addEventListener('click', async () => {
+      if (!armed) {
+        armed = true;
+        db2.textContent = '정말 철거합니다 (한 번 더)';
+        db2.classList.add('armed');
+        setTimeout(() => { if (db2.isConnected) { armed = false; db2.textContent = '철거'; db2.classList.remove('armed'); } }, 4000);
+        return;
+      }
+      const name = STRUCTURES[struct.key].name;
+      const res = await dispatch(
+        () => ({ error: game.myNation.demolish(struct.id) }),
+        () => callDemolish(struct.id));
+      if (res.error) flashMessage(res.error, true);
+      else { flashMessage(`${name} 철거 완료`, false); closeStructModal(); }
+    });
+  }
+
   const ub = document.getElementById('upgrade-btn');
   if (ub) ub.addEventListener('click', async () => {
     if (isMultiplayer()) {

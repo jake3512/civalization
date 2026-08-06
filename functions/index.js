@@ -128,6 +128,17 @@ export const submitRecruitUnit = onCall(async (request) => {
   return { ok: true };
 });
 
+export const submitDemolish = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { structId } = request.data || {};
+  const err = nation.demolish(structId);
+  if (err) return { error: err };
+  await saveNation(uid, nation);
+  return { ok: true };
+});
+
 // ---------------- 농사 · 목축 · 여행 · 판매 ----------------
 export const submitSetCrop = onCall(async (request) => {
   const uid = requireAuth(request);

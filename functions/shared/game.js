@@ -58,6 +58,10 @@ export class Nation {
     const res = logic.upgrade(this, structId);
     return res.ok ? null : res.error;
   }
+  demolish(structId) {
+    const res = logic.demolish(this, structId);
+    return res.ok ? null : res.error;
+  }
   setRecipe(structId, recipeKey) {
     const res = logic.setRecipe(this, structId, recipeKey);
     return res.ok ? null : res.error;

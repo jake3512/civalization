@@ -376,6 +376,31 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   #left-panel, #right-panel { width: 200px; }
 }
 
+/* ---- 철거 블록 ----
+   되돌릴 수 없는 조작이라 레벨업 블록과 시각적으로 확실히 구분한다. */
+.dem-block {
+  margin-top: 12px; padding: 12px; border: 2px solid rgba(255,77,61,0.45);
+  border-radius: 6px; background: rgba(255,77,61,0.07);
+}
+.dem-head {
+  font-family: var(--font-display); font-size: 14px; color: var(--danger);
+  letter-spacing: 0.5px; margin-bottom: 6px;
+}
+.dem-lost { font-family: var(--font-mono); font-size: 11.5px; color: var(--danger); margin: 4px 0; }
+.dem-lost .ic { width: 15px; height: 15px; vertical-align: -3px; }
+.demolish-btn {
+  width: 100%; margin-top: 10px; padding: 11px;
+  background: transparent; color: var(--danger);
+  border: 2px solid var(--danger); border-radius: 5px;
+  font-family: var(--font-display); font-size: 14px; letter-spacing: 1px; font-weight: 600;
+}
+.demolish-btn.armed {
+  background: var(--danger); color: #1a0603;
+  box-shadow: 0 0 16px rgba(255,77,61,0.5);
+}
+.demolish-btn:active:not(:disabled) { transform: translateY(1px); }
+.demolish-btn:disabled { opacity: 0.4; border-color: var(--line); color: var(--text-dim); cursor: not-allowed; }
+
 /* ---- 건설 확정 바 ----
    손이 닿는 순간 지어지면 오조작이 잦아서, 고스트를 원하는 칸으로 옮긴 뒤
    이 바의 "설치"를 눌러야 실제로 지어진다. 터치 화면에서 엄지로 누르기 좋게

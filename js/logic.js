@@ -360,6 +360,100 @@ export function upgrade(nation, structId) {
   return { ok: true, structure: s };
 }
 
+// ============================================================
+// 철거
+//
+// 구조물은 원래 한 번 지으면 되돌릴 수 없었다. 그러다 보니 광산 자리를 창고로
+// 덮는 실수 하나가 영구히 남았다. 이제 철거로 되돌릴 수 있되,
+//   · 수도는 국가의 시작점이라 철거할 수 없고
+//   · 중심지는 그 영토에 다른 구조물이 서 있으면 철거할 수 없으며
+//     (영토가 사라지면 그 위의 구조물이 영토 밖에 붕 뜨게 되므로)
+//   · 철거하는 구조물 안에 들어 있던 자원은 전부 사라진다 (되돌리기 비용)
+// 는 규칙을 둔다. 건설비도 돌려주지 않는다.
+// ============================================================
+
+/** 이 구조물이 만들어내는 영토 타일 (영토를 넓히지 않는 구조물이면 빈 배열) */
+export function territoryTilesOf(nation, s) {
+  const def = STRUCTURES[s.key];
+  if (!def || !def.territoryRadius) return [];
+  const [cx, cy] = footprintCenter(s.x, s.y, def.footprint);
+  const radius = getTerritoryRadius(s.key, s.level);
+  const out = [];
+  const y0 = Math.floor(cy - radius), y1 = Math.ceil(cy + radius);
+  const x0 = Math.floor(cx - radius), x1 = Math.ceil(cx + radius);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (Math.hypot(x - cx, y - cy) <= radius) out.push([x, y]);
+    }
+  }
+  return out;
+}
+
+/**
+ * 이 구조물만이 제공하는 영토 타일 (다른 수도·중심지가 겹쳐 덮고 있지 않은 칸).
+ * 중심지가 서로 겹쳐 있을 때 "겹친 부분"까지 잃는 것으로 잘못 세지 않으려고 쓴다.
+ */
+function exclusiveTerritoryOf(nation, s) {
+  const others = nation.structures.filter(o => o.id !== s.id && STRUCTURES[o.key]?.territoryRadius);
+  const covered = new Set();
+  for (const o of others) for (const [x, y] of territoryTilesOf(nation, o)) covered.add(tileKey(x, y));
+  return territoryTilesOf(nation, s).filter(([x, y]) => !covered.has(tileKey(x, y)));
+}
+
+/** 철거할 수 있는지 판정만 한다 (버튼 잠금·안내 문구용) */
+export function canDemolish(nation, structId) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  if (s.key === 'capital') return { ok: false, error: '수도는 철거할 수 없습니다' };
+
+  if (STRUCTURES[s.key]?.territoryRadius) {
+    // 이 구조물이 없어지면 영토 밖으로 밀려날 구조물이 있는지 본다
+    const losing = new Set(exclusiveTerritoryOf(nation, s).map(([x, y]) => tileKey(x, y)));
+    const stranded = nation.structures.filter(o => {
+      if (o.id === s.id) return false;
+      const [w, h] = STRUCTURES[o.key].footprint;
+      return footprintTiles(o.x, o.y, [w, h]).some(([x, y]) => losing.has(tileKey(x, y)));
+    });
+    if (stranded.length) {
+      const names = [...new Set(stranded.map(o => STRUCTURES[o.key].name))].slice(0, 3).join(', ');
+      return {
+        ok: false,
+        error: `이 영토에 구조물이 ${stranded.length}개 남아 있습니다 (${names}${stranded.length > 3 ? ' 등' : ''}) — 먼저 철거해주세요`,
+        stranded: stranded.length,
+      };
+    }
+  }
+  return { ok: true, structure: s };
+}
+
+/** 영토를 처음부터 다시 계산한다 (철거로 줄어들 수 있으므로 누적이 아니라 재구성) */
+function recomputeTerritory(nation) {
+  nation.territory = new Set();
+  for (const s of nation.structures) {
+    for (const [x, y] of territoryTilesOf(nation, s)) nation.territory.add(tileKey(x, y));
+  }
+}
+
+/** 구조물을 철거한다. 안에 있던 자원은 전부 사라지고 건설비도 돌려주지 않는다. */
+export function demolish(nation, structId) {
+  const check = canDemolish(nation, structId);
+  if (!check.ok) return check;
+  const s = check.structure;
+
+  // 사라지는 자원을 알려주기 위해 미리 모아둔다 (UI 경고 문구용)
+  const lost = {};
+  for (const bag of [s.store, s.inputBuffer, s.outputBuffer]) {
+    for (const [res, amt] of Object.entries(bag || {})) {
+      if (amt > 0) lost[res] = (lost[res] || 0) + amt;
+    }
+  }
+
+  nation.structures = nation.structures.filter(o => o.id !== structId);
+  recomputeTerritory(nation);
+  recomputeStock(nation);   // 창고가 사라졌으면 국고 표시도 줄어든다
+  return { ok: true, removed: s, lost };
+}
+
 export function setRecipe(nation, structId, recipeKey) {
   const s = nation.structures.find(s => s.id === structId);
   if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };

@@ -140,6 +140,55 @@ assert.deepStrictEqual(Array.from(round.unlockedGoods).sort(), Array.from(n.unlo
 assert.strictEqual(round.structures.find(s => s.id === placed.id).crop, placed.crop);
 console.log('✓ 직렬화 왕복 (작물/해금 유지)');
 
+// --- 철거 규칙 ---
+{
+  const cap2 = n.structures.find(s2 => s2.key === 'capital');
+  assert.strictEqual(L.canDemolish(n, cap2.id).ok, false, '수도는 철거할 수 없어야 한다');
+
+  // 인벤토리에 든 자원은 철거와 함께 사라진다
+  cap2.store = { wood: 500, stone: 500 }; L.recomputeStock(n);
+  let wh = null;
+  for (const key of Array.from(n.territory)) {
+    const [x, y] = key.split(',').map(Number);
+    const r = L.build(n, 'warehouse', x, y);
+    if (r.ok) { wh = r.structure; break; }
+  }
+  assert.ok(wh, '창고 건설');
+  L.depositInto(wh, 'wood', 120); L.recomputeStock(n);
+  const beforeStock = L.totalStock(n, 'wood');
+  const out = L.demolish(n, wh.id);
+  assert.strictEqual(out.ok, true, out.error);
+  assert.strictEqual(out.lost.wood, 120, '사라진 자원을 보고해야 한다');
+  assert.strictEqual(L.totalStock(n, 'wood'), beforeStock - 120, '국고에서도 빠져야 한다');
+  assert.ok(!n.structures.some(s2 => s2.id === wh.id), '구조물이 목록에서 빠져야 한다');
+
+  // 중심지는 그 영토가 비어 있어야만 철거된다
+  const before = n.territory.size;
+  let hub = null;
+  for (const key of Array.from(n.territory)) {
+    const [x, y] = key.split(',').map(Number);
+    if (Math.hypot(x - cap2.x, y - cap2.y) <= 5) continue;
+    const r = L.build(n, 'hub', x, y);
+    if (r.ok) { hub = r.structure; break; }
+  }
+  if (hub) {
+    assert.ok(n.territory.size > before, '중심지가 영토를 넓혀야 한다');
+    const capR = L.getTerritoryRadius('capital', cap2.level);
+    const onlyHub = L.territoryTilesOf(n, hub)
+      .filter(([x, y]) => Math.hypot(x - (cap2.x + 1), y - (cap2.y + 1)) > capR);
+    let planted = null;
+    for (const [x, y] of onlyHub) { const r = L.build(n, 'warehouse', x, y); if (r.ok) { planted = r.structure; break; } }
+    if (planted) {
+      assert.strictEqual(L.canDemolish(n, hub.id).ok, false, '영토에 구조물이 있으면 중심지 철거 거부');
+      assert.strictEqual(L.demolish(n, planted.id).ok, true);
+    }
+    assert.strictEqual(L.canDemolish(n, hub.id).ok, true, '비우면 중심지 철거 가능');
+    assert.strictEqual(L.demolish(n, hub.id).ok, true);
+    assert.strictEqual(n.territory.size, before, '철거하면 영토가 원래대로 줄어야 한다');
+  }
+  console.log('✓ 철거 규칙 (수도 불가 · 중심지 조건부 · 인벤토리 소멸 · 영토 복구)');
+}
+
 // --- 그림 리소스가 빠진 게 없는지 ---
 {
   const { existsSync } = await import('node:fs');
