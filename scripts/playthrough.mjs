@@ -7,7 +7,12 @@
 // 그래서 "규칙상으로는 되는데 실제로는 안 되는" 문제(자리가 없다, 자원이
 // 창고까지 오지 못한다, 특정 구조물이 영영 멈춰 있다 …)를 잡아낸다.
 //
-// 실행: node scripts/playthrough.mjs [--verbose]
+// 실행: node scripts/playthrough.mjs [--from=x,y] [--verbose] [--debug]
+//
+// 주의: 이 봇은 "게임이 완주 가능한가"를 확인하는 도구지 최적 플레이어가 아니다.
+// 자원 배분이 서툴러 일부 시작 지점에서는 중간에 자원을 다 써버리고 정체한다.
+// 봇이 멈췄다고 곧 게임이 막힌 것은 아니며, 판정은 "부족: ○○" 자원이 실제로
+// 그 시점에 생산 가능한지로 해야 한다.
 // ============================================================
 import { createNation } from '../js/game.js';
 import * as L from '../js/logic.js';
@@ -45,6 +50,15 @@ const capital = () => n.structures.find(s => s.key === 'capital');
 const stock = (res) => L.totalStock(n, res);
 /** 비용을 감당할 수 있는지 (logic.canAfford는 내부 함수라 여기서 같은 판정을 한다) */
 const afford = (cost) => Object.entries(cost || {}).every(([r, a]) => stock(r) >= a);
+/**
+ * "수도 업그레이드에 쓸 몫을 건드리지 않고" 이 비용을 낼 수 있는가.
+ * 이 규칙이 없으면 봇이 창고·공장을 계속 지어대느라 수도 업그레이드 자원을
+ * 영영 못 모은다 (실제로 그렇게 Lv.4에서 맴돌았다).
+ */
+function affordSpare(cost) {
+  const reserve = getUpgradeCost('capital', capital().level) || {};
+  return Object.entries(cost || {}).every(([r, a]) => stock(r) - (reserve[r] || 0) >= a);
+}
 
 /** 비어 있는 자리에 구조물을 짓는다. 자원 노드가 필요하면 그 노드 위에 짓는다. */
 function buildSomewhere(key, { onNode = null } = {}) {
@@ -103,7 +117,9 @@ function warehouseTarget() {
 function ensureWarehouses(count) {
   let made = 0;
   while (structsOf('warehouse').length < count) {
-    if (!afford(STRUCTURES.warehouse.baseCost)) break;
+    // 첫 창고 몇 개는 필수(보관 없이는 아무것도 못 쌓는다), 그 다음부터는 여유분으로만
+    const essential = structsOf('warehouse').length < 8;
+    if (!(essential ? afford(STRUCTURES.warehouse.baseCost) : affordSpare(STRUCTURES.warehouse.baseCost))) break;
     if (!buildSomewhere('warehouse')) break;
     made++;
   }
@@ -196,11 +212,28 @@ function play() {
 }
 
 const allResearched = () => Object.keys(TECH_TREE).every(k => n.unlocked.has(k));
-const describe = () => `${capital().level}|${n.unlocked.size}|${n.structures.length}|${Object.keys(n.unlockedGoods).length}`;
+/**
+ * "진행 중인가"를 나타내는 지문. 구조물·연구뿐 아니라 **다음 수도 업그레이드에
+ * 얼마나 다가갔는지**도 넣는다. 이게 없으면 "지을 건 다 짓고 자원만 모으는
+ * 중"인 정상 상태를 멈춘 것으로 잘못 판정한다.
+ */
+function describe() {
+  const cost = getUpgradeCost('capital', capital().level) || {};
+  const progress = Object.entries(cost)
+    .reduce((a, [r, amt]) => a + Math.min(1, stock(r) / amt), 0);
+  return `${capital().level}|${n.unlocked.size}|${n.structures.length}`
+    + `|${n.unlockedGoods.size}|${progress.toFixed(2)}`;
+}
 
 /** 매 틱 하는 일: 짓기 → 연구 → 여행 → 레시피 설정 → 수도 업그레이드 */
 function act() {
   const cap = capital();
+
+  // 0) 창고가 먼저다. 산출 인벤토리가 차면 채굴·가공이 통째로 멈추기 때문에,
+  //    광산을 더 짓기 전에 보관 공간부터 확보한다.
+  //    (이 순서를 뒤로 미뤘더니 광산이 석재를 다 먹어 창고를 못 짓고,
+  //     창고가 없어 석재가 안 쌓이는 교착에 빠졌다)
+  ensureWarehouses(warehouseTarget());
 
   // 1) 채굴 구조물 — 영토 안의 자원 노드마다 하나씩
   for (const [nodeRes, structKey] of [['wood', 'lumber_mill'], ['stone', 'mine'],
@@ -208,6 +241,7 @@ function act() {
                                       ['copper_ore', 'mine'], ['gold_ore', 'mine'],
                                       ['mana_stone', 'extractor'], ['crude_oil', 'oil_well']]) {
     if (!n.unlocked.has(structKey)) continue;
+    // 채굴은 수입원 자체라 항상 최우선 (예비분을 헐어도 짓는다)
     if (!afford(STRUCTURES[structKey].baseCost)) continue;
     const s = buildSomewhere(structKey, { onNode: nodeRes });
     if (s) note(`t${tick} ${STRUCTURES[structKey].name} 건설 (${nodeRes} 노드)`);
@@ -239,7 +273,9 @@ function act() {
     if (!n.unlocked.has(key)) continue;
     const want = ['smelter', 'factory', 'refinery'].includes(key) ? 4 : 2;
     if (structsOf(key).length >= want) continue;
-    if (!afford(STRUCTURES[key].baseCost)) continue;
+    // 그 종류가 아직 하나도 없으면 예비분을 헐어서라도 짓는다 (없으면 진행 자체가 막힌다)
+    const first = structsOf(key).length === 0;
+    if (!(first ? afford(STRUCTURES[key].baseCost) : affordSpare(STRUCTURES[key].baseCost))) continue;
     const s = buildSomewhere(key);
     if (s) note(`t${tick} ${STRUCTURES[key].name} 건설`);
     // 지을 자리가 없어서 실패했다면 영토를 넓혀야 한다 (빈 칸이 조각나
@@ -298,10 +334,6 @@ function act() {
     }
   }
 
-  // 8-1) 창고는 "필요한 만큼만" 짓는다. 무작정 늘리면 목재·석재를 다 먹어
-  //      제련소 같은 핵심 구조물을 못 짓는다 (실제로 그렇게 막혔었다).
-  ensureWarehouses(warehouseTarget());
-
   // 9) 다른 구조물도 여유가 있으면 올린다 (생산량 확보)
   if (tick % 15 === 0) {
     for (const s of n.structures) {
@@ -309,7 +341,7 @@ function act() {
       const c = getUpgradeCost(s.key, s.level);
       // 창고는 용량이 곧 물류 한계라 우선 올린다
       const priority = s.key === 'warehouse';
-      if (c && afford(c) && (priority || stockRich())) L.upgrade(n, s.id);
+      if (c && affordSpare(c) && (priority || stockRich())) L.upgrade(n, s.id);
     }
   }
 }
@@ -352,7 +384,7 @@ const ORE_FOR = {
  * (수도 업그레이드 비용에 필요한 광물이 영토에 없으면 여기서 막히기 때문)
  */
 function expandTowardMissing() {
-  if (!afford(STRUCTURES.hub.baseCost)) return;
+  if (!afford(STRUCTURES.hub.baseCost)) return;   // 확장은 진행에 직결되므로 예비분을 헐어도 된다
   const have = nodesInTerritory();
   const upCost = getUpgradeCost('capital', capital().level) || {};
   // 지금 필요한데 영토에 없는 "원석"만 고른다.
