@@ -46,6 +46,8 @@ export class Nation {
     this.trophies = 0;
     this.shieldUntil = 0; // 타임스탬프(ms). 이 값이 현재 시각보다 크면 보호막 활성.
     this.units = { attack: {}, defense: {} }; // 무장 완료된 병력 로스터 (unitKey -> 보유 수)
+    this.seenRaids = [];  // 이미 반영한 습격 리포트 id (같은 리포트를 두 번 받아도 한 번만 적용)
+    this.raidsSent = 0;   // 내가 보낸 습격 횟수
   }
 
   isOwned(x, y) { return this.territory.has(logic.tileKey(x, y)); }
@@ -56,6 +58,14 @@ export class Nation {
   }
   upgrade(structId) {
     const res = logic.upgrade(this, structId);
+    return res.ok ? null : res.error;
+  }
+  demolish(structId) {
+    const res = logic.demolish(this, structId);
+    return res.ok ? null : res.error;
+  }
+  rotateStructure(structId, dir) {
+    const res = logic.rotateStructure(this, structId, dir);
     return res.ok ? null : res.error;
   }
   setRecipe(structId, recipeKey) {
@@ -96,6 +106,8 @@ export class Nation {
       expedition: this.expedition, unlockedGoods: Array.from(this.unlockedGoods),
       lastExpedition: this.lastExpedition,
       trophies: this.trophies, shieldUntil: this.shieldUntil, units: this.units,
+      // 멀티플레이 습격: 이미 반영한 리포트 id(중복 반영 방지)와 보낸 습격 수
+      seenRaids: this.seenRaids || [], raidsSent: this.raidsSent || 0,
     };
   }
 
@@ -112,6 +124,8 @@ export class Nation {
     n.trophies = data.trophies || 0;
     n.shieldUntil = data.shieldUntil || 0;
     n.units = data.units || { attack: {}, defense: {} };
+    n.seenRaids = data.seenRaids || [];
+    n.raidsSent = data.raidsSent || 0;
     n.nextStructId = (n.structures.reduce((m, s) => Math.max(m, s.id), 0)) + 1;
     return n;
   }

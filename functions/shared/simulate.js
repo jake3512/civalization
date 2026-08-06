@@ -8,7 +8,7 @@
 // 중요: 자원은 저절로 국고로 들어가지 않는다. 벨트나 수동 이송으로 창고(수도 포함)
 // 까지 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
 // ============================================================
-import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity,
+import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity, isBeltKey,
          CROPS, ANIMALS } from './data.js';
 import { getTile } from './world.js';
 import { footprintTiles, tileKey, structureAt, getTerritoryRadius,
@@ -47,6 +47,9 @@ function isPowered(circles, s, def) {
 }
 
 // ---------------- 벨트 물류 ----------------
+/** 벨트류인가 (일반 벨트 · 분할 · 교차) */
+const isBelt = (s) => !!s && isBeltKey(s.key);
+
 function findAdjacentBelt(nation, s, def, wantFacingAway) {
   // 구조물 외곽에 붙어있는 벨트 중, 조건(구조물에서 나가는 방향인지)에 맞는 것을 찾는다
   const tiles = footprintTiles(s.x, s.y, def.footprint);
@@ -55,11 +58,12 @@ function findAdjacentBelt(nation, s, def, wantFacingAway) {
     for (const [dx, dy] of DIR_VECT) {
       const nx = x + dx, ny = y + dy;
       if (inside.has(tileKey(nx, ny))) continue;
-      const belt = nation.structures.find(b => b.key === 'belt' && b.x === nx && b.y === ny);
+      const belt = nation.structures.find(b => isBelt(b) && b.x === nx && b.y === ny);
       if (!belt) continue;
-      const [bdx, bdy] = DIR_VECT[belt.dir];
+      // 교차로는 들어온 방향 그대로 지나가므로, 구조물 쪽에서 보면 항상 "나가는" 포트다
+      const [bdx, bdy] = DIR_VECT[belt.dir || 0];
       const targetTile = tileKey(nx + bdx, ny + bdy);
-      const pointsBackIn = inside.has(targetTile);
+      const pointsBackIn = STRUCTURES[belt.key].beltKind === 'cross' ? false : inside.has(targetTile);
       if (wantFacingAway && !pointsBackIn) return belt;   // 구조물에서 나가는 벨트(산출 포트)
       if (!wantFacingAway && pointsBackIn) return belt;   // 구조물로 들어오는 벨트(투입 포트)
     }
@@ -72,34 +76,74 @@ function findAdjacentBelt(nation, s, def, wantFacingAway) {
  * (들어가지 못한 양은 호출자가 원래 있던 곳에 그대로 남겨둔다 — 예전처럼
  *  국고로 순간이동시키지 않는다. 국고는 창고 재고의 합계일 뿐이기 때문)
  */
-function pushIntoBeltChain(nation, startBelt, res, amt) {
-  let cur = startBelt;
-  const visited = new Set();
-  while (cur) {
-    const key = tileKey(cur.x, cur.y);
-    if (visited.has(key)) break; // 루프 방지
-    visited.add(key);
-    const [dx, dy] = DIR_VECT[cur.dir];
-    const nx = cur.x + dx, ny = cur.y + dy;
-    const moved = Math.min(amt, beltThroughput(cur.level));
-    // 지나간 자원을 벨트에 표시해 둔다 (화면에서 무엇이 흐르는지 보이도록)
-    cur._carry = res; cur._carryTtl = 2;
+/**
+ * 이 벨트 칸에서 자원이 나갈 방향들을 정한다.
+ *  · 일반 벨트: 설정된 방향 하나
+ *  · 분할 컨베이어: 정면 · 좌 · 우 세 방향을 번갈아 (막힌 쪽은 건너뛴다)
+ *  · 교차로: 들어온 방향 그대로 직진 (두 라인이 섞이지 않는다)
+ */
+function beltExits(s, fromDir) {
+  const kind = STRUCTURES[s.key].beltKind;
+  if (kind === 'cross') {
+    // 들어온 방향을 모르면(구조물에서 바로 들어온 경우) 설정 방향으로 내보낸다
+    return [fromDir == null ? (s.dir || 0) : fromDir];
+  }
+  if (kind === 'splitter') {
+    const d = s.dir || 0;
+    const order = [d, (d + 3) % 4, (d + 1) % 4];   // 정면 → 좌 → 우
+    // 매번 같은 순서로 보내면 한쪽만 채워지므로, 보낸 횟수로 시작점을 돌린다
+    const turn = (s._splitTurn || 0) % 3;
+    return [...order.slice(turn), ...order.slice(0, turn)];
+  }
+  return [s.dir || 0];
+}
 
-    const targetStruct = structureAt(nation, nx, ny);
-    if (targetStruct && targetStruct.key !== 'belt') {
+/**
+ * 벨트 체인을 따라 자원을 보낸다. 실제로 목적지에 들어간 양을 반환한다.
+ * (들어가지 못한 양은 호출자가 원래 있던 곳에 그대로 남겨둔다 — 예전처럼
+ *  국고로 순간이동시키지 않는다. 국고는 창고 재고의 합계일 뿐이기 때문)
+ */
+function pushIntoBeltChain(nation, startBelt, res, amt, fromDir = null, visited = new Set(), depth = 0) {
+  const cur = startBelt;
+  if (!cur || depth > 200) return 0;
+  const key = tileKey(cur.x, cur.y);
+  if (visited.has(key)) return 0;   // 루프 방지
+  visited.add(key);
+
+  const moved = Math.min(amt, beltThroughput(cur.level));
+  // 지나간 자원을 벨트에 표시해 둔다 (화면에서 무엇이 흐르는지 보이도록)
+  cur._carry = res; cur._carryTtl = 2;
+
+  for (const dir of beltExits(cur, fromDir)) {
+    const [dx, dy] = DIR_VECT[dir];
+    const nx = cur.x + dx, ny = cur.y + dy;
+    const target = structureAt(nation, nx, ny);
+
+    if (target && !isBelt(target)) {
       // 창고로 들어가는 경우 — 종류/용량 제한을 그대로 적용한다
-      if (STRUCTURES[targetStruct.key]?.storageCapacity) {
-        return depositInto(targetStruct, res, moved);
+      if (STRUCTURES[target.key]?.storageCapacity) {
+        const got = depositInto(target, res, moved);
+        if (got > 0) { cur._splitTurn = (cur._splitTurn || 0) + 1; return got; }
+        continue;   // 이 갈래가 막혔으면 다음 갈래로
       }
-      targetStruct.inputBuffer = targetStruct.inputBuffer || {};
-      const room = LOGISTICS.inputCapacity - (targetStruct.inputBuffer[res] || 0);
+      target.inputBuffer = target.inputBuffer || {};
+      const room = LOGISTICS.inputCapacity - (target.inputBuffer[res] || 0);
       const accepted = Math.max(0, Math.min(moved, room));
-      targetStruct.inputBuffer[res] = (targetStruct.inputBuffer[res] || 0) + accepted;
-      return accepted;
+      if (accepted > 0) {
+        target.inputBuffer[res] = (target.inputBuffer[res] || 0) + accepted;
+        cur._splitTurn = (cur._splitTurn || 0) + 1;
+        return accepted;
+      }
+      continue;
     }
-    const nextBelt = nation.structures.find(b => b.key === 'belt' && b.x === nx && b.y === ny);
-    if (nextBelt) { cur = nextBelt; continue; }
-    break; // 벨트가 허공에서 끝남 → 아무것도 옮기지 못한다
+
+    if (isBelt(target)) {
+      const got = pushIntoBeltChain(nation, target, res, moved, dir, visited, depth + 1);
+      if (got > 0) { cur._splitTurn = (cur._splitTurn || 0) + 1; return got; }
+      visited.delete(tileKey(target.x, target.y)); // 다른 갈래로도 시도할 수 있게 되돌린다
+      continue;
+    }
+    // 벨트가 허공에서 끝남 → 이 갈래로는 못 보낸다
   }
   return 0;
 }
@@ -236,8 +280,12 @@ export function tickNation(nation) {
         }
       } else if (s.key === 'farm') {
         const crop = CROPS[s.crop || 'rice'];
-        if (crop) storeOutput(s, crop.yields, crop.baseYield * s.level);
-        else { s.idle = true; s.idleReason = '작물 미선택'; }
+        if (crop) {
+          storeOutput(s, crop.yields, crop.baseYield * s.level);
+          // 인력은 오직 농지에서만 나온다 (여행의 유일한 연료).
+          // 작물과 달리 창고를 거치지 않는 수치 자원이라 바로 국고에 더한다.
+          nation.resources.labor = (nation.resources.labor || 0) + (def.laborIncome || 0) * s.level;
+        } else { s.idle = true; s.idleReason = '작물 미선택'; }
       } else if (s.key === 'barn') {
         const animal = ANIMALS[s.animal || 'cattle'];
         if (animal) {
@@ -259,7 +307,6 @@ export function tickNation(nation) {
       }
     } else if (def.category === 'core' && s.key === 'capital') {
       nation.resources.gold = (nation.resources.gold || 0) + (def.goldIncome || 0) * s.level;
-      nation.resources.labor = (nation.resources.labor || 0) + (def.laborIncome || 0) * s.level;
     } else if (def.category === 'military_base' && s.key === 'outpost') {
       processRecruitQueue(nation, s);
     }

@@ -9,7 +9,7 @@
 // 뒤쪽(y가 작은) 것부터 그리면 앞 건물이 뒤 건물을 자연스럽게 가린다.
 // ============================================================
 import { getTileRange } from './world.js';
-import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon } from './data.js';
+import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon, isBeltKey } from './data.js';
 
 // 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
@@ -184,7 +184,7 @@ export class Renderer {
     const [w, h] = def.footprint;
     const { sx, sy } = this.proj(s.x, s.y);
     const bw = w * this.tile, bh = h * this.tileY;
-    if (s.key === 'belt') return { left: sx, right: sx + bw, top: sy, bottom: sy + bh, sx, sy, bw, bh };
+    if (isBeltKey(s.key)) return { left: sx, right: sx + bw, top: sy, bottom: sy + bh, sx, sy, bw, bh };
     const m = structArtMetrics(this.tile, w, h, s.key);
     const lift = m.lift, art = m.art;
     const footY = sy + m.footY;                     // 그림이 서 있는 바닥선 = 발판 앞쪽 모서리
@@ -333,7 +333,7 @@ export class Renderer {
     // 발판 고스트 (초록=건설 가능, 빨강=불가) — 실제 건물과 같은 자세로 세워 보여준다
     ctx.fillStyle = p.ok ? 'rgba(74,157,143,0.30)' : 'rgba(193,68,60,0.30)';
     ctx.fillRect(sx, sy, bw, bh);
-    if (p.key !== 'belt') {
+    if (!isBeltKey(p.key)) {
       this._drawStandingArt(structureIcon(p.key), sx + bw / 2, sy + bh * 0.72,
         Math.min(w, h) * tile * 1.15 * structScale(p.key), 0.8);
     }
@@ -345,7 +345,7 @@ export class Renderer {
     ctx.lineWidth = 1;
 
     // 벨트는 흐를 방향을 화살표로 함께 보여준다
-    if (p.key === 'belt') {
+    if (isBeltKey(p.key)) {
       ctx.fillStyle = '#f0e8de';
       ctx.font = `${tile * 0.55}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -379,7 +379,7 @@ export class Renderer {
     const b = this.structBounds(s);
     if (b.right < 0 || b.left > canvas.width || b.bottom < 0 || b.top > canvas.height) return;
 
-    if (s.key === 'belt') {
+    if (isBeltKey(s.key)) {
       // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다
       ctx.fillStyle = '#4b5a67';
       ctx.fillRect(b.sx + 2, b.sy + 1, tile - 4, tileY - 2);
@@ -458,7 +458,7 @@ export class Renderer {
    */
   _drawOverlay(s) {
     const { ctx, tile, canvas } = this;
-    if (tile < 11 || s.key === 'belt') return;      // 너무 축소된 상태에서는 생략
+    if (tile < 11 || isBeltKey(s.key)) return;      // 너무 축소된 상태에서는 생략
     const def = STRUCTURES[s.key];
     const b = this.structBounds(s);
     // 화면 밖 구조물은 건너뛴다 (나라가 커져도 프레임마다 헛일하지 않도록)

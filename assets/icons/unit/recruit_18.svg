@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>
+  <path d="M8 40 h48 a6 6 0 0 1 0 14 H8 a6 6 0 0 1 0 -14 Z" fill="#4a444f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="14" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="24" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="34" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="44" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="52" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/>
+  <path d="M12 40 H52 L47.6 34 H16.4 Z" fill="#3a4650" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M12 26 h40 v14 h-40 Z" fill="#5f7080" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M32 26 h20 v14 h-20 Z" fill="#3a4650" opacity="0.4"/>
+     <!-- 공성 파쇄기 — 앞에 거대한 파쇄 드럼 -->
+    <path d="M18 16 h28 v12 h-28 Z" fill="#9fb0c0" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    
+  <path d="M42 26 v16 a10 4.5 0 0 0 20 0 v-16 a10 4.5 0 0 0 -20 0 Z" fill="#9fb0c0" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M55.4 26 v16 a6.6000000000000005 4.5 0 0 0 6.6000000000000005 -0.45 v-16 Z" fill="#5f7080" opacity="0.42"/>
+  <path d="M43.5 30.5 v16 a3 4.5 0 0 0 3 1.8 v-17.8 Z" fill="#e2ebf2" opacity="0.55"/>
+  <ellipse cx="52" cy="26" rx="10" ry="4.5" fill="#e2ebf2" stroke="#161018" stroke-width="3"/>
+    <path d="M42 20 H62" stroke="#161018" stroke-width="2.6"/><path d="M42 26 H62" stroke="#161018" stroke-width="2.6"/><path d="M42 32 H62" stroke="#161018" stroke-width="2.6"/>
+    <circle cx="28" cy="22" r="4" fill="#ff8f6b" stroke="#161018" stroke-width="2"/>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>                     <!-- 차원 침투 특공대 — 포탈에서 튀어나온다 -->
+    <ellipse cx="32" cy="52" rx="20" ry="7" fill="#542ea8" stroke="#161018" stroke-width="3"/>
+    <ellipse cx="32" cy="51" rx="13" ry="4.4" fill="#c9a6ff" opacity="0.85"/>
+    <path d="M25 40 h5 v10 h-5 Z" fill="#2f2440" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M34 40 h5 v10 h-5 Z" fill="#2f2440" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M22 22 h20 v20 a4 4 0 0 1 -4 4 H26 a4 4 0 0 1 -4 -4 Z" fill="#5a3f8f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 22 h10 v20 a4 4 0 0 1 -4 4 H32 Z" fill="#31215a" opacity="0.45"/>
+    <circle cx="32" cy="13" r="8" fill="#efe0ff" stroke="#161018" stroke-width="3"/>
+    <path d="M23 12 a9 9 0 0 1 18 0 Z" fill="#31215a" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="32" cy="32" r="5" fill="#c9a6ff" stroke="#161018" stroke-width="2"/>
+    <path d="M12 30 L20 26 M52 30 L44 26" stroke="#c9a6ff" stroke-width="3.4" stroke-linecap="round"/>
+</svg>

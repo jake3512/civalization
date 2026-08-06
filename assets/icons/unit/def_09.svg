@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>                           <!-- 대공 사격조 — 하늘로 세운 연장포 -->
+    
+  <path d="M14 42 v10 a18 6 0 0 0 36 0 v-10 a18 6 0 0 0 -36 0 Z" fill="#8d99a6" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M38.12 42 v10 a11.88 6 0 0 0 11.88 -0.6000000000000001 v-10 Z" fill="#5d6773" opacity="0.42"/>
+  <path d="M16.700000000000003 48 v10 a5.3999999999999995 6 0 0 0 5.3999999999999995 2.4000000000000004 v-12.4 Z" fill="#b9c3cc" opacity="0.55"/>
+  <ellipse cx="32" cy="42" rx="18" ry="6" fill="#b9c3cc" stroke="#161018" stroke-width="3"/>
+    <path d="M22 34 h20 v10 h-20 Z" fill="#5f7080" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M26 34 L23 6" stroke="#161018" stroke-width="5" stroke-linecap="round"/>
+      <path d="M26 34 L23 6" stroke="#e2ebf2" stroke-width="2.4" stroke-linecap="round"/><path d="M32 34 L29 6" stroke="#161018" stroke-width="5" stroke-linecap="round"/>
+      <path d="M32 34 L29 6" stroke="#e2ebf2" stroke-width="2.4" stroke-linecap="round"/><path d="M38 34 L35 6" stroke="#161018" stroke-width="5" stroke-linecap="round"/>
+      <path d="M38 34 L35 6" stroke="#e2ebf2" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="44" cy="30" r="5" fill="#6fd4ff" stroke="#161018" stroke-width="2.5"/>
+</svg>

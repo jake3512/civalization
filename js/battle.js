@@ -17,6 +17,22 @@ import { tileKey, getTerritoryRadius } from './logic.js';
 
 let nextEntityId = 1;
 
+/**
+ * 전투는 **결정론적**이어야 한다. 방어자가 나중에 접속해 "내 기지가 어떻게
+ * 뚫렸는지" 그대로 재생해 보려면(리플레이), 같은 시드 + 같은 배치 기록으로
+ * 돌렸을 때 같은 전투가 나와야 하기 때문이다. 그래서 Math.random 대신
+ * 시드를 받는 난수를 쓴다 (mulberry32).
+ */
+function makeRng(seed) {
+  let a = (seed >>> 0) || 1;
+  return function rng() {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function footprintCenter(s) {
   const def = STRUCTURES[s.key];
   const [w, h] = def.footprint;
@@ -51,8 +67,10 @@ function moveToward(u, target, speed, dt) {
  * 방어자 스냅샷(js/game.js의 Nation#toJSON 결과)과 공격자가 고른 "공격 덱"
  * (unitKey -> 수량)으로 전투 세션을 만든다.
  */
-export function createBattleSession(defenderSnapshot, attackerDeck) {
+export function createBattleSession(defenderSnapshot, attackerDeck, seed = null) {
   nextEntityId = 1;
+  const usedSeed = seed == null ? (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0 : seed >>> 0;
+  const rng = makeRng(usedSeed);
   const territorySet = new Set(defenderSnapshot.territory || []);
 
   const structures = (defenderSnapshot.structures || []).map(s => {
@@ -77,7 +95,7 @@ export function createBattleSession(defenderSnapshot, attackerDeck) {
     for (let i = 0; i < count; i++) {
       const anchor = anchorPool.length ? anchorPool[anchorIdx % anchorPool.length] : capitalStruct;
       anchorIdx++;
-      const jitter = () => (Math.random() - 0.5) * 2.4;
+      const jitter = () => (rng() - 0.5) * 2.4;
       defenders.push({
         uid: `d${nextEntityId++}`, type: 'unit', side: 'defense', key: unitKey,
         x: (anchor ? anchor.cx : 0) + jitter(), y: (anchor ? anchor.cy : 0) + jitter(),
@@ -96,6 +114,9 @@ export function createBattleSession(defenderSnapshot, attackerDeck) {
     attackers: [],             // 실시간으로 소환되는 공격 유닛
     deck: { ...attackerDeck }, // 남은 배치 가능 수량 (unitKey -> count)
     deployedCounts: {},        // 실제로 배치한 수량 누계 (종료 후 공격자 로스터에서 차감)
+    seed: usedSeed,            // 리플레이용 — 이 시드로 다시 만들면 같은 배치가 나온다
+    deployLog: [],             // [{ t, key, x, y }] 공격자가 언제 어디에 소환했는가
+    replay: null,              // 리플레이 재생 중이면 { deploys, cursor }
     timeLeft: BATTLE.durationSec,
     elapsed: 0,
     ended: false,
@@ -119,6 +140,10 @@ export function deployUnit(session, unitKey, x, y) {
 
   session.deck[unitKey] -= 1;
   session.deployedCounts[unitKey] = (session.deployedCounts[unitKey] || 0) + 1;
+  // 리플레이 기록 — 재생 중에는 이미 기록을 읽고 있는 것이라 다시 남기지 않는다
+  if (!session.replay) {
+    session.deployLog.push({ t: Math.round(session.elapsed * 100) / 100, key: unitKey, x, y });
+  }
   const entity = {
     uid: `a${nextEntityId++}`, type: 'unit', side: 'attack', key: unitKey,
     x, y, hp: unitDef.hp, maxHp: unitDef.hp, alive: true, cooldown: 0, targetUid: null,
@@ -336,4 +361,38 @@ export function stepBattle(session, dt) {
 /** 유저가 직접 전투를 조기 종료(퇴각)할 때. */
 export function retreat(session) {
   return endBattle(session);
+}
+
+// ---------------- 리플레이 (방어자가 "어떻게 뚫렸는지" 다시 보기) ----------------
+/**
+ * 습격 리포트의 replay({ seed, deploys })와 내 기지 스냅샷으로 같은 전투를
+ * 다시 만든다. 시드가 같으면 수비 유닛 배치까지 똑같고, 기록된 시각에 맞춰
+ * 공격 유닛이 자동으로 소환되므로 전투가 그대로 재현된다.
+ *
+ * 주의: 방어 배치를 바꾼 뒤에 예전 리플레이를 보면 그때와 다르게 흘러간다.
+ * 그래서 리포트를 만들 때의 기지 스냅샷(baseSnapshot)을 함께 넘기는 쪽이 정확하다.
+ */
+export function createReplaySession(baseSnapshot, replay) {
+  const deploys = [...(replay?.deploys || [])].sort((a, b) => a.t - b.t);
+  const deck = {};
+  for (const d of deploys) deck[d.key] = (deck[d.key] || 0) + 1;
+  const session = createBattleSession(baseSnapshot, deck, replay?.seed ?? 1);
+  session.replay = { deploys, cursor: 0 };
+  return session;
+}
+
+/**
+ * 리플레이를 dt초만큼 진행한다. 기록된 시각이 지난 소환을 먼저 재생한 뒤
+ * 평소와 같이 전투를 한 스텝 굴린다.
+ */
+export function stepReplay(session, dt) {
+  if (session.ended) return session;
+  const r = session.replay;
+  if (r) {
+    while (r.cursor < r.deploys.length && r.deploys[r.cursor].t <= session.elapsed) {
+      const d = r.deploys[r.cursor++];
+      deployUnit(session, d.key, d.x, d.y);
+    }
+  }
+  return stepBattle(session, dt);
 }

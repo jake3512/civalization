@@ -8,7 +8,7 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES,
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, isBeltKey, isRotatable,
          VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity,
          CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
@@ -200,7 +200,25 @@ export function capitalSiteReport(x, y) {
     }
   }
   const missing = CAPITAL_REQUIRED_NODES.filter(k => !found.has(k));
-  return { ok: missing.length === 0, found, missing, radius, center: [cx, cy] };
+  // 수도 발판(3x3)이 자원 노드를 깔고 앉으면 그 노드는 영영 못 쓴다.
+  // 구조물을 철거하는 수단이 없고 수도는 옮길 수도 없어서, 하필 그게 구리
+  // 광산이면 수도 4레벨(구리 주괴 필요)에서 되돌릴 수 없이 막힌다.
+  // 그래서 아예 그런 자리에는 수도를 못 세우게 막는다.
+  const buried = buriedNodes(x, y, def.footprint);
+  return {
+    ok: missing.length === 0 && buried.length === 0,
+    found, missing, buried, radius, center: [cx, cy],
+  };
+}
+
+/** 이 발판이 깔고 앉게 되는 자원 노드 종류 (되돌릴 수 없으므로 미리 알려준다) */
+export function buriedNodes(x, y, footprint) {
+  const out = new Set();
+  for (const [tx, ty] of footprintTiles(x, y, footprint)) {
+    const t = getTile(tx, ty);
+    if (t.node) out.add(t.terrain);
+  }
+  return Array.from(out);
 }
 
 /**
@@ -228,7 +246,8 @@ export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
       const [cx, cy] = footprintCenter(x, y, def.footprint);
       const all = CAPITAL_REQUIRED_NODES.every(k =>
         nodes[k].some(([nx, ny]) => Math.hypot(nx - cx, ny - cy) <= radius));
-      if (all) sites.push([x, y]);
+      // 노드를 깔고 앉는 자리는 후보에서 뺀다 (capitalSiteReport와 같은 규칙)
+      if (all && buriedNodes(x, y, def.footprint).length === 0) sites.push([x, y]);
     }
   }
   return sites;
@@ -271,6 +290,10 @@ export function validatePlacement(nation, structKey, x, y) {
     if (!clear) return { ok: false, error: '이 위치에는 건설할 수 없습니다 (이미 점유됨)' };
     const site = capitalSiteReport(x, y);
     if (!site.ok) {
+      if (site.buried && site.buried.length) {
+        const names = site.buried.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+        return { ok: false, error: `수도가 ${names} 위에 놓입니다 — 그 자원을 영영 못 쓰게 되니 한 칸 옮겨주세요` };
+      }
       const names = site.missing.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
       return { ok: false, error: `수도 주변 영토에 ${names}이(가) 없습니다` };
     }
@@ -305,7 +328,7 @@ export function build(nation, structKey, x, y, dir = 0) {
   pay(nation, def.baseCost);
   const structure = {
     id: nation.nextStructId++, key: structKey, x, y, level: 1,
-    recipe: null, dir: structKey === 'belt' ? dir : undefined,
+    recipe: null, dir: isBeltKey(structKey) ? dir : undefined,
     inputBuffer: {}, outputBuffer: {}, idle: false,
     // 보관 구조물(창고·수도)만 실제 재고를 담는다
     store: def.storageCapacity ? {} : undefined,
@@ -335,6 +358,113 @@ export function upgrade(nation, structId) {
     addTerritory(nation, cx, cy, getTerritoryRadius(s.key, s.level));
   }
   return { ok: true, structure: s };
+}
+
+// ============================================================
+// 철거
+//
+// 구조물은 원래 한 번 지으면 되돌릴 수 없었다. 그러다 보니 광산 자리를 창고로
+// 덮는 실수 하나가 영구히 남았다. 이제 철거로 되돌릴 수 있되,
+//   · 수도는 국가의 시작점이라 철거할 수 없고
+//   · 중심지는 그 영토에 다른 구조물이 서 있으면 철거할 수 없으며
+//     (영토가 사라지면 그 위의 구조물이 영토 밖에 붕 뜨게 되므로)
+//   · 철거하는 구조물 안에 들어 있던 자원은 전부 사라진다 (되돌리기 비용)
+// 는 규칙을 둔다. 건설비도 돌려주지 않는다.
+// ============================================================
+
+/** 이 구조물이 만들어내는 영토 타일 (영토를 넓히지 않는 구조물이면 빈 배열) */
+export function territoryTilesOf(nation, s) {
+  const def = STRUCTURES[s.key];
+  if (!def || !def.territoryRadius) return [];
+  const [cx, cy] = footprintCenter(s.x, s.y, def.footprint);
+  const radius = getTerritoryRadius(s.key, s.level);
+  const out = [];
+  const y0 = Math.floor(cy - radius), y1 = Math.ceil(cy + radius);
+  const x0 = Math.floor(cx - radius), x1 = Math.ceil(cx + radius);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (Math.hypot(x - cx, y - cy) <= radius) out.push([x, y]);
+    }
+  }
+  return out;
+}
+
+/**
+ * 이 구조물만이 제공하는 영토 타일 (다른 수도·중심지가 겹쳐 덮고 있지 않은 칸).
+ * 중심지가 서로 겹쳐 있을 때 "겹친 부분"까지 잃는 것으로 잘못 세지 않으려고 쓴다.
+ */
+function exclusiveTerritoryOf(nation, s) {
+  const others = nation.structures.filter(o => o.id !== s.id && STRUCTURES[o.key]?.territoryRadius);
+  const covered = new Set();
+  for (const o of others) for (const [x, y] of territoryTilesOf(nation, o)) covered.add(tileKey(x, y));
+  return territoryTilesOf(nation, s).filter(([x, y]) => !covered.has(tileKey(x, y)));
+}
+
+/** 철거할 수 있는지 판정만 한다 (버튼 잠금·안내 문구용) */
+export function canDemolish(nation, structId) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  if (s.key === 'capital') return { ok: false, error: '수도는 철거할 수 없습니다' };
+
+  if (STRUCTURES[s.key]?.territoryRadius) {
+    // 이 구조물이 없어지면 영토 밖으로 밀려날 구조물이 있는지 본다
+    const losing = new Set(exclusiveTerritoryOf(nation, s).map(([x, y]) => tileKey(x, y)));
+    const stranded = nation.structures.filter(o => {
+      if (o.id === s.id) return false;
+      const [w, h] = STRUCTURES[o.key].footprint;
+      return footprintTiles(o.x, o.y, [w, h]).some(([x, y]) => losing.has(tileKey(x, y)));
+    });
+    if (stranded.length) {
+      const names = [...new Set(stranded.map(o => STRUCTURES[o.key].name))].slice(0, 3).join(', ');
+      return {
+        ok: false,
+        error: `이 영토에 구조물이 ${stranded.length}개 남아 있습니다 (${names}${stranded.length > 3 ? ' 등' : ''}) — 먼저 철거해주세요`,
+        stranded: stranded.length,
+      };
+    }
+  }
+  return { ok: true, structure: s };
+}
+
+/** 영토를 처음부터 다시 계산한다 (철거로 줄어들 수 있으므로 누적이 아니라 재구성) */
+function recomputeTerritory(nation) {
+  nation.territory = new Set();
+  for (const s of nation.structures) {
+    for (const [x, y] of territoryTilesOf(nation, s)) nation.territory.add(tileKey(x, y));
+  }
+}
+
+/** 구조물을 철거한다. 안에 있던 자원은 전부 사라지고 건설비도 돌려주지 않는다. */
+export function demolish(nation, structId) {
+  const check = canDemolish(nation, structId);
+  if (!check.ok) return check;
+  const s = check.structure;
+
+  // 사라지는 자원을 알려주기 위해 미리 모아둔다 (UI 경고 문구용)
+  const lost = {};
+  for (const bag of [s.store, s.inputBuffer, s.outputBuffer]) {
+    for (const [res, amt] of Object.entries(bag || {})) {
+      if (amt > 0) lost[res] = (lost[res] || 0) + amt;
+    }
+  }
+
+  nation.structures = nation.structures.filter(o => o.id !== structId);
+  recomputeTerritory(nation);
+  recomputeStock(nation);   // 창고가 사라졌으면 국고 표시도 줄어든다
+  return { ok: true, removed: s, lost };
+}
+
+/**
+ * 이미 설치된 벨트류의 방향을 바꾼다.
+ * 벨트는 한 칸씩 이어 깔다 보면 방향을 잘못 잡기 쉬운데, 예전에는 방향을
+ * 고치려면 지우고 다시 까는 수밖에 없었다 (철거도 없던 시절엔 아예 불가능).
+ */
+export function rotateStructure(nation, structId, dir = null) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  if (!isRotatable(s.key)) return { ok: false, error: '방향을 바꿀 수 없는 구조물입니다' };
+  s.dir = dir == null ? (((s.dir || 0) + 1) % 4) : (((dir % 4) + 4) % 4);
+  return { ok: true, structure: s, dir: s.dir };
 }
 
 export function setRecipe(nation, structId, recipeKey) {
@@ -650,17 +780,140 @@ export function applyRaidResult(attacker, defender, raidResult, now = Date.now()
   defender.trophies = Math.max(0, (defender.trophies || 0) + defenderTrophyDelta);
 
   // 배치했던 공격 유닛은 생존 여부와 무관하게 소모된다 (다시 모집해야 함)
-  attacker.units = attacker.units || { attack: {}, defense: {} };
-  for (const [key, rawCount] of Object.entries(raidResult.deployedUnits || {})) {
-    if (!UNITS.attack[key]) continue;
-    const count = Math.max(0, Math.floor(Number(rawCount) || 0));
-    attacker.units.attack[key] = Math.max(0, (attacker.units.attack[key] || 0) - count);
-  }
+  consumeDeployedUnits(attacker, raidResult.deployedUnits);
 
   attacker.shieldUntil = 0;                          // 공격하면 자신의 실드는 즉시 해제
   defender.shieldUntil = now + WAR.postAttackShieldMs; // 공격당한 쪽은 새 실드를 얻는다 (연쇄 공격 방지)
 
   return { win, destructionPercent, loot: appliedLoot, attackerTrophyDelta, defenderTrophyDelta };
+}
+
+/** 배치했던 공격 유닛을 로스터에서 뺀다 (생존 여부와 무관하게 소모) */
+function consumeDeployedUnits(attacker, deployedUnits) {
+  attacker.units = attacker.units || { attack: {}, defense: {} };
+  for (const [key, rawCount] of Object.entries(deployedUnits || {})) {
+    if (!UNITS.attack[key]) continue;
+    const count = Math.max(0, Math.floor(Number(rawCount) || 0));
+    attacker.units.attack[key] = Math.max(0, (attacker.units.attack[key] || 0) - count);
+  }
+}
+
+// ============================================================
+// 비동기 습격 (양쪽이 같은 순간에 접속해 있지 않은 멀티플레이)
+//
+// applyRaidResult는 공격자와 방어자 객체가 **둘 다 메모리에 있을 때** 쓴다
+// (로컬 플레이 / Cloud Functions 서버). 실제 멀티플레이에서는 방어자가
+// 접속해 있지 않을 수 있어서, 공격자가 자기 몫을 먼저 반영하고 "습격 리포트"를
+// 남기면, 방어자가 다음에 접속했을 때 자기 몫을 반영한다.
+//
+// 그래서 아래 두 함수는 applyRaidResult를 반으로 쪼갠 것이다:
+//   applyRaidToAttacker — 약탈품 획득 · 유닛 소모 · 트로피 · 실드 해제
+//   applyRaidToDefender — 약탈 손실 · 트로피 · 실드 획득 (리포트 id로 멱등)
+//
+// 방어자는 공격자가 보낸 숫자를 그대로 믿지 않는다. 파괴율에서 승패를 다시
+// 계산하고, 트로피 변동은 규칙상 가능한 범위로 자르고, 약탈은 지금 실제로
+// 가진 재고까지만 빠진다. 즉 조작된 리포트로 뺏을 수 있는 최대치는
+// "정직하게 완승했을 때"와 같다.
+// ============================================================
+
+/** 습격 리포트를 만든다 (공격자가 전투를 끝낸 직후). 그대로 직렬화해 전송한다. */
+export function buildRaidReport(attacker, defenderSnapshot, session, now = Date.now()) {
+  const result = session.result || {};
+  const destructionPercent = Math.max(0, Math.min(1, Number(result.destructionPercent) || 0));
+  const win = !!result.perfectVictory || destructionPercent >= BATTLE.winDestructionPct;
+  const { attackerTrophyDelta, defenderTrophyDelta } =
+    tradeTrophies(win, attacker.trophies || 0, defenderSnapshot.trophies || 0);
+  return {
+    id: `${attacker.id}_${now}_${Math.floor(Math.random() * 1e6)}`,
+    attackerId: attacker.id, attackerName: attacker.name, attackerColor: attacker.color,
+    defenderId: defenderSnapshot.id, defenderName: defenderSnapshot.name,
+    win, destructionPercent, perfectVictory: !!result.perfectVictory,
+    loot: { ...(result.loot || {}) },
+    deployedUnits: { ...(result.deployedUnits || {}) },
+    attackerTrophyDelta, defenderTrophyDelta,
+    // 방어자가 "어떻게 뚫렸는지" 그대로 재생해 볼 수 있는 기록 (battle.js).
+    // 무대가 된 기지 배치도 같이 담는다 — 그 뒤에 기지를 고쳐도 그때 그대로 재생된다.
+    replay: {
+      seed: session.seed,
+      deploys: (session.deployLog || []).map(d => ({ ...d })),
+      base: {
+        id: defenderSnapshot.id, name: defenderSnapshot.name, color: defenderSnapshot.color,
+        capital: defenderSnapshot.capital,
+        territory: Array.from(defenderSnapshot.territory || []),
+        structures: (defenderSnapshot.structures || []).map(s => ({ ...s })),
+        units: { defense: { ...((defenderSnapshot.units && defenderSnapshot.units.defense) || {}) } },
+      },
+    },
+    timestamp: now,
+  };
+}
+
+/** 공격자 쪽 반영 — 약탈품을 창고에 넣고, 배치한 유닛을 소모하고, 트로피를 받는다. */
+export function applyRaidToAttacker(attacker, report, now = Date.now()) {
+  const gained = {};
+  for (const [res, rawAmt] of Object.entries(report.loot || {})) {
+    const want = Math.max(0, Math.floor(Number(rawAmt) || 0));
+    if (want <= 0) continue;
+    if (VIRTUAL_RESOURCES.has(res)) {
+      attacker.resources[res] = (attacker.resources[res] || 0) + want;
+      gained[res] = want;
+      continue;
+    }
+    const stored = depositAnywhere(attacker, res, want);   // 창고가 모자라면 그만큼만 받는다
+    if (stored > 0) gained[res] = stored;
+  }
+  recomputeStock(attacker);
+  consumeDeployedUnits(attacker, report.deployedUnits);
+  attacker.trophies = Math.max(0, (attacker.trophies || 0) + (report.attackerTrophyDelta || 0));
+  attacker.shieldUntil = 0;                                 // 공격하면 내 실드는 사라진다
+  attacker.raidsSent = (attacker.raidsSent || 0) + 1;
+  return { gained };
+}
+
+/**
+ * 방어자 쪽 반영 — 같은 리포트를 두 번 받아도 한 번만 적용된다(멱등).
+ * 이미 반영한 리포트 id는 nation.seenRaids에 남는다.
+ */
+export function applyRaidToDefender(defender, report, now = Date.now()) {
+  defender.seenRaids = defender.seenRaids || [];
+  if (report.id && defender.seenRaids.includes(report.id)) return { applied: false, lost: {} };
+
+  // 승패는 파괴율에서 다시 계산한다 (공격자가 보낸 win 값을 믿지 않는다)
+  const destructionPercent = Math.max(0, Math.min(1, Number(report.destructionPercent) || 0));
+  const win = !!report.perfectVictory || destructionPercent >= BATTLE.winDestructionPct;
+
+  // 약탈 상한도 파괴율에서 다시 계산한다. 공격자가 부풀린 숫자를 보내도
+  // "그 파괴율로 가져갈 수 있는 최대치"를 넘지 못한다.
+  const lootMul = report.perfectVictory ? BATTLE.perfectVictoryLootMul : 1;
+  const maxFraction = Math.min(1, destructionPercent * BATTLE.lootRatePerHp * lootMul);
+
+  const lost = {};
+  for (const [res, rawAmt] of Object.entries(report.loot || {})) {
+    const want = Math.max(0, Math.floor(Number(rawAmt) || 0));
+    if (want <= 0) continue;
+    if (VIRTUAL_RESOURCES.has(res)) {
+      const held = defender.resources[res] || 0;
+      const take = Math.min(want, Math.floor(held * maxFraction));
+      if (take <= 0) continue;
+      defender.resources[res] -= take;
+      lost[res] = take;
+      continue;
+    }
+    const held = totalStock(defender, res);
+    const take = withdrawAnywhere(defender, res, Math.min(want, Math.floor(held * maxFraction)));
+    if (take > 0) lost[res] = take;
+  }
+  recomputeStock(defender);
+
+  // 트로피 변동도 규칙상 가능한 범위로 자른다
+  const raw = Number(report.defenderTrophyDelta) || 0;
+  const delta = win ? Math.max(-WAR.maxTrophyTrade, Math.min(0, raw)) : 0;
+  defender.trophies = Math.max(0, (defender.trophies || 0) + delta);
+  defender.shieldUntil = now + WAR.postAttackShieldMs;      // 연쇄 공격 방지
+
+  defender.seenRaids.push(report.id);
+  if (defender.seenRaids.length > 100) defender.seenRaids = defender.seenRaids.slice(-100);
+  return { applied: true, win, destructionPercent, lost, trophyDelta: delta };
 }
 
 /** 방어력: 수비 유닛 + 터렛(레벨 비례, 유휴 상태면 제외) + 방벽(레벨 비례)의 합 (전투 전 미리보기용) */
@@ -697,14 +950,42 @@ export function canAttack(attacker, defender, now = Date.now()) {
  */
 export function findMatch(myNation, candidates, now = Date.now()) {
   const myTrophies = myNation.trophies || 0;
-  const pool = candidates.filter(c =>
-    c.id !== myNation.id &&
-    !isShielded(c, now) &&
-    Math.abs((c.trophies || 0) - myTrophies) <= WAR.matchTrophyRange
-  );
-  if (!pool.length) return null;
-  pool.sort((a, b) => Math.abs((a.trophies || 0) - myTrophies) - Math.abs((b.trophies || 0) - myTrophies));
+  const attackable = candidates.filter(c => c.id !== myNation.id && !isShielded(c, now));
+  if (!attackable.length) return null;
+
+  const byTrophyGap = (a, b) =>
+    Math.abs((a.trophies || 0) - myTrophies) - Math.abs((b.trophies || 0) - myTrophies);
+
+  // 트로피가 비슷한 상대가 우선이지만, 접속자가 적을 때는 범위를 넘겨서라도
+  // 붙여준다. 상대가 분명히 있는데 "찾을 수 없다"고 하면 전쟁 자체가 막힌다.
+  const inRange = attackable.filter(c => Math.abs((c.trophies || 0) - myTrophies) <= WAR.matchTrophyRange);
+  const pool = (inRange.length ? inRange : attackable).sort(byTrophyGap);
   // 가장 비슷한 후보 몇 명 중 무작위로 하나 선택 (매번 같은 상대만 나오지 않도록)
   const topPool = pool.slice(0, Math.min(5, pool.length));
   return topPool[Math.floor(Math.random() * topPool.length)];
+}
+
+/**
+ * 다른 플레이어에게 공개하는 국가 스냅샷.
+ * 공격자가 이걸 그대로 battle.js에 넣어 전투를 돌리므로, 방어에 필요한 것만
+ * 담는다 — 기지 배치(구조물·영토), 수비 로스터, 약탈 대상이 되는 재고, 트로피.
+ * 연구 진행이나 레시피 같은 내정 정보는 넘기지 않는다.
+ */
+export function defenseSnapshot(nation, now = Date.now()) {
+  return {
+    id: nation.id,
+    name: nation.name,
+    color: nation.color,
+    capital: nation.capital,
+    trophies: nation.trophies || 0,
+    shieldUntil: nation.shieldUntil || 0,
+    territory: Array.from(nation.territory || []),
+    structures: (nation.structures || []).map(s => ({
+      id: s.id, key: s.key, x: s.x, y: s.y, level: s.level, dir: s.dir || 0, idle: !!s.idle,
+    })),
+    units: { defense: { ...((nation.units && nation.units.defense) || {}) } },
+    resources: { ...(nation.resources || {}) },
+    defensePower: getDefensePower(nation),
+    updatedAt: now,
+  };
 }

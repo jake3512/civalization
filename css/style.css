@@ -105,6 +105,8 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   font-family: var(--font-mono); font-size: 13px;
 }
 .resource-bar .res { display: flex; gap: 5px; align-items: center; color: var(--text); white-space: nowrap; font-weight: 500; }
+/* 해금은 됐지만 지금 재고가 0인 자원 — 자리는 지키되 흐리게 */
+.resource-bar .res.empty { opacity: 0.38; }
 .resource-bar .res.teal { color: var(--teal); }
 .mp-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 
@@ -144,10 +146,15 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   font-size: 13px; letter-spacing: 2px; color: var(--text-dim);
   margin: 0 0 12px; text-transform: uppercase;
 }
-.cost-preview {
-  font-family: var(--font-mono); font-size: 11px; color: var(--accent);
-  min-height: 16px; margin-bottom: 4px;
-}
+/* ---- 고른 구조물의 필요 자원 ---- */
+.cost-preview { min-height: 18px; margin-bottom: 6px; font-size: 11px; }
+.cost-title { font-family: var(--font-display); font-size: 13px; color: var(--accent); letter-spacing: 0.3px; }
+.cost-items { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.cost-item { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.cost-item b { color: var(--text); font-weight: 600; }
+.cost-item.short, .cost-item.short b { color: var(--danger); }
+.cost-item .ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 2px; }
+.cost-note { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); margin-top: 4px; }
 /* 건설 미리보기(고스트) 상태 줄 — 커서 위치의 건설 가능 여부/사유 */
 .preview-hint {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
@@ -155,7 +162,40 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 .preview-hint.ok { color: var(--teal); }
 .preview-hint.err { color: var(--danger); }
+.preview-hint.warn { color: var(--accent); }
 .build-menu { display: flex; flex-direction: column; gap: 4px; }
+
+/* ---- 카탈로그 세트 ----
+   구조물이 35종이라 한 줄로 늘어놓으면 못 찾는다. 종류별로 묶어 세트를 먼저
+   고르고, 펼친 세트 안에서 구조물을 고른다. */
+.build-group {
+  display: grid; grid-template-columns: 30px 1fr auto auto;
+  gap: 8px; align-items: center; text-align: left;
+  background: var(--panel-2); border: 2px solid var(--line); color: var(--text);
+  padding: 8px 10px; border-radius: 5px; font-size: 13px;
+}
+.build-group.open { border-color: var(--accent); background: rgba(255,168,46,0.10); }
+.build-group.locked { opacity: 0.45; }
+.build-group .gic { width: 26px; height: 26px; justify-self: center; filter: saturate(0.8); }
+.build-group .gnm { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.3px; line-height: 1.2; }
+.build-group .gdesc { display: block; font-family: var(--font-body); font-size: 10.5px; color: var(--text-dim); letter-spacing: 0; }
+.build-group .gcnt { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.build-group .gcaret { color: var(--accent); font-size: 12px; }
+.build-sublist {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 2px 0 6px 10px; padding-left: 8px;
+  border-left: 2px solid var(--line);
+}
+
+/* ---- 설치된 벨트 방향 바꾸기 ---- */
+.rot-row { display: flex; gap: 6px; margin: 6px 0 10px; }
+.rot-btn {
+  flex: 1; padding: 10px 0; font-size: 18px; line-height: 1;
+  background: var(--panel); border: 2px solid var(--line); color: var(--text); border-radius: 5px;
+}
+.rot-btn.active { border-color: var(--teal); color: var(--teal); background: rgba(47,224,176,0.12); }
+.rot-btn:active { transform: translateY(1px); }
+.rot-now { color: var(--teal); font-size: 15px; }
 .build-item {
   display: grid; grid-template-columns: 38px 1fr auto;
   gap: 8px; align-items: center;
@@ -363,8 +403,37 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   padding: 10px 8px; font-size: 12px; min-height: 40px;
 }
 
-.battle-log { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+/* 출격 편성 — 이번 습격에 데려갈 유닛 수를 고른다 */
+.deck-edit { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.deck-edit-head { font-family: var(--font-display); font-size: 12px; margin-bottom: 6px; }
+.deck-edit-head .dim { color: var(--text-dim); font-family: var(--font-mono); }
+.deck-edit-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.deck-edit-art { width: 26px; height: 26px; flex: none; image-rendering: auto; }
+.deck-edit-row .nm { flex: 1; font-size: 12px; }
+.deck-edit-row .cnt { font-family: var(--font-mono); font-size: 12px; min-width: 42px; text-align: center; }
+.deck-plus, .deck-minus {
+  width: 30px; height: 30px; flex: none; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 4px; font-size: 15px; line-height: 1;
+}
+.deck-plus:active, .deck-minus:active { background: var(--accent); color: #14100a; }
+.shield-on { color: var(--accent); }
+
+.battle-log { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
 .log-row b { color: var(--text); }
+.log-row {
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 4px;
+  padding: 6px 8px; background: var(--panel);
+}
+.log-row.atk { border-left-color: var(--accent); }
+.log-row.def { border-left-color: var(--danger); }
+.log-row .trophy { float: right; font-family: var(--font-mono); color: var(--accent); }
+.log-loot { margin-top: 3px; }
+.log-actions { display: flex; gap: 6px; margin-top: 6px; }
+.log-btn {
+  flex: 1; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 3px; padding: 6px; font-size: 11px; min-height: 30px;
+}
+.log-btn.revenge { background: var(--danger); color: #fff; border-color: var(--danger); }
 
 /* 스크롤바 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -373,6 +442,86 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 
 @media (max-width: 900px) {
   #left-panel, #right-panel { width: 200px; }
+}
+
+/* ---- 철거 블록 ----
+   되돌릴 수 없는 조작이라 레벨업 블록과 시각적으로 확실히 구분한다. */
+.dem-block {
+  margin-top: 12px; padding: 12px; border: 2px solid rgba(255,77,61,0.45);
+  border-radius: 6px; background: rgba(255,77,61,0.07);
+}
+.dem-head {
+  font-family: var(--font-display); font-size: 14px; color: var(--danger);
+  letter-spacing: 0.5px; margin-bottom: 6px;
+}
+.dem-lost { font-family: var(--font-mono); font-size: 11.5px; color: var(--danger); margin: 4px 0; }
+.dem-lost .ic { width: 15px; height: 15px; vertical-align: -3px; }
+.demolish-btn {
+  width: 100%; margin-top: 10px; padding: 11px;
+  background: transparent; color: var(--danger);
+  border: 2px solid var(--danger); border-radius: 5px;
+  font-family: var(--font-display); font-size: 14px; letter-spacing: 1px; font-weight: 600;
+}
+.demolish-btn.armed {
+  background: var(--danger); color: #1a0603;
+  box-shadow: 0 0 16px rgba(255,77,61,0.5);
+}
+.demolish-btn:active:not(:disabled) { transform: translateY(1px); }
+.demolish-btn:disabled { opacity: 0.4; border-color: var(--line); color: var(--text-dim); cursor: not-allowed; }
+
+/* ---- 건설 확정 바 ----
+   손이 닿는 순간 지어지면 오조작이 잦아서, 고스트를 원하는 칸으로 옮긴 뒤
+   이 바의 "설치"를 눌러야 실제로 지어진다. 터치 화면에서 엄지로 누르기 좋게
+   필드 아래쪽 가운데에 크게 띄운다. */
+.build-bar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 5;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px 10px 10px; border-radius: 10px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 3px solid var(--ink);
+  box-shadow: 0 0 0 2px var(--accent), 0 14px 34px rgba(0,0,0,0.6);
+  max-width: 94%;
+}
+.build-bar-art { width: 46px; height: 46px; flex: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+.build-bar-info { min-width: 132px; display: flex; flex-direction: column; gap: 3px; }
+.build-bar-name { font-family: var(--font-display); font-size: 15px; letter-spacing: 0.4px; }
+.build-bar-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+.build-bar-status.ok { color: var(--teal); }
+.build-bar-status.err { color: var(--danger); }
+.build-bar-status.warn { color: var(--accent); }
+.build-bar-repeat {
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 12px; color: var(--text-dim); user-select: none; cursor: pointer;
+}
+.build-bar-repeat input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.build-confirm, .build-cancel {
+  flex: none; border: none; border-radius: 6px; white-space: nowrap;
+  font-family: var(--font-display); letter-spacing: 1px; font-weight: 600;
+}
+.build-confirm {
+  padding: 13px 26px; font-size: 16px;
+  background: var(--accent); color: #14100a;
+  border-bottom: 4px solid var(--accent-dim);
+  box-shadow: 0 0 16px rgba(255,168,46,0.4);
+}
+.build-confirm:active:not(:disabled) { transform: translateY(2px); border-bottom-width: 2px; }
+.build-confirm:disabled {
+  background: var(--line); color: var(--text-dim);
+  border-bottom-color: var(--line); box-shadow: none; cursor: not-allowed;
+}
+.build-cancel {
+  padding: 11px 15px; font-size: 13px;
+  background: var(--panel); color: var(--text-dim);
+  border: 2px solid var(--line);
+}
+.build-cancel:active { transform: translateY(1px); }
+
+@media (max-width: 900px) {
+  .build-bar { gap: 8px; padding: 8px; bottom: 12px; }
+  .build-bar-art { width: 38px; height: 38px; }
+  .build-bar-info { min-width: 108px; }
+  .build-confirm { padding: 12px 20px; font-size: 15px; }
 }
 
 /* ---------------- 실시간 습격 전투 화면 ---------------- */

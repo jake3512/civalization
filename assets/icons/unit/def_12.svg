@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>                           <!-- 차원 수호자 — 결계에 감싸인 형상 -->
+    <ellipse cx="32" cy="52" rx="20" ry="7" fill="#542ea8" stroke="#161018" stroke-width="3"/>
+    <path d="M22 20 h20 v24 a5 5 0 0 1 -5 5 H27 a5 5 0 0 1 -5 -5 Z" fill="#4a3a7a" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 20 h10 v24 a5 5 0 0 1 -5 5 H32 Z" fill="#2a1f50" opacity="0.45"/>
+    <circle cx="32" cy="12" r="8" fill="#efe0ff" stroke="#161018" stroke-width="3"/>
+    <path d="M23 11 a9 9 0 0 1 18 0 Z" fill="#2a1f50" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="32" cy="30" r="6" fill="#9df4ee" stroke="#161018" stroke-width="2.5"/>
+    <path d="M4 32 a28 28 0 0 1 56 0 a28 28 0 0 1 -56 0 Z" fill="#9df4ee" opacity="0.14"/>
+    <path d="M4 32 a28 28 0 0 1 56 0 a28 28 0 0 1 -56 0 Z" fill="none" stroke="#9df4ee" stroke-width="2.5" opacity="0.8"/>
+</svg>

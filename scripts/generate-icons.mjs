@@ -256,6 +256,131 @@ const resArt = {
     ${fd('M32 20 L46 12 L52 22 L46 25 V54 H36 V36 H32 Z', P.wheatD, 0.45)}
     ${fr(20, 30, 6, 12, P.darkD, 1)}${fr(38, 30, 6, 12, P.darkD, 1)}`,
 
+  // ---- 조리 1차 가공품 (추가분) ----
+  sugar: `${groundSm}
+    ${topFace(14, 26, 36, 8, '#ffffff')}
+    ${rc(14, 26, 36, 24, '#f2ece0', 2)}
+    ${fd('M14 40 H50 V50 H14 Z', '#c9c2b2', 0.4)}
+    ${fr(20, 30, 24, 6, '#ffffff', 1)}
+    <path d="M22 44 h5 v5 h-5 Z M34 44 h5 v5 h-5 Z" fill="#ffffff"/>`,
+  cooking_oil: `${groundSm}
+    ${sh('M24 20 h16 v6 l6 8 v20 a4 4 0 0 1 -4 4 H22 a4 4 0 0 1 -4 -4 V34 l6 -8 Z', '#f7e9b0')}
+    ${fd('M32 20 h8 v6 l6 8 v20 a4 4 0 0 1 -4 4 H32 Z', '#c9a83c', 0.45)}
+    ${fd('M20 40 h24 v14 a4 4 0 0 1 -4 4 H24 a4 4 0 0 1 -4 -4 Z', P.goldL, 0.95)}
+    ${rc(26, 10, 12, 10, '#7d9a4a', 2)}`,
+  noodle: `${groundSm}
+    ${sh('M10 34 a22 12 0 0 0 44 0 a22 12 0 0 0 -44 0 Z', '#efe6cc')}
+    ${fd('M32 22 a22 12 0 0 1 0 24 Z', '#c9bd9a', 0.4)}
+    ${[26,32,38].map(y=>`<path d="M16 ${y} q8 -5 16 0 q8 5 16 0" fill="none" stroke="${P.wheatD}" stroke-width="2.6" stroke-linecap="round"/>`).join('')}
+    ${sh('M6 44 a26 8 0 0 0 52 0 Z', '#dfe6ec')}`,
+  cream: `${groundSm}
+    ${cyl3(32, 26, 15, 26, 6, '#ffffff', '#f7f0e0', '#cfc6b2')}
+    ${sh('M22 24 q4 -10 10 -10 q6 0 10 10 q-10 4 -20 0 Z', '#ffffff', 2.5)}`,
+  broth: `${groundSm}
+    ${cyl3(32, 34, 20, 18, 7, '#e0e6ec', '#b8c2cc', '#7d8894')}
+    <ellipse cx="32" cy="34" rx="16" ry="5.4" fill="#c98a45" stroke="${INK}" stroke-width="2"/>
+    <ellipse cx="27" cy="33" rx="4" ry="1.6" fill="#e8b06a" opacity="0.8"/>
+    <path d="M26 22 q-3 -5 0 -9 M38 22 q-3 -5 0 -9" fill="none" stroke="${INK}" stroke-width="3.4" stroke-linecap="round"/>
+    <path d="M26 22 q-3 -5 0 -9 M38 22 q-3 -5 0 -9" fill="none" stroke="#f2f7ff" stroke-width="1.6" stroke-linecap="round"/>`,
+
+  // ---- 완성 요리 (추가분) ----
+  noodle_soup: `${groundSm}
+    ${sh('M8 32 h48 l-6 18 a6 6 0 0 1 -6 4 H20 a6 6 0 0 1 -6 -4 Z', '#e0e6ec')}
+    <ellipse cx="32" cy="32" rx="24" ry="7" fill="#e8d9a8" stroke="${INK}" stroke-width="${OUT_W}"/>
+    ${[26,32,38].map(x=>`<path d="M${x} 28 q3 4 0 8" fill="none" stroke="${P.wheatD}" stroke-width="2.4"/>`).join('')}
+    ${sh('M40 24 l10 -8 l2 3 l-9 8 Z', P.woodL, 2)}
+    <path d="M24 20 q-3 -5 0 -9" fill="none" stroke="#f2f7ff" stroke-width="2.4" stroke-linecap="round"/>`,
+  pasta: `${groundSm}
+    ${sh('M8 34 h48 l-6 16 a6 6 0 0 1 -6 4 H20 a6 6 0 0 1 -6 -4 Z', '#e0e6ec')}
+    <ellipse cx="32" cy="34" rx="24" ry="7" fill="#f0d98c" stroke="${INK}" stroke-width="${OUT_W}"/>
+    ${[[24,32],[32,30],[40,32]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="4" fill="${P.red}" stroke="${INK}" stroke-width="2"/>`).join('')}
+    <path d="M14 36 q9 -5 18 0 q9 5 18 0" fill="none" stroke="${P.wheatD}" stroke-width="2.4"/>`,
+  pizza: `${groundSm}
+    ${sh('M32 8 L58 50 H6 Z', '#f0c060')}
+    ${fd('M32 8 L58 50 H32 Z', '#c98a2c', 0.35)}
+    ${sh('M32 16 L50 46 H14 Z', '#e07a3c', 2.5)}
+    ${[[26,32],[38,34],[32,42],[24,44],[40,44]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="3.4" fill="${P.red}" stroke="${INK}" stroke-width="1.8"/>`).join('')}`,
+  dumpling: `${groundSm}
+    ${sh('M12 40 q0 -20 20 -20 q20 0 20 20 q-20 10 -40 0 Z', '#efe4cc')}
+    ${fd('M32 20 q20 0 20 20 q-10 5 -20 6 Z', '#c9bda0', 0.4)}
+    <path d="M16 34 q4 -6 8 0 M28 32 q4 -6 8 0 M40 34 q4 -6 8 0" fill="none" stroke="${INK}" stroke-width="2.4"/>
+    ${sh('M8 44 a24 8 0 0 0 48 0 Z', '#dfe6ec')}`,
+  curry: `${groundSm}
+    ${sh('M6 32 h52 l-6 18 a6 6 0 0 1 -6 4 H18 a6 6 0 0 1 -6 -4 Z', '#e0e6ec')}
+    <ellipse cx="32" cy="32" rx="26" ry="7.5" fill="#f5f0e2" stroke="${INK}" stroke-width="${OUT_W}"/>
+    ${sh('M32 26 a20 6 0 0 1 22 6 a22 7 0 0 1 -22 6 Z', '#d9962c', 2.5)}
+    <circle cx="44" cy="32" r="3" fill="#a8622f"/><circle cx="38" cy="35" r="2.4" fill="#a8622f"/>`,
+  stew: `${groundSm}
+    ${cyl3(32, 30, 21, 20, 7.5, '#e0e6ec', '#b8c2cc', '#7d8894')}
+    <ellipse cx="32" cy="30" rx="17" ry="5.6" fill="#b0542c" stroke="${INK}" stroke-width="2"/>
+    ${[[27,29],[36,31],[32,27]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="2.8" fill="${P.meatL}"/>`).join('')}
+    <path d="M8 34 h-4 a4 4 0 0 0 0 8 h4 M56 34 h4 a4 4 0 0 1 0 8 h-4" fill="none" stroke="${INK}" stroke-width="3"/>`,
+  samgyetang: `${groundSm}
+    ${cyl3(32, 30, 20, 20, 7, '#e8e2d0', '#cfc6b0', '#9a9384')}
+    <ellipse cx="32" cy="30" rx="16" ry="5.4" fill="#e8ddc0" stroke="${INK}" stroke-width="2"/>
+    ${sh('M24 28 q8 -10 16 0 q-8 5 -16 0 Z', '#f2ece0', 2)}
+    <path d="M28 20 q-3 -5 0 -9 M38 20 q-3 -5 0 -9" fill="none" stroke="#f2f7ff" stroke-width="2.4" stroke-linecap="round"/>`,
+  cheeseburger: `${groundSm}
+    ${sh('M10 26 q0 -14 22 -14 q22 0 22 14 Z', '#e0a955')}
+    ${fd('M32 12 q22 0 22 14 H32 Z', '#b07a35', 0.35)}
+    ${sh('M8 28 h48 v5 H8 Z', P.greenL, 2)}
+    ${sh('M8 33 h48 v7 H8 Z', P.meat, 2)}
+    ${sh('M10 40 h44 v5 H10 Z', P.goldL, 2)}
+    ${sh('M10 45 q0 8 22 8 q22 0 22 -8 Z', '#e0a955')}
+    ${[[20,20],[32,17],[42,20]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="1.8" fill="#fff8e0"/>`).join('')}`,
+  hotdog: `${groundSm}
+    ${sh('M6 40 q0 -10 12 -10 h28 q12 0 12 10 q0 8 -12 8 H18 q-12 0 -12 -8 Z', '#e0a955')}
+    ${fd('M32 30 h14 q12 0 12 10 q0 8 -12 8 H32 Z', '#b07a35', 0.35)}
+    ${sh('M12 34 q0 -6 8 -6 h24 q8 0 8 6 q0 6 -8 6 H20 q-8 0 -8 -6 Z', '#e07a50')}
+    <path d="M14 34 q6 -5 12 0 q6 5 12 0 q6 -5 12 0" fill="none" stroke="${P.goldL}" stroke-width="3" stroke-linecap="round"/>`,
+  donut: `${groundSm}
+    ${ci(32, 34, 20, '#e0a955')}
+    ${fd('M32 14 a20 20 0 0 1 0 40 Z', '#b07a35', 0.35)}
+    ${sh('M12 32 q6 -14 20 -14 q14 0 20 14 q-6 6 -20 6 q-14 0 -20 -6 Z', '#f0a0c0', 2.5)}
+    ${ci(32, 34, 7, '#2c4a30', 2.5)}
+    ${[[24,26],[32,22],[40,26],[28,32],[38,32]].map(([x,y])=>`<rect x="${x}" y="${y}" width="5" height="2.4" rx="1.2" fill="#fff"/>`).join('')}`,
+  cookie: `${groundSm}
+    ${ci(32, 34, 20, '#c98a4c')}
+    ${fd('M32 14 a20 20 0 0 1 0 40 Z', '#8f5a26', 0.4)}
+    ${[[25,28],[38,26],[32,38],[22,40],[41,38]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="3.2" fill="#4a2c14"/>`).join('')}`,
+  pancake: `${groundSm}
+    ${[46, 38, 30].map((y, i) => {
+      const rx = 22 - i * 1.5, ry = 7 - i * 0.4;
+      return `<ellipse cx="32" cy="${y}" rx="${rx}" ry="${ry}" fill="${i % 2 ? '#e0b060' : '#eec277'}" stroke="${INK}" stroke-width="${OUT_W}"/>`;
+    }).join('')}
+    ${sh('M22 26 q10 -6 20 0 q-4 8 -20 4 Z', P.goldL, 2)}
+    ${rc(28, 14, 10, 8, '#f5d76a', 2)}`,
+  pudding: `${groundSm}
+    ${sh('M14 26 h36 l-5 24 a5 5 0 0 1 -5 4 H24 a5 5 0 0 1 -5 -4 Z', '#f2d078')}
+    ${fd('M32 26 h18 l-5 24 a5 5 0 0 1 -5 4 H32 Z', '#c9a03c', 0.4)}
+    ${sh('M12 22 h40 v5 H12 Z', '#a8622f', 2.5)}
+    ${fd('M20 32 h6 v14 h-6 Z', '#fff2c0', 0.6)}`,
+  ice_cream: `${groundSm}
+    ${sh('M22 34 L32 56 L42 34 Z', '#e0a955')}
+    ${fd('M32 34 L42 34 L32 56 Z', '#b07a35', 0.4)}
+    <path d="M25 40 L38 40 M27 46 L36 46" stroke="${INK}" stroke-width="2"/>
+    ${ci(25, 28, 10, '#f7d0e2')}
+    ${ci(39, 28, 10, '#c9e8f2')}
+    ${ci(32, 18, 10, '#f2ece0')}
+    ${ci(32, 8, 3.5, P.red, 2)}`,
+  apple_jam: `${groundSm}
+    ${cyl3(32, 24, 16, 28, 6.5, '#f2b0a0', '#d9503c', '#8f2418')}
+    ${rc(15, 18, 34, 8, '#7d9a4a', 2)}
+    ${fr(20, 34, 24, 10, '#fff', 1)}
+    ${sh('M26 36 q6 -4 12 0 q-2 6 -12 4 Z', P.red, 2)}`,
+  wine: `${groundSm}
+    ${sh('M22 8 h20 v14 a10 10 0 0 1 -20 0 Z', '#8b2f52')}
+    ${fd('M32 8 h10 v14 a10 10 0 0 1 -10 10 Z', '#5a1836', 0.45)}
+    <path d="M32 32 V48" stroke="${INK}" stroke-width="4"/>
+    ${sh('M20 52 h24 v4 h-24 Z', '#dfe6ec', 2.5)}
+    ${fd('M25 12 h4 v10 h-4 Z', '#d97fa0', 0.55)}`,
+  bbq: `${groundSm}
+    ${sh('M8 40 h48 v6 a6 6 0 0 1 -6 6 H14 a6 6 0 0 1 -6 -6 Z', P.darkL)}
+    <path d="M12 46 H52" stroke="${P.roofL}" stroke-width="3"/>
+    ${[[16,32],[30,30],[44,32]].map(([x,y])=>`${sh(`M${x} ${y} q8 -6 14 0 q-6 8 -14 0 Z`, P.meat, 2.5)}`).join('')}
+    <path d="M10 36 H54" stroke="${INK}" stroke-width="3"/>
+    <path d="M20 26 q-3 -6 0 -10 M40 26 q-3 -6 0 -10" fill="none" stroke="${P.goldL}" stroke-width="3" stroke-linecap="round"/>`,
+
   // ---- 필드에서 구조물 위에 띄우는 경고 배지 ----
   // 말풍선 꼬리가 아래를 가리켜서 "이 건물의 문제"라는 게 바로 읽힌다.
   // 바탕은 항상 같고 안쪽 기호만 달라서 멀리서도 종류가 구분된다.
@@ -671,6 +796,32 @@ const art = {
     ${ci(13, 34, 5, P.metalL, 2.5)}${ci(51, 34, 5, P.metalL, 2.5)}
     ${sh('M24 28 L38 34 L24 40 Z', P.goldL, 2.5)}`,
 
+  // 분할 컨베이어 — 한 줄로 들어와 세 갈래로 나간다
+  belt_splitter: `${topFace(4, 40, 56, 12, '#5c6b78')}
+    ${frontFace(4, 40, 56, 10, P.darkL, 2)}
+    <path d="M6 34 H58" stroke="${INK}" stroke-width="2.2"/>
+    ${ci(32, 34, 7, P.metalL, 2.5)}
+    <g stroke="${INK}" stroke-width="6" stroke-linecap="round">
+      <path d="M32 34 H54 M32 34 L18 20 M32 34 L18 48"/>
+    </g>
+    <g stroke="${P.goldL}" stroke-width="3" stroke-linecap="round">
+      <path d="M32 34 H54 M32 34 L18 20 M32 34 L18 48"/>
+    </g>
+    ${sh('M50 28 L60 34 L50 40 Z', P.goldL, 2.5)}`,
+
+  // 컨베이어 교차로 — 두 라인이 섞이지 않고 지나간다
+  belt_cross: `${topFace(4, 40, 56, 12, '#5c6b78')}
+    ${frontFace(4, 40, 56, 10, P.darkL, 2)}
+    <path d="M6 34 H58" stroke="${INK}" stroke-width="2.2"/>
+    <g stroke="${INK}" stroke-width="8" stroke-linecap="round">
+      <path d="M4 34 H60 M32 6 V56"/>
+    </g>
+    <path d="M4 34 H60" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
+    <path d="M32 6 V56" stroke="${P.cyanL}" stroke-width="4" stroke-linecap="round"/>
+    ${ci(32, 34, 6, P.metalL, 2.5)}
+    ${sh('M52 28 L62 34 L52 40 Z', P.goldL, 2.5)}
+    ${sh('M26 48 L32 58 L38 48 Z', P.cyanL, 2.5)}`,
+
   // 창고 — 넓은 박공 지붕 + 큰 셔터문
   warehouse: `${ground}
     ${sh('M6 28 L32 12 L58 28 Z', P.woodL)}
@@ -720,6 +871,37 @@ const TURRETS = {
   turret_05: turret(`${rc(26, 6, 12, 24, P.stoneL, 2)}${fd('M32 6 H38 V30 H32 Z', INK, 0.25)}`, P.stone),
   turret_06: turret(`${sh('M32 2 L40 20 H24 Z', P.purpleL, 2.5)}${rc(29, 18, 6, 12, P.purple, 1)}
     <path d="M18 14 L25 19 M46 14 L39 19" stroke="${P.purpleL}" stroke-width="3.5" stroke-linecap="round"/>`, P.purple),
+  // 후반 터렛 — 포신이 굵고 여러 개라 한눈에 상위 티어로 읽힌다
+  turret_07: turret(`${[24, 32, 40].map(x => rc(x - 3, 8, 6, 20, P.roofL, 1)).join('')}
+    ${rc(21, 24, 22, 6, P.roofD, 1)}`, P.roof),
+  turret_08: turret(`${rc(28, 2, 8, 28, P.metalL, 1)}${fd('M32 2 H36 V30 H32 Z', INK, 0.25)}
+    ${[10, 18].map(y => rc(24, y, 16, 4, P.blueD, 1)).join('')}
+    ${ci(32, 6, 4, P.blueL, 2)}`, P.metalD),
+  turret_09: turret(`${sh('M20 30 q-6 -16 12 -24 q18 8 12 24 Z', P.roofL, 2.5)}
+    ${fd('M32 6 q18 8 12 24 H32 Z', P.roofD, 0.35)}
+    ${ci(32, 16, 5, P.goldL, 2)}`, '#a8482c'),
+  turret_10: turret(`${[22, 32, 42].map(x => `<path d="M${x} 30 L${x - (x - 32) * 0.35} 4" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>
+    <path d="M${x} 30 L${x - (x - 32) * 0.35} 4" stroke="${P.cyanL}" stroke-width="3" stroke-linecap="round"/>`).join('')}
+    ${rc(20, 26, 24, 6, P.cyanD, 2)}`, P.cyan),
+  turret_11: turret(`${ci(32, 14, 12, P.purpleL, 2.5)}
+    ${fd('M32 2 a12 12 0 0 1 0 24 Z', P.purpleD, 0.4)}
+    ${ci(32, 14, 5, '#ffffff')}
+    <path d="M14 14 a18 18 0 0 1 36 0" fill="none" stroke="${P.purpleL}" stroke-width="2.6" opacity="0.85"/>`, P.purple),
+  turret_12: turret(`${rc(27, 4, 10, 26, P.metalL, 2)}
+    ${fd('M32 4 H37 V30 H32 Z', INK, 0.25)}
+    ${ci(32, 6, 6, '#7ef0ff', 2.5)}${ci(32, 6, 2.6, '#ffffff')}
+    <path d="M20 20 L27 24 M44 20 L37 24" stroke="#7ef0ff" stroke-width="3.4" stroke-linecap="round"/>`, '#2a6f8f'),
+  turret_13: turret(`${sh('M32 2 L44 22 H20 Z', P.goldL, 2.5)}
+    ${fd('M32 2 L44 22 H32 Z', P.goldD, 0.35)}
+    ${rc(27, 20, 10, 12, P.gold, 1)}
+    <path d="M12 10 L22 16 M52 10 L42 16" stroke="${P.goldL}" stroke-width="3.4" stroke-linecap="round"/>
+    ${ci(32, 12, 3.4, '#ffffff')}`, P.goldD),
+  turret_14: turret(`${sh('M32 0 L46 20 H18 Z', '#d9c0ff', 2.5)}
+    ${fd('M32 0 L46 20 H32 Z', P.purpleD, 0.35)}
+    ${rc(26, 18, 12, 14, P.purple, 2)}
+    ${ci(32, 10, 4.4, '#ffffff')}
+    <path d="M8 16 L20 22 M56 16 L44 22 M32 -2 V-2" stroke="#d9c0ff" stroke-width="3.6" stroke-linecap="round"/>
+    ${[20, 44].map(x => ci(x, 30, 3.4, P.purpleL, 2)).join('')}`, '#5a3f8f'),
 };
 
 const STRUCT_SPEC = { ...art, ...TURRETS };
@@ -896,6 +1078,163 @@ const unitArt = {
       <path d="M6 36 a26 26 0 0 1 52 0 a26 26 0 0 1 -52 0 Z" fill="none" stroke="${P.cyanL}" stroke-width="2.5" opacity="0.85"/>`,
   }),
 };
+
+
+// ---- 추가 공격 유닛 (11~22) ----
+Object.assign(unitArt, {
+  recruit_11: trooper({                       // 방패 돌격대 — 전신을 가리는 철벽
+    armor: '#5a6d8a', armorD: '#2f3d54',
+    front: `${sh('M8 18 h26 v24 q0 12 -13 18 q-13 -6 -13 -18 Z', P.metalL)}
+      ${fd('M21 18 h13 v24 q0 12 -13 18 Z', P.metalD, 0.45)}
+      ${ci(21, 34, 5, P.gold, 2)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v3 h-22 Z', P.metalD)}${fr(24, 14, 16, 4, INK)}`,
+  }),
+  recruit_12: trooper({                       // 장궁 저격병 — 아주 긴 총열 + 조준경
+    armor: '#3f5a3f', armorD: '#1f3320',
+    front: `<path d="M4 44 H56" stroke="${INK}" stroke-width="7" stroke-linecap="round"/>
+      <path d="M4 44 H56" stroke="${P.darkL}" stroke-width="3.5" stroke-linecap="round"/>
+      ${rc(24, 44, 6, 9, P.darkD, 1)}
+      ${rc(28, 36, 16, 5, P.blueD, 2)}${ci(44, 38, 3.4, P.blueL, 2)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v3 h-22 Z', '#2b3d2b')}${fr(23, 13, 18, 4, P.greenL)}`,
+  }),
+  recruit_13: trooper({                       // 공병 파괴반 — 등에 폭약 다발
+    armor: '#8a5a2f', armorD: '#4f3012',
+    back: `${rc(40, 20, 14, 24, P.roofD, 2)}${[43, 47, 51].map(x => rc(x - 1, 18, 3, 6, P.roof, 1)).join('')}`,
+    front: `${ci(20, 40, 9, P.dark)}${ci(20, 40, 3.4, P.roofL, 2)}
+      <path d="M20 31 q3 -7 9 -8" fill="none" stroke="${INK}" stroke-width="3"/>`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v2 h-22 Z', P.goldL)}`,
+  }),
+  recruit_14: vehicle('#8a4530', '#4f2312', `  <!-- 중장 화염 전차 -->
+    ${sh('M22 14 h20 v12 h-20 Z', '#b0603c')}
+    <path d="M38 20 H58" stroke="${INK}" stroke-width="9" stroke-linecap="round"/>
+    <path d="M38 20 H58" stroke="${P.metal}" stroke-width="5" stroke-linecap="round"/>
+    ${sh('M56 14 q10 6 4 14 q-6 -4 -8 -8 Z', P.roofL, 2.5)}`),
+  recruit_15: `${groundSm}                     <!-- 전투 드론 편대 (3기) -->
+    <ellipse cx="32" cy="56" rx="14" ry="3.4" fill="#000" opacity="0.25"/>
+    ${[[16, 30, 0.72], [48, 30, 0.72], [32, 20, 1]].map(([cx, cy, sc]) => `
+      <g transform="translate(${cx} ${cy}) scale(${sc}) translate(-32 -34)">
+        ${[[16, 22], [48, 22]].map(([x, y]) => `<ellipse cx="${x}" cy="${y}" rx="11" ry="3" fill="${P.plasticL}" opacity="0.55" stroke="${INK}" stroke-width="2"/>`).join('')}
+        ${sh('M22 28 h20 a6 6 0 0 1 6 6 v4 a9 9 0 0 1 -16 6 a9 9 0 0 1 -16 -6 v-4 a6 6 0 0 1 6 -6 Z', P.darkL)}
+        ${ci(32, 38, 5, P.cyanL, 2.5)}
+      </g>`).join('')}`,
+  recruit_16: vehicle('#5c4a7a', '#33254a', `  <!-- 마도 포격단 -->
+    ${sh('M20 12 h24 v14 h-24 Z', '#7a63a0')}
+    ${[26, 32, 38].map(x => `<path d="M${x} 12 V2" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M${x} 12 V2" stroke="${P.purple}" stroke-width="2.6" stroke-linecap="round"/>`).join('')}
+    ${ci(32, 19, 5, P.purpleL, 2.5)}`),
+  recruit_17: trooper({                       // 강습 강화병 — 동력 외골격
+    armor: '#3a6b5a', armorD: '#1b3a30',
+    back: `${sh('M42 18 h14 v20 h-14 Z', P.metalD, 2.5)}${ci(49, 28, 4, P.cyanL, 2)}`,
+    front: `<path d="M12 40 H46" stroke="${INK}" stroke-width="8" stroke-linecap="round"/>
+      <path d="M12 40 H46" stroke="${P.metalL}" stroke-width="4" stroke-linecap="round"/>
+      ${rc(26, 40, 7, 10, P.darkD, 1)}
+      ${sh('M18 26 h14 v12 h-14 Z', P.cyan, 2.5)}`,
+    helm: `${sh('M20 16 a12 11 0 0 1 24 0 v3 h-24 Z', P.metalD)}${fr(23, 13, 18, 4, P.cyanL)}`,
+  }),
+  recruit_18: vehicle(P.metalD, '#3a4650', `   <!-- 공성 파쇄기 — 앞에 거대한 파쇄 드럼 -->
+    ${sh('M18 16 h28 v12 h-28 Z', P.metal)}
+    ${cyl3(52, 26, 10, 16, 4.5, P.metalL, P.metal, P.metalD)}
+    ${[20, 26, 32].map(y => `<path d="M42 ${y} H62" stroke="${INK}" stroke-width="2.6"/>`).join('')}
+    ${ci(28, 22, 4, P.redL, 2)}`),
+  recruit_19: `${groundSm}                     <!-- 비행 폭격단 — 날개 달린 폭격기 -->
+    <ellipse cx="32" cy="57" rx="15" ry="3.4" fill="#000" opacity="0.25"/>
+    ${sh('M4 30 h56 l-8 8 H12 Z', P.metalD)}
+    ${sh('M20 16 h24 a8 8 0 0 1 8 8 v10 a10 10 0 0 1 -20 6 a10 10 0 0 1 -20 -6 V24 a8 8 0 0 1 8 -8 Z', P.metalL)}
+    ${fd('M32 16 h12 a8 8 0 0 1 8 8 v10 a10 10 0 0 1 -20 6 Z', P.metalD, 0.42)}
+    ${fr(24, 22, 16, 6, P.glass, 2)}
+    ${[24, 32, 40].map(x => `<circle cx="${x}" cy="42" r="3.4" fill="${P.roof}" stroke="${INK}" stroke-width="2"/>`).join('')}`,
+  recruit_20: `${ground}                       <!-- 마도 기갑 거신 -->
+    ${sh('M14 46 h11 v14 h-11 Z', '#3a2c50', 2.5)}${sh('M39 46 h11 v14 h-11 Z', '#3a2c50', 2.5)}
+    ${sh('M10 22 h44 v24 a7 7 0 0 1 -7 7 H17 a7 7 0 0 1 -7 -7 Z', '#6b5590')}
+    ${fd('M32 22 h22 v24 a7 7 0 0 1 -7 7 H32 Z', '#3d2c57', 0.45)}
+    ${sh('M2 24 h10 v22 h-10 Z', '#6b5590', 2.5)}${sh('M52 24 h10 v22 h-10 Z', '#6b5590', 2.5)}
+    ${sh('M20 6 h24 v12 h-24 Z', P.metalD)}
+    <circle cx="26" cy="12" r="3" fill="${P.redL}"/><circle cx="38" cy="12" r="3" fill="${P.redL}"/>
+    ${ci(32, 34, 9, P.purpleL, 2.5)}${ci(32, 34, 4, '#ffffff')}`,
+  recruit_21: `${groundSm}                     <!-- 차원 침투 특공대 — 포탈에서 튀어나온다 -->
+    <ellipse cx="32" cy="52" rx="20" ry="7" fill="${P.purpleD}" stroke="${INK}" stroke-width="${OUT_W}"/>
+    <ellipse cx="32" cy="51" rx="13" ry="4.4" fill="${P.purpleL}" opacity="0.85"/>
+    ${sh('M25 40 h5 v10 h-5 Z', '#2f2440', 2.5)}${sh('M34 40 h5 v10 h-5 Z', '#2f2440', 2.5)}
+    ${sh('M22 22 h20 v20 a4 4 0 0 1 -4 4 H26 a4 4 0 0 1 -4 -4 Z', '#5a3f8f')}
+    ${fd('M32 22 h10 v20 a4 4 0 0 1 -4 4 H32 Z', '#31215a', 0.45)}
+    ${ci(32, 13, 8, '#efe0ff')}
+    ${sh('M23 12 a9 9 0 0 1 18 0 Z', '#31215a', 2.5)}
+    ${ci(32, 32, 5, P.purpleL, 2)}
+    <path d="M12 30 L20 26 M52 30 L44 26" stroke="${P.purpleL}" stroke-width="3.4" stroke-linecap="round"/>`,
+  recruit_22: `${ground}                       <!-- 왕립 근위 군단 — 금빛 갑주 -->
+    ${sh('M22 44 h7 v14 h-7 Z', P.goldD, 2.5)}${sh('M35 44 h7 v14 h-7 Z', P.goldD, 2.5)}
+    ${sh('M16 20 h32 v24 a6 6 0 0 1 -6 6 H22 a6 6 0 0 1 -6 -6 Z', P.goldL)}
+    ${fd('M32 20 h16 v24 a6 6 0 0 1 -6 6 H32 Z', P.goldD, 0.42)}
+    ${sh('M6 22 h10 v20 h-10 Z', P.gold, 2.5)}${sh('M48 22 h10 v20 h-10 Z', P.gold, 2.5)}
+    ${ci(32, 12, 9, SKIN)}
+    ${sh('M22 11 a10 10 0 0 1 20 0 v3 h-20 Z', P.goldD)}
+    ${sh('M32 0 L36 6 h-8 Z', P.redL, 2)}
+    ${ci(32, 32, 7, P.red, 2.5)}${ci(32, 32, 3, P.goldL)}`,
+});
+
+// ---- 추가 수비 유닛 (05~12) ----
+Object.assign(unitArt, {
+  def_05: trooper({                           // 창벽 방어병
+    armor: '#4a6d5a', armorD: '#233a2e',
+    back: shaft(P.metalD) + sh('M42 2 L52 14 L45 19 L36 9 Z', P.metalL, 2.5),
+    front: `${sh('M12 22 h20 v20 q0 9 -10 14 q-10 -5 -10 -14 Z', P.metalL)}
+      ${fd('M22 22 h10 v20 q0 9 -10 14 Z', P.metalD, 0.45)}`,
+    helm: sh('M22 16 a10 10 0 0 1 20 0 Z', '#233a2e', 2.5),
+  }),
+  def_06: trooper({                           // 중장 수리반 — 큰 렌치 + 부품 가방
+    armor: '#c98a2f', armorD: '#8a5810',
+    back: `${rc(42, 24, 14, 18, P.woodL, 2)}${fr(45, 28, 8, 3, P.metalL, 1)}`,
+    front: `<path d="M14 50 L36 26" stroke="${INK}" stroke-width="10" stroke-linecap="round"/>
+      <path d="M14 50 L36 26" stroke="${P.metalL}" stroke-width="5.5" stroke-linecap="round"/>
+      ${sh('M33 22 a9 9 0 1 1 10 10 l-6 -4 Z', P.metal, 2.5)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v2 h-22 Z', P.goldL)}${fr(24, 8, 16, 4, P.goldD, 1)}`,
+  }),
+  def_07: trooper({                           // 연사 사수 — 총열 두 개
+    armor: '#3f5a3f', armorD: '#1f3320',
+    front: `<path d="M6 40 H52 M6 46 H52" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>
+      <path d="M6 40 H52 M6 46 H52" stroke="${P.darkL}" stroke-width="3" stroke-linecap="round"/>
+      ${rc(24, 40, 6, 12, P.darkD, 1)}
+      ${rc(30, 32, 12, 5, P.blueD, 2)}`,
+    helm: `${sh('M21 16 a11 10 0 0 1 22 0 v3 h-22 Z', '#2b3d2b')}${fr(24, 14, 16, 4, P.greenL)}`,
+  }),
+  def_08: `${ground}                           <!-- 방벽 거인 — 벽 그 자체 -->
+    ${sh('M14 46 h10 v12 h-10 Z', '#3a4650', 2.5)}${sh('M40 46 h10 v12 h-10 Z', '#3a4650', 2.5)}
+    ${sh('M8 18 h48 v28 a6 6 0 0 1 -6 6 H14 a6 6 0 0 1 -6 -6 Z', P.stoneL)}
+    ${fd('M32 18 h24 v28 a6 6 0 0 1 -6 6 H32 Z', P.stoneD, 0.42)}
+    <path d="M8 28 H56 M8 38 H56 M20 18 V28 M44 18 V28 M14 28 V38 M32 28 V38 M50 28 V38" stroke="${INK}" stroke-width="2.4"/>
+    ${ci(32, 10, 7, P.metalD, 2.5)}
+    <circle cx="29" cy="10" r="1.8" fill="${P.redL}"/><circle cx="35" cy="10" r="1.8" fill="${P.redL}"/>`,
+  def_09: `${ground}                           <!-- 대공 사격조 — 하늘로 세운 연장포 -->
+    ${cyl3(32, 42, 18, 10, 6, P.stoneL, P.stone, P.stoneD)}
+    ${sh('M22 34 h20 v10 h-20 Z', P.metalD)}
+    ${[26, 32, 38].map(x => `<path d="M${x} 34 L${x - 3} 6" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M${x} 34 L${x - 3} 6" stroke="${P.metalL}" stroke-width="2.4" stroke-linecap="round"/>`).join('')}
+    ${ci(44, 30, 5, P.blueL, 2.5)}`,
+  def_10: trooper({                           // 마도 치유단 — 초록 치유 빛
+    armor: '#3f7a5a', armorD: '#1d4030',
+    front: `${ci(20, 36, 10, '#8ff0b0')}
+      <path d="M20 30 V42 M14 36 H26" stroke="#1d4030" stroke-width="4" stroke-linecap="round"/>`,
+    helm: sh('M23 15 a9 9 0 0 1 18 0 Z', '#1d4030', 2.5),
+    accent: `<path d="M8 34 a24 24 0 0 1 48 0 a24 24 0 0 1 -48 0 Z" fill="#8ff0b0" opacity="0.14"/>`,
+  }),
+  def_11: trooper({                           // 왕궁 근위대 — 금빛 방패
+    armor: P.goldL, armorD: P.goldD,
+    back: shaft(P.goldD) + sh('M42 2 L52 14 L45 19 L36 9 Z', P.goldL, 2.5),
+    front: `${sh('M10 20 h24 v22 q0 11 -12 16 q-12 -5 -12 -16 Z', P.gold)}
+      ${fd('M22 20 h12 v22 q0 11 -12 16 Z', P.goldD, 0.45)}
+      ${ci(22, 34, 5, P.redL, 2)}`,
+    helm: `${sh('M21 15 a11 10 0 0 1 22 0 v3 h-22 Z', P.goldD)}${sh('M32 2 L36 9 h-8 Z', P.redL, 2)}`,
+  }),
+  def_12: `${ground}                           <!-- 차원 수호자 — 결계에 감싸인 형상 -->
+    <ellipse cx="32" cy="52" rx="20" ry="7" fill="${P.purpleD}" stroke="${INK}" stroke-width="${OUT_W}"/>
+    ${sh('M22 20 h20 v24 a5 5 0 0 1 -5 5 H27 a5 5 0 0 1 -5 -5 Z', '#4a3a7a')}
+    ${fd('M32 20 h10 v24 a5 5 0 0 1 -5 5 H32 Z', '#2a1f50', 0.45)}
+    ${ci(32, 12, 8, '#efe0ff')}
+    ${sh('M23 11 a9 9 0 0 1 18 0 Z', '#2a1f50', 2.5)}
+    ${ci(32, 30, 6, P.cyanL, 2.5)}
+    <path d="M4 32 a28 28 0 0 1 56 0 a28 28 0 0 1 -56 0 Z" fill="${P.cyanL}" opacity="0.14"/>
+    <path d="M4 32 a28 28 0 0 1 56 0 a28 28 0 0 1 -56 0 Z" fill="none" stroke="${P.cyanL}" stroke-width="2.5" opacity="0.8"/>`,
+});
 
 for (const [key, body] of Object.entries(unitArt)) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}">\n  ${body}\n</svg>`;

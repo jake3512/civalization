@@ -5,22 +5,26 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
          LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput,
-         CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon } from './data.js';
+         CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon, VIRTUAL_RESOURCES } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
-import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
+import { createBattleSession, createReplaySession, deployUnit, stepBattle, stepReplay,
+         retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
-         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage } from './logic.js';
+         storedTotal, totalStock, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
+         hasGood, sellFromStorage, buriedNodes, canDemolish,
+         defenseSnapshot, buildRaidReport, applyRaidToAttacker, applyRaidToDefender, canAttack } from './logic.js';
+import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
+import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS } from './mpNet.js';
 import {
-  initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
+  initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
-  callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate,
+  callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish, callRotate,
 } from './multiplayer.js';
 
 const game = new Game();
@@ -40,11 +44,22 @@ const renderer = new Renderer(canvas, game);
 const battleCanvas = document.getElementById('battle-field');
 const battleRenderer = new BattleRenderer(battleCanvas);
 
+// 다른 플레이어가 정한 문자열(국가 이름·색)은 그대로 innerHTML에 넣으면 안 된다.
+// 멀티플레이가 붙은 뒤로 화면에 남의 입력이 섞이므로 여기서 한 번 걸러 쓴다.
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const safeColor = (c) => (/^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '#888888');
+/** 자원 이름만 뽑아 쓰는 헬퍼 (아이콘 태그를 못 쓰는 자리 — flashMessage 등) */
+const resNames = (obj) => Object.entries(obj || {})
+  .map(([r, a]) => `${RESOURCES[r]?.name || r} ${a}`).join(', ');
+
 // 자원/상태 아이콘을 <img> 태그로 뽑아주는 헬퍼 (이모지 대신 assets/icons/*.svg 사용)
 const resIcon = (key) => `<img class="ic" src="${RESOURCES[key]?.icon || ''}" alt="${RESOURCES[key]?.name || key}">`;
 const statusIcon = (key) => `<img class="ic" src="${STATUS_ICONS[key]}" alt="${key}">`;
 const unitArtIcon = (key, cls = 'uic') => `<img class="${cls}" src="${unitIcon(key)}" alt="">`;
 
+// 한 번이라도 손에 넣어 본 자원 — 상단 표시줄을 고정 순서로 유지하기 위해 기억한다
+const seenResources = new Set();
 let selectedStruct = null;   // 현재 건설 모드로 선택된 구조물 key
 let beltDir = 0;              // 벨트 건설 시 방향 (회전 버튼 / R키)
 let pendingNation = null;     // { name, color } — 수도 위치를 아직 못 고른 상태
@@ -124,11 +139,11 @@ document.getElementById('placement-confirm').addEventListener('click', () => {
 
 async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
+  const mode = pickMode();
 
-  if (!FUNCTIONS_DEPLOYED) {
-    statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (Cloud Functions 미배포)';
-    return; // Functions 배포 전에는 Firebase 연결 자체를 시도하지 않는다 (안전한 폴백)
-  }
+  // Cloud Functions가 배포돼 있으면 예전처럼 서버 권위 모드로 간다.
+  // 아니면 mpNet의 local/firestore 백엔드로 전투 멀티플레이만 켠다.
+  if (mode !== NET_MODE.FUNCTIONS) return startCombatNet(mode, statusEl);
 
   const ok = await initFirebase();
   if (!ok) { statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (firebase-config.js 미설정)'; return; }
@@ -152,45 +167,188 @@ async function initMultiplayer(name, color, cx, cy) {
   watchBattles(renderBattleLog);
 }
 
+// ============================================================
+// 전투 멀티플레이 (mpNet)
+//
+// Cloud Functions 없이도 다른 플레이어와 싸울 수 있게 하는 경로다.
+//   1) 내 기지 스냅샷을 주기적으로 올린다 (defenseSnapshot)
+//   2) 다른 플레이어 스냅샷 목록을 받아 매치메이킹에 쓴다
+//   3) 공격은 내 브라우저에서 스냅샷 상대로 시뮬레이션하고(battle.js),
+//      결과를 습격 리포트로 상대 앞에 남긴다
+//   4) 나를 공격한 리포트가 오면 방어 측 반영(applyRaidToDefender)을 하고
+//      알림 + 리플레이를 띄운다
+// ============================================================
+let net = null;                 // 전송 계층 (mpNet)
+let netMode = null;
+let peers = [];                 // 다른 플레이어 국가 스냅샷
+let defenseReports = [];        // 나를 공격한 리포트 (최근 것 먼저)
+let attackReports = [];         // 내가 보낸 습격 (최근 것 먼저)
+let publishTimer = null;
+
+async function startCombatNet(mode, statusEl) {
+  let handles = null;
+  if (mode === NET_MODE.FIRESTORE) {
+    const ok = await initFirebase();
+    handles = ok ? getFirestoreHandles() : null;
+    if (handles) {
+      // 습격 리포트는 국가 id로 주고받으므로 로그인 uid를 그대로 쓴다
+      game.myNation.id = getUid();
+    } else {
+      mode = NET_MODE.LOCAL;    // Firebase 연결 실패 → 같은 기기 대전으로 폴백
+    }
+  }
+  netMode = mode;
+  net = createNet(mode, game.myNation.id, handles);
+
+  net.watchPeers((list) => {
+    peers = list;
+    game.otherNations.clear();
+    for (const p of list) game.otherNations.set(p.id, p);
+    renderWarPanel(list);
+    updateNetStatus(statusEl);
+  });
+  net.watchRaids(handleIncomingRaid);
+
+  publishMyNation();
+  if (publishTimer) clearInterval(publishTimer);
+  publishTimer = setInterval(publishMyNation, PUBLISH_INTERVAL_MS);
+  updateNetStatus(statusEl);
+  renderWarPanel(peers);
+  renderBattleLog();
+}
+
+function updateNetStatus(statusEl) {
+  if (!statusEl || !netMode) return;
+  const on = peers.length > 0;
+  statusEl.innerHTML = `<span class="dot ${on ? 'on' : 'off'}"></span> ${MODE_LABEL[netMode]} · 상대 ${peers.length}`;
+}
+
+/** 내 기지를 다른 플레이어가 공격할 수 있도록 공개한다 */
+function publishMyNation() {
+  if (!net || !game.myNation) return;
+  const snap = defenseSnapshot(game.myNation);
+  // 지역 버킷 — 서버 권위 모드의 주변 국가 쿼리와 같은 형식을 맞춰둔다
+  snap.region = regionKey(game.myNation.capital.x, game.myNation.capital.y);
+  net.publish(snap);
+}
+
+/**
+ * 나를 공격한 습격 리포트가 도착했을 때. 같은 리포트를 여러 번 받아도
+ * applyRaidToDefender가 한 번만 반영한다(멱등).
+ */
+function handleIncomingRaid(report) {
+  if (!game.myNation || !report || report.defenderId !== game.myNation.id) return;
+  if (defenseReports.some(r => r.id === report.id)) return;
+
+  const res = applyRaidToDefender(game.myNation, report);
+  defenseReports.unshift(report);
+  defenseReports.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  if (defenseReports.length > 30) defenseReports.length = 30;
+
+  if (res.applied) {
+    // flashMessage는 textContent라 아이콘 태그를 못 쓴다 (남의 국가 이름이 섞이는 자리라 그대로 둔다)
+    flashMessage(
+      `${report.attackerName || '누군가'}의 습격! 파괴율 ${Math.round(res.destructionPercent * 100)}%`
+      + ` · 약탈당함 ${resNames(res.lost) || '없음'}`,
+      true);
+    renderResourcePanel();
+    publishMyNation();          // 줄어든 재고를 바로 반영해 다시 공개한다
+  }
+  renderBattleLog();
+}
+
 // ---------- 건설 메뉴 ----------
+/**
+ * 건설 카탈로그. 구조물이 35종까지 늘면서 한 줄로 늘어놓으면 찾기 어려워져서,
+ * **같은 종류끼리 세트로 묶고 세트를 먼저 고르게** 한다 (터렛만 14종이다).
+ * 세트를 열면 그 안의 구조물이 나오고, 거기서 하나를 골라 짓는다.
+ */
+let openBuildGroup = null;   // 지금 펼쳐 둔 세트 key
+
 function buildBuildMenu() {
   const menu = document.getElementById('build-menu');
   menu.innerHTML = '';
-  for (const [key, def] of Object.entries(STRUCTURES)) {
-    const btn = document.createElement('button');
-    btn.className = 'build-item';
-    btn.dataset.struct = key;
-    btn.disabled = !game.myNation.unlocked.has(key);
-    btn.innerHTML = `<img class="sic" src="${structureIcon(key)}" alt=""><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
-    btn.title = def.desc;
-    btn.addEventListener('click', () => {
-      const wasSelected = selectedStruct === key;
-      clearSelectedStruct();          // 미리보기/힌트까지 같이 지운다
-      if (wasSelected) return;        // 같은 버튼을 다시 누르면 선택 해제
-      selectedStruct = key;
-      btn.classList.add('active');
-      const rotateBtn = document.getElementById('rotate-btn');
-      if (rotateBtn) rotateBtn.disabled = (key !== 'belt');
-      renderCostPreview(def);
+
+  for (const group of BUILD_GROUPS) {
+    const keys = Object.keys(STRUCTURES).filter(k => buildGroupOf(k) === group.key);
+    if (!keys.length) continue;
+    const unlockedKeys = keys.filter(k => game.myNation.unlocked.has(k));
+    const open = openBuildGroup === group.key;
+
+    const head = document.createElement('button');
+    head.className = `build-group${open ? ' open' : ''}${unlockedKeys.length ? '' : ' locked'}`;
+    head.dataset.group = group.key;
+    head.innerHTML =
+      `<img class="gic" src="${structureIcon(unlockedKeys[0] || keys[0])}" alt="">
+       <span class="gnm">${group.name}<span class="gdesc">${group.desc}</span></span>
+       <span class="gcnt">${unlockedKeys.length}/${keys.length}</span>
+       <span class="gcaret">${open ? '▾' : '▸'}</span>`;
+    head.addEventListener('click', () => {
+      openBuildGroup = open ? null : group.key;
+      buildBuildMenu();
     });
-    menu.appendChild(btn);
+    menu.appendChild(head);
+    if (!open) continue;
+
+    const list = document.createElement('div');
+    list.className = 'build-sublist';
+    for (const key of keys) {
+      const def = STRUCTURES[key];
+      const btn = document.createElement('button');
+      btn.className = 'build-item';
+      btn.dataset.struct = key;
+      btn.disabled = !game.myNation.unlocked.has(key);
+      btn.innerHTML = `<img class="sic" src="${structureIcon(key)}" alt=""><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
+      btn.title = def.desc;
+      btn.addEventListener('click', () => {
+        const wasSelected = selectedStruct === key;
+        clearSelectedStruct();          // 미리보기/힌트까지 같이 지운다
+        if (wasSelected) return;        // 같은 버튼을 다시 누르면 선택 해제
+        selectedStruct = key;
+        btn.classList.add('active');
+        const rotateBtn = document.getElementById('rotate-btn');
+        if (rotateBtn) rotateBtn.disabled = !isRotatable(key);
+        renderCostPreview(def);
+        // 고를 때 곧바로 화면 한가운데에 고스트를 띄워, 어디를 눌러야 할지 알려준다
+        buildTarget = renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
+      });
+      // 메뉴를 다시 그려도 지금 고른 구조물의 강조 표시가 풀리지 않게 한다
+      // (연속 설치 중에 건설할 때마다 선택이 사라져 보이던 문제)
+      if (selectedStruct === key) btn.classList.add('active');
+      list.appendChild(btn);
+    }
+    menu.appendChild(list);
   }
 }
 
+/**
+ * 고른 구조물의 필요 자원을 "보유/필요"로 보여준다.
+ * 모자란 자원은 빨갛게 떠서, 짓기 전에 무엇이 부족한지 바로 알 수 있다.
+ */
 function renderCostPreview(def) {
   const el = document.getElementById('cost-preview');
-  const parts = Object.entries(def.baseCost).map(([r, a]) => `${resIcon(r)} ${RESOURCES[r]?.name || r} ${a}`);
-  let html = parts.length ? `건설 비용: ${parts.join(' · ')}` : '건설 비용 없음';
-  if (def === STRUCTURES.belt) html += `  ·  방향 ${DIR_ARROW[beltDir]} (우측 하단 ⟳ 버튼으로 회전)`;
+  if (!def) { el.innerHTML = '구조물을 선택하세요'; return; }
+  const stockOf = (r) => Math.floor(game.myNation
+    ? (VIRTUAL_RESOURCES.has(r) ? (game.myNation.resources[r] || 0) : totalStock(game.myNation, r))
+    : 0);
+  const parts = Object.entries(def.baseCost).map(([r, need]) => {
+    const have = stockOf(r);
+    return `<span class="cost-item${have >= need ? '' : ' short'}">${resIcon(r)}<b>${have}</b>/${need}</span>`;
+  });
+  let html = `<div class="cost-title">${def.name} · 필요 자원</div>`;
+  html += parts.length ? `<div class="cost-items">${parts.join('')}</div>` : `<div class="cost-items">건설 비용 없음</div>`;
+  if (isRotatable(selectedStruct)) html += `<div class="cost-note">방향 ${DIR_ARROW[beltDir]} — ⟳ 버튼이나 R 키로 회전</div>`;
   el.innerHTML = html;
 }
 
 // ---------- 터치 툴바 버튼 (회전 / 전력범위 / 줌) ----------
 document.getElementById('rotate-btn').addEventListener('click', () => {
-  if (selectedStruct !== 'belt') return;
+  if (!isRotatable(selectedStruct)) return;
   beltDir = (beltDir + 1) % 4;
-  renderCostPreview(STRUCTURES.belt);
+  renderCostPreview(STRUCTURES[selectedStruct]);
 });
+document.getElementById('build-confirm').addEventListener('click', confirmBuild);
+document.getElementById('build-cancel').addEventListener('click', clearSelectedStruct);
 document.getElementById('power-btn').addEventListener('click', (e) => {
   renderer.showPower = !renderer.showPower;
   e.currentTarget.classList.toggle('active', renderer.showPower);
@@ -204,13 +362,18 @@ document.getElementById('zoom-out-btn').addEventListener('click', () => {
 
 // ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
 window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 'r' && selectedStruct === 'belt') {
+  if (e.key.toLowerCase() === 'r' && isRotatable(selectedStruct)) {
     beltDir = (beltDir + 1) % 4;
-    renderCostPreview(STRUCTURES.belt);
+    renderCostPreview(STRUCTURES[selectedStruct]);
   }
   if (e.key.toLowerCase() === 'p') {
     renderer.showPower = !renderer.showPower;
     document.getElementById('power-btn').classList.toggle('active', renderer.showPower);
+  }
+  // 키보드가 있으면 Enter로 설치, Esc로 취소 (터치에서는 화면 버튼을 쓴다)
+  if (selectedStruct) {
+    if (e.key === 'Enter') { e.preventDefault(); confirmBuild(); }
+    if (e.key === 'Escape') { e.preventDefault(); clearSelectedStruct(); }
   }
 });
 
@@ -218,17 +381,18 @@ window.addEventListener('keydown', (e) => {
 let dragging = false, lastX = 0, lastY = 0, dragged = false;
 let pinching = false, pinchStartDist = 0;
 
-// ---------- 드래그 건설 ----------
+// ---------- 건설 배치 (고스트를 옮긴 뒤 "설치" 버튼으로 확정) ----------
 // 구조물을 고른 상태에서 지도를 드래그하면 지나가는 칸마다 이어서 설치된다
 // (벨트·방벽처럼 여러 개를 줄줄이 놓을 때 편하도록). 손을 떼면 그 구조물은
 // 자동으로 선택 해제되어, 실수로 계속 지어지는 일이 없다.
-let placing = false;
-const placedThisDrag = new Set();
+let placing = false;          // 고스트를 끌어 옮기는 중
+let buildTarget = null;       // 설치 버튼이 지을 칸 { x, y }
 let suppressNextTap = false;
 
 /** 건설 모드 해제 (카탈로그 강조·회전 버튼·미리보기까지 함께 정리) */
 function clearSelectedStruct() {
   selectedStruct = null;
+  buildTarget = null;
   document.querySelectorAll('.build-item.active').forEach(b => b.classList.remove('active'));
   const rotateBtn = document.getElementById('rotate-btn');
   if (rotateBtn) rotateBtn.disabled = true;
@@ -237,34 +401,52 @@ function clearSelectedStruct() {
   if (hint) { hint.textContent = ''; hint.className = 'preview-hint'; }
 }
 
-/** 화면 좌표를 타일로 바꿔 그 자리에 한 번 설치한다 (같은 칸 중복 시도는 건너뜀) */
-async function placeAtScreen(clientX, clientY) {
+/**
+ * 건설 위치(고스트)를 화면 좌표가 가리키는 칸으로 옮긴다.
+ * 손가락이 닿는 순간 지어지면 오조작이 잦아서, 여기서는 자리만 잡고
+ * 실제 건설은 "설치" 버튼(confirmBuild)에서만 일어난다.
+ */
+function moveBuildTargetTo(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const { x, y } = renderer.screenToWorld(clientX - rect.left, clientY - rect.top);
-  const key = `${x},${y}`;
-  if (placedThisDrag.has(key)) return;
-  placedThisDrag.add(key);
+  buildTarget = renderer.screenToWorld(clientX - rect.left, clientY - rect.top);
+}
 
+/** "설치" 버튼 — 지금 고스트가 있는 칸에 실제로 짓는다 */
+async function confirmBuild() {
   const structKey = selectedStruct;
-  if (!structKey) return;
+  if (!structKey || !buildTarget || !game.myNation) return;
+  const { x, y } = buildTarget;
+  const repeat = document.getElementById('build-repeat')?.checked;
+
   if (isMultiplayer()) {
     const res = await callBuild(structKey, x, y, beltDir);
-    if (res.error) flashMessage(res.error, true);
-    else flashMessage(`${STRUCTURES[structKey].name} 건설 요청 완료`, false);
+    if (res.error) { flashMessage(res.error, true); return; }
+    flashMessage(`${STRUCTURES[structKey].name} 건설 요청 완료`, false);
   } else {
     const err = game.myNation.build(structKey, x, y, beltDir);
-    if (err) flashMessage(err, true);
-    else { flashMessage(`${STRUCTURES[structKey].name} 건설 완료`, false); buildBuildMenu(); }
+    if (err) { flashMessage(err, true); return; }
+    flashMessage(`${STRUCTURES[structKey].name} 건설 완료`, false);
+    buildBuildMenu();
+  }
+  // 기본은 한 번 설치하면 선택 해제. "연속"을 켜두면 벨트처럼 여러 개를
+  // 이어 지을 때 매번 카탈로그로 돌아가지 않아도 된다.
+  if (repeat) {
+    if (isBeltKey(structKey)) {
+      // 벨트는 흐르는 방향으로 한 칸 밀어줘야 자연스럽게 이어 깔린다
+      const [dx, dy] = DIR_VECT[beltDir] || [1, 0];
+      buildTarget = { x: x + dx, y: y + dy };
+    }
+  } else {
+    clearSelectedStruct();
   }
 }
 
 function pointerDown(x, y) {
   dragged = false; lastX = x; lastY = y;
-  // 건설 모드에서는 드래그가 "이동"이 아니라 "설치"가 된다
+  // 건설 모드에서 드래그는 "설치"가 아니라 "고스트 옮기기"다
   if (selectedStruct && game.myNation) {
     placing = true;
-    placedThisDrag.clear();
-    placeAtScreen(x, y);
+    moveBuildTargetTo(x, y);
     return;
   }
   dragging = true;
@@ -272,7 +454,7 @@ function pointerDown(x, y) {
 function pointerMove(x, y) {
   const rect = canvas.getBoundingClientRect();
   renderer.hover = renderer.screenToWorld(x - rect.left, y - rect.top);
-  if (placing) { placeAtScreen(x, y); lastX = x; lastY = y; return; }
+  if (placing) { moveBuildTargetTo(x, y); lastX = x; lastY = y; return; }
   if (dragging) {
     const dx = x - lastX, dy = y - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 3) dragged = true;
@@ -283,8 +465,6 @@ function pointerMove(x, y) {
 function pointerUp() {
   if (placing) {
     placing = false;
-    placedThisDrag.clear();
-    clearSelectedStruct();   // 한 번 설치했으면 선택 해제
     suppressNextTap = true;  // 뒤이어 오는 click이 타일 정보를 열지 않도록
   }
   dragging = false;
@@ -302,7 +482,7 @@ async function handleTap(clientX, clientY) {
     return;
   }
   if (!game.myNation) return;
-  // 건설은 pointerDown/Move에서 이미 처리된다 (드래그 건설)
+  // 건설 모드에서는 탭이 "고스트 옮기기"라 타일 정보를 열지 않는다
   if (selectedStruct) return;
 
   // 카메라가 기울어져 있어서 건물은 자기 타일보다 위로 솟아 보인다.
@@ -356,7 +536,7 @@ canvas.addEventListener('touchmove', (e) => {
 canvas.addEventListener('touchend', (e) => {
   if (pinching) { pinching = false; dragged = true; pointerUp(); return; }
   const wasPlacing = placing;
-  pointerUp(); // 설치 중이었다면 여기서 선택이 해제된다
+  pointerUp(); // 고스트를 옮기는 중이었다면 여기서 끝난다 (설치는 설치 버튼에서만)
   if (!wasPlacing && !dragged && e.changedTouches.length === 1) {
     handleTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
   }
@@ -591,6 +771,32 @@ document.querySelector('.struct-modal-backdrop').addEventListener('click', close
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeStructModal(); });
 
 /**
+ * 철거 블록 — 되돌릴 수 없는 조작이라 "무엇을 잃는지"를 먼저 보여주고,
+ * 한 번 더 눌러야 실제로 철거되게 한다 (오탭 방지).
+ */
+function renderDemolishHtml(struct, def) {
+  if (struct.key === 'capital') {
+    return `<div class="dem-block"><div class="pd dim">수도는 철거할 수 없습니다</div></div>`;
+  }
+  const check = canDemolish(game.myNation, struct.id);
+  // 철거하면 사라지는 자원 (보관함 + 투입/산출 인벤토리)
+  const lost = {};
+  for (const bag of [struct.store, struct.inputBuffer, struct.outputBuffer]) {
+    for (const [res, amt] of Object.entries(bag || {})) if (amt > 0) lost[res] = (lost[res] || 0) + amt;
+  }
+  const lostTxt = Object.entries(lost).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
+  const queued = (struct.recruitQueue || []).length;
+
+  let html = `<div class="dem-block"><div class="dem-head">철거</div>`;
+  html += `<div class="pd dim">건설비는 돌려받지 못하고, 안에 있는 자원은 모두 사라집니다.</div>`;
+  if (lostTxt) html += `<div class="dem-lost">사라짐: ${lostTxt}</div>`;
+  if (queued) html += `<div class="dem-lost">모집 대기 ${queued}건도 함께 사라집니다</div>`;
+  if (!check.ok) html += `<div class="pd err">${check.error}</div>`;
+  html += `<button id="demolish-btn" class="demolish-btn" ${check.ok ? '' : 'disabled'}>철거</button></div>`;
+  return html;
+}
+
+/**
  * 레벨업 정보 — 다음 레벨에서 실제로 무엇이 얼마나 좋아지는지와 비용을 보여준다.
  * (숫자를 직접 비교해 보여주므로 "올릴 가치가 있는지" 판단할 수 있다)
  */
@@ -623,7 +829,7 @@ function renderUpgradeHtml(struct, def) {
   }
   if (def.defense) add('방어력', def.defense * cur, def.defense * next);
   if (def.baseHp) add('내구도', getStructureMaxHp(struct.key, cur), getStructureMaxHp(struct.key, next));
-  if (struct.key === 'belt') add('처리량', beltThroughput(cur), beltThroughput(next), '/틱');
+  if (isBeltKey(struct.key)) add('처리량', beltThroughput(cur), beltThroughput(next), '/틱');
 
   if (gains.length) {
     html += `<div class="up-gains">` + gains.map(g =>
@@ -674,9 +880,16 @@ function showStructPanel(struct, x, y) {
   if (struct.key === 'barn') html += renderChoiceHtml(struct, ANIMALS, 'animal', '기를 가축', '여행으로 데려오세요');
   if (STRUCTURES[struct.key].storageCapacity) html += renderSellHtml(struct);
 
+  if (isRotatable(struct.key)) {
+    html += `<div class="pd">흐르는 방향: <b class="rot-now">${DIR_ARROW[struct.dir || 0]}</b></div>
+      <div class="rot-row">
+        ${[0, 1, 2, 3].map(d => `<button class="rot-btn${(struct.dir || 0) === d ? ' active' : ''}" data-rot="${d}">${DIR_ARROW[d]}</button>`).join('')}
+      </div>`;
+  }
   if (def.recipes) html += renderRecipeHtml(struct, def);
 
   html += renderUpgradeHtml(struct, def);
+  html += renderDemolishHtml(struct, def);
 
   const body = document.getElementById('struct-modal-body');
   body.innerHTML = html;
@@ -697,6 +910,38 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
+  body.querySelectorAll('[data-rot]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const dir = Number(btn.dataset.rot);
+      const res = await dispatch(
+        () => ({ error: game.myNation.rotateStructure(struct.id, dir) }),
+        () => callRotate(struct.id, dir));
+      if (res.error) flashMessage(res.error, true);
+      else showStructPanel(game.myNation.structures.find(s2 => s2.id === struct.id) || null, x, y);
+    });
+  });
+
+  // 철거는 되돌릴 수 없어서 두 번 눌러야 실행된다 (첫 탭은 확인 요청)
+  const db2 = document.getElementById('demolish-btn');
+  if (db2) {
+    let armed = false;
+    db2.addEventListener('click', async () => {
+      if (!armed) {
+        armed = true;
+        db2.textContent = '정말 철거합니다 (한 번 더)';
+        db2.classList.add('armed');
+        setTimeout(() => { if (db2.isConnected) { armed = false; db2.textContent = '철거'; db2.classList.remove('armed'); } }, 4000);
+        return;
+      }
+      const name = STRUCTURES[struct.key].name;
+      const res = await dispatch(
+        () => ({ error: game.myNation.demolish(struct.id) }),
+        () => callDemolish(struct.id));
+      if (res.error) flashMessage(res.error, true);
+      else { flashMessage(`${name} 철거 완료`, false); closeStructModal(); }
+    });
+  }
+
   const ub = document.getElementById('upgrade-btn');
   if (ub) ub.addEventListener('click', async () => {
     if (isMultiplayer()) {
@@ -855,25 +1100,47 @@ function renderLabHtml() {
 let knownNations = [];  // 최근 watchNations로 받은 주변 국가 목록 (원본 데이터, 매치메이킹 소스)
 let currentMatch = null; // 현재 화면에 표시 중인 매치 후보
 
+let attackDeck = null;   // 이번 출격에 데려갈 병력 (unitKey -> 수). null이면 전군
+
 function renderWarPanel(nations) {
   knownNations = nations;
   const el = document.getElementById('war-list');
+  if (!el || !game.myNation) return;
   if (currentMatch && !nations.some(n => n.id === currentMatch.id)) currentMatch = null;
+
+  const now = Date.now();
+  const shieldLeft = Math.max(0, (game.myNation.shieldUntil || 0) - now);
+  const shieldTxt = shieldLeft > 0
+    ? `<div class="pd shield-on">내 보호막 ${Math.ceil(shieldLeft / 60000)}분 남음 — 공격하면 즉시 풀립니다</div>`
+    : `<div class="pd">내 보호막 없음 — 다른 플레이어가 나를 공격할 수 있습니다</div>`;
+
   el.innerHTML = `
-    <div class="pd">주변 국가 ${nations.length}개 발견됨</div>
+    <div class="pd">접속한 상대 ${nations.length}명 · 내 트로피 ${statusIcon('trophy')} ${game.myNation.trophies || 0}</div>
+    ${shieldTxt}
     <button id="find-match-btn" class="find-match-btn">⚔️ 상대 찾기</button>
     <div id="match-card"></div>
   `;
   document.getElementById('find-match-btn').addEventListener('click', () => {
-    if (!game.myNation) return;
-    const now = Date.now();
-    if (isShielded(game.myNation, now)) {
-      flashMessage('내 보호막이 켜져 있는 동안은 공격하면 보호막이 사라집니다. 그래도 공격할까요?', false);
+    currentMatch = findMatch(game.myNation, knownNations, Date.now());
+    attackDeck = null;
+    if (!currentMatch && knownNations.length) {
+      flashMessage('지금은 공격할 수 있는 상대가 없습니다 (전부 보호막 상태)', true);
     }
-    currentMatch = findMatch(game.myNation, knownNations, now);
     renderMatchCard();
   });
   renderMatchCard();
+}
+
+/** 출격 편성 — 데려갈 유닛 수를 정한다. 기본값은 보유 전군. */
+function currentDeck() {
+  const roster = (game.myNation.units && game.myNation.units.attack) || {};
+  if (!attackDeck) return Object.fromEntries(Object.entries(roster).filter(([, c]) => c > 0));
+  const deck = {};
+  for (const [key, count] of Object.entries(attackDeck)) {
+    const capped = Math.min(count, roster[key] || 0);
+    if (capped > 0) deck[key] = capped;
+  }
+  return deck;
 }
 
 function renderMatchCard() {
@@ -881,75 +1148,184 @@ function renderMatchCard() {
   if (!el) return;
   if (!currentMatch) {
     el.innerHTML = knownNations.length
-      ? '<div class="pd">상대 찾기 버튼을 눌러 트로피가 비슷한 국가를 찾아보세요.</div>'
-      : '<div class="pd">아직 발견된 다른 국가가 없습니다.</div>';
+      ? '<div class="pd">상대 찾기 버튼을 눌러 트로피가 비슷한 상대를 찾아보세요.</div>'
+      : `<div class="pd">아직 접속한 상대가 없습니다.</div>
+         <div class="pd dim">${netMode === NET_MODE.LOCAL
+            ? '이 게임을 <b>새 탭에서 하나 더 열어</b> 국가를 세우면 그 국가가 상대로 잡힙니다.'
+            : '상대가 접속하면 자동으로 목록에 올라옵니다.'}</div>`;
     return;
   }
   const n = currentMatch;
-  const myAttackUnits = Object.entries((game.myNation.units && game.myNation.units.attack) || {}).filter(([, c]) => c > 0);
-  const hasArmy = myAttackUnits.length > 0;
+  const roster = (game.myNation.units && game.myNation.units.attack) || {};
+  const deck = currentDeck();
+  const total = Object.values(deck).reduce((a, b) => a + b, 0);
+  const blocked = canAttack(game.myNation, n, Date.now());
+
   el.innerHTML = `
     <div class="match-card">
       <div class="match-head">
-        <span class="dot" style="background:${n.color}"></span>
-        <span class="nm">${n.name}</span>
-        <span class="trophy">${statusIcon('trophy')} ${n.trophies || 0}</span>
+        <span class="dot" style="background:${safeColor(n.color)}"></span>
+        <span class="nm">${esc(n.name)}</span>
+        <span class="trophy">${statusIcon('trophy')} ${Number(n.trophies) || 0}</span>
       </div>
-      <div class="pd">예상 방어력 ${getDefensePower(n)} · 약탈량은 실제 파괴율에 비례합니다</div>
+      <div class="pd">기지 ${(n.structures || []).length}동 · 예상 방어력 ${n.defensePower ?? getDefensePower(n)}
+        · 약탈량은 실제 파괴율에 비례합니다</div>
+      <div class="deck-edit">
+        <div class="deck-edit-head">출격 편성 <span class="dim">${total}기</span></div>
+        ${Object.entries(roster).filter(([, c]) => c > 0).map(([key, have]) => `
+          <div class="deck-edit-row">
+            ${unitArtIcon(key, 'deck-edit-art')}
+            <span class="nm">${UNITS.attack[key]?.name || key}</span>
+            <button class="deck-minus" data-unit="${key}">−</button>
+            <span class="cnt">${deck[key] || 0}/${have}</span>
+            <button class="deck-plus" data-unit="${key}">＋</button>
+          </div>`).join('') || '<div class="pd err">공격 유닛이 없습니다 — 전초기지에서 모집하세요</div>'}
+      </div>
       <div class="match-actions">
-        <button id="attack-match-btn" class="atk-btn" ${hasArmy ? '' : 'disabled title="전초기지에서 공격 유닛을 먼저 모집하세요"'}>공격</button>
+        <button id="attack-match-btn" class="atk-btn" ${total > 0 && !blocked ? '' : `disabled title="${blocked || '데려갈 유닛을 1기 이상 골라주세요'}"`}>공격</button>
         <button id="skip-match-btn" class="skip-btn">다른 상대</button>
       </div>
+      ${blocked ? `<div class="pd err">${blocked}</div>` : ''}
     </div>`;
+
+  const bump = (key, delta) => {
+    const base = currentDeck();
+    const have = roster[key] || 0;
+    attackDeck = { ...base, [key]: Math.max(0, Math.min(have, (base[key] || 0) + delta)) };
+    renderMatchCard();
+  };
+  el.querySelectorAll('.deck-plus').forEach(b => b.addEventListener('click', () => bump(b.dataset.unit, +1)));
+  el.querySelectorAll('.deck-minus').forEach(b => b.addEventListener('click', () => bump(b.dataset.unit, -1)));
+
   document.getElementById('attack-match-btn').addEventListener('click', () => {
-    if (!hasArmy) return;
-    openBattleScreen(currentMatch);
+    if (!Object.keys(currentDeck()).length) return;
+    openBattleScreen(currentMatch, currentDeck());
   });
   document.getElementById('skip-match-btn').addEventListener('click', () => {
     currentMatch = findMatch(game.myNation, knownNations, Date.now());
+    attackDeck = null;
     renderMatchCard();
   });
 }
 
-function renderBattleLog(list) {
+/**
+ * 전투 기록. 서버 권위 모드에서는 서버가 준 battles 목록을(list 인자),
+ * mpNet 모드에서는 내가 보낸 습격 + 나를 공격한 리포트를 함께 보여준다.
+ * 방어 기록에는 **리플레이**(어떻게 뚫렸는지 다시 보기)와 **복수** 버튼이 붙는다.
+ */
+function renderBattleLog(list = null) {
   const el = document.getElementById('battle-log');
-  el.innerHTML = list.map(b => {
-    const mine = b.attackerId === game.myNation.id;
-    const outcome = b.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '승리');
-    const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (${statusIcon('trophy')}${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
-    return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
-  }).join('') || '<div class="pd">전투 기록 없음</div>';
+  if (!el || !game.myNation) return;
+
+  if (list) {   // 서버 권위 모드
+    el.innerHTML = list.map(b => {
+      const mine = b.attackerId === game.myNation.id;
+      const outcome = b.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '승리');
+      const trophyTxt = mine && typeof b.trophyDelta === 'number' ? ` (${statusIcon('trophy')}${b.trophyDelta >= 0 ? '+' : ''}${b.trophyDelta})` : '';
+      return `<div class="log-row">${mine ? '내가 공격' : '상대가 공격'} → <b>${outcome}</b>${trophyTxt}</div>`;
+    }).join('') || '<div class="pd">전투 기록 없음</div>';
+    return;
+  }
+
+  const rows = [
+    ...attackReports.map(r => ({ r, mine: true })),
+    ...defenseReports.map(r => ({ r, mine: false })),
+  ].sort((a, b) => (b.r.timestamp || 0) - (a.r.timestamp || 0)).slice(0, 30);
+
+  if (!rows.length) { el.innerHTML = '<div class="pd">전투 기록 없음</div>'; return; }
+
+  el.innerHTML = rows.map(({ r, mine }, i) => {
+    const outcome = r.win ? (mine ? '승리' : '패배') : (mine ? '패배' : '방어 성공');
+    const delta = mine ? r.attackerTrophyDelta : r.defenderTrophyDelta;
+    const pct = Math.round((r.destructionPercent || 0) * 100);
+    const who = mine ? `→ ${esc(r.defenderName)}` : `← ${esc(r.attackerName)}`;
+    const lootTxt = Object.entries(r.loot || {}).slice(0, 4)
+      .map(([res, a]) => `${resIcon(res)}${a}`).join(' ');
+    return `<div class="log-row ${mine ? 'atk' : 'def'}">
+      <div class="log-line">
+        <b>${mine ? '공격' : '방어'}</b> ${who} · ${outcome} ${pct}%
+        <span class="trophy">${statusIcon('trophy')}${(delta || 0) >= 0 ? '+' : ''}${delta || 0}</span>
+      </div>
+      ${lootTxt ? `<div class="log-loot">${mine ? '약탈' : '피해'} ${lootTxt}</div>` : ''}
+      <div class="log-actions">
+        ${r.replay?.deploys?.length ? `<button class="log-btn" data-replay="${i}">리플레이</button>` : ''}
+        ${!mine ? `<button class="log-btn revenge" data-revenge="${i}">복수</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-replay]').forEach(btn => btn.addEventListener('click', () => {
+    openReplayScreen(rows[Number(btn.dataset.replay)].r, rows[Number(btn.dataset.replay)].mine);
+  }));
+  el.querySelectorAll('[data-revenge]').forEach(btn => btn.addEventListener('click', () => {
+    const report = rows[Number(btn.dataset.revenge)].r;
+    const target = peers.find(p => p.id === report.attackerId);
+    if (!target) { flashMessage('상대가 접속을 끊어 지금은 복수할 수 없습니다', true); return; }
+    currentMatch = target;
+    attackDeck = null;
+    renderWarPanel(peers);
+    flashMessage(`${target.name}에게 복수 준비 — 출격 편성을 확인하세요`, false);
+  }));
 }
 
 // ---------------- 실시간 습격 전투 화면 ----------------
-// 실시간 소켓 서버가 없는 프로토타입이라, 방어자의 스냅샷(구조물·영토·병력
-// 로스터·자원)을 그대로 가져와 공격자 브라우저에서 전투 전체를 시뮬레이션한다
-// (battle.js). 서버에는 최종 결과(파괴율·약탈량)만 제출해 검증 후 반영된다.
+// 실시간 소켓 서버가 없으므로, 방어자의 스냅샷(구조물·영토·병력 로스터·자원)을
+// 그대로 가져와 공격자 브라우저에서 전투 전체를 시뮬레이션한다 (battle.js).
+// 상대가 접속해 있지 않아도 공격할 수 있고(비동기 습격), 결과는 습격 리포트로
+// 상대 앞에 남아 다음 접속 때 반영된다.
 let battleSession = null;
 let battleDeployKey = null;      // 배치 모드로 선택된 유닛 key
 let battleRafId = null;
 let battleLastTs = null;
 let battleDragging = false, battleLastX = 0, battleLastY = 0, battleDragged = false;
 let battlePinching = false, battlePinchStartDist = 0;
+let battleIsReplay = false;      // 리플레이 재생 중이면 결과를 제출하지 않는다
+let battleTargetSnapshot = null; // 이번 전투에서 싸운 상대 스냅샷
 
-function openBattleScreen(defenderSnapshot) {
+function openBattleScreen(defenderSnapshot, deck = null) {
   closeStructModal(); // 팝업이 전투 화면 위에 남지 않도록
-  const deck = { ...((game.myNation.units && game.myNation.units.attack) || {}) };
-  battleSession = createBattleSession(defenderSnapshot, deck);
+  const useDeck = deck || { ...((game.myNation.units && game.myNation.units.attack) || {}) };
+  battleSession = createBattleSession(defenderSnapshot, useDeck);
+  battleIsReplay = false;
+  battleTargetSnapshot = defenderSnapshot;
+  showBattleScreen(`습격 중: ${defenderSnapshot.name}`);
+}
+
+/**
+ * 리플레이 재생. 방어 기록에서는 "내 기지가 어떻게 뚫렸는지",
+ * 공격 기록에서는 "내가 어떻게 밀었는지"를 그대로 다시 본다.
+ * 결과는 이미 반영된 것이라 다시 제출하지 않는다.
+ */
+function openReplayScreen(report, mine) {
+  closeStructModal();
+  // 무대는 리포트에 함께 담긴 그때의 기지 배치다 (그 뒤에 기지를 고쳐도 그때 그대로 재생된다).
+  // 옛 기록이라 배치가 없으면 지금 알고 있는 기지로 대신한다.
+  const base = report.replay?.base
+    || (mine ? peers.find(p => p.id === report.defenderId) : null)
+    || defenseSnapshot(game.myNation);
+  battleSession = createReplaySession(base, report.replay);
+  battleIsReplay = true;
+  battleTargetSnapshot = base;
+  showBattleScreen(`리플레이: ${mine ? report.defenderName : report.attackerName}의 습격`);
+}
+
+function showBattleScreen(title) {
   battleDeployKey = null;
   battleLastTs = null;
 
   document.getElementById('app').classList.add('hidden');
   document.getElementById('battle-screen').classList.remove('hidden');
-  document.getElementById('battle-defender-name').textContent = defenderSnapshot.name;
+  document.getElementById('battle-defender-name').textContent = title.replace(/^[^:]*: /, '');
+  document.querySelector('.battle-title').firstChild.textContent = title.includes('리플레이') ? '리플레이: ' : '습격 중: ';
   document.getElementById('battle-result').classList.add('hidden');
-  document.getElementById('battle-hint').classList.remove('hidden');
+  document.getElementById('battle-hint').classList.toggle('hidden', battleIsReplay);
+  document.getElementById('battle-deck-tray').classList.toggle('hidden', battleIsReplay);
 
   battleRenderer.resize();
   const capital = battleSession.structures.find(s => s.key === 'capital');
   battleRenderer.centerOn(capital ? capital.cx : 0, capital ? capital.cy : 0);
 
-  renderDeckTray();
+  if (!battleIsReplay) renderDeckTray();
   if (battleRafId) cancelAnimationFrame(battleRafId);
   battleRafId = requestAnimationFrame(battleLoop);
 }
@@ -960,7 +1336,10 @@ function battleLoop(ts) {
   const dt = Math.min(0.1, Math.max(0, (ts - battleLastTs) / 1000)); // 탭 비활성 등으로 인한 큰 시간 점프 방지
   battleLastTs = ts;
 
-  if (!battleSession.ended) stepBattle(battleSession, dt);
+  if (!battleSession.ended) {
+    if (battleIsReplay) stepReplay(battleSession, dt);
+    else stepBattle(battleSession, dt);
+  }
 
   battleRenderer.resize();
   battleRenderer.draw(battleSession);
@@ -1084,36 +1463,68 @@ async function finishBattle() {
 
   const title = document.getElementById('battle-result-title');
   const body = document.getElementById('battle-result-body');
-  title.textContent = result.win ? (result.perfectVictory ? '완벽한 승리!' : '승리') : '패배';
-  title.className = `battle-result-title ${result.win ? 'win' : 'lose'}`;
+  const closeBtn = document.getElementById('battle-result-close');
   const lootTxt = Object.entries(result.loot).map(([r, a]) => `${resIcon(r)}${a}`).join(' ') || '없음';
-  body.innerHTML = `
-    파괴율 <b>${Math.round(result.destructionPercent * 100)}%</b><br>
-    약탈(예상) ${lootTxt}<br>
-    서버에 결과를 제출하는 중...`;
-  document.getElementById('battle-result').classList.remove('hidden');
+  const pct = Math.round(result.destructionPercent * 100);
 
-  const res = await callRaidResult(defenderId, result);
-  if (res.error) {
-    body.innerHTML = `
-      파괴율 <b>${Math.round(result.destructionPercent * 100)}%</b><br>
-      약탈(예상) ${lootTxt}<br>
-      <span style="color:var(--danger)">서버 반영 실패: ${res.error}</span>`;
-  } else {
-    const trophyTxt = typeof res.trophyDelta === 'number' ? `${statusIcon('trophy')}${res.trophyDelta >= 0 ? '+' : ''}${res.trophyDelta}` : '';
-    body.innerHTML = `
-      파괴율 <b>${Math.round((res.destructionPercent ?? result.destructionPercent) * 100)}%</b><br>
-      약탈 ${lootTxt}<br>
-      트로피 ${trophyTxt}`;
-  }
-
-  document.getElementById('battle-result-close').onclick = () => {
+  closeBtn.onclick = () => {
     document.getElementById('battle-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    document.getElementById('battle-deck-tray').classList.remove('hidden');
     battleSession = null;
-    currentMatch = null;
-    renderMatchCard();
+    if (!battleIsReplay) { currentMatch = null; attackDeck = null; }
+    battleIsReplay = false;
+    renderWarPanel(peers);
+    renderBattleLog(null);
   };
+  document.getElementById('battle-result').classList.remove('hidden');
+
+  // 리플레이는 이미 끝난 전투를 다시 본 것이라 아무것도 반영하지 않는다
+  if (battleIsReplay) {
+    title.textContent = '리플레이 종료';
+    title.className = 'battle-result-title';
+    body.innerHTML = `파괴율 <b>${pct}%</b><br><span class="dim">지난 전투를 다시 본 것이라 결과는 반영되지 않습니다</span>`;
+    return;
+  }
+
+  title.textContent = result.win ? (result.perfectVictory ? '완벽한 승리!' : '승리') : '패배';
+  title.className = `battle-result-title ${result.win ? 'win' : 'lose'}`;
+  body.innerHTML = `파괴율 <b>${pct}%</b><br>약탈(예상) ${lootTxt}<br>결과를 반영하는 중...`;
+
+  // 서버 권위 모드: 예전처럼 Cloud Function이 양쪽을 다 반영한다
+  if (game.serverAuthoritative) {
+    const res = await callRaidResult(defenderId, result);
+    if (res.error) {
+      body.innerHTML = `파괴율 <b>${pct}%</b><br>약탈(예상) ${lootTxt}<br>
+        <span style="color:var(--danger)">서버 반영 실패: ${res.error}</span>`;
+    } else {
+      const trophyTxt = typeof res.trophyDelta === 'number' ? `${statusIcon('trophy')}${res.trophyDelta >= 0 ? '+' : ''}${res.trophyDelta}` : '';
+      body.innerHTML = `파괴율 <b>${Math.round((res.destructionPercent ?? result.destructionPercent) * 100)}%</b><br>
+        약탈 ${lootTxt}<br>트로피 ${trophyTxt}`;
+    }
+    return;
+  }
+
+  // mpNet 모드(local/firestore): 내 몫을 먼저 반영하고, 상대 앞으로 리포트를 남긴다.
+  // 상대가 접속해 있지 않아도 다음에 접속할 때 자기 몫을 반영한다.
+  const report = buildRaidReport(game.myNation, battleTargetSnapshot || { id: defenderId }, battleSession);
+  const { gained } = applyRaidToAttacker(game.myNation, report);
+  attackReports.unshift(report);
+  if (attackReports.length > 30) attackReports.length = 30;
+
+  let sendErr = null;
+  if (net) {
+    try { await net.sendRaid(report); } catch (e) { sendErr = e.message || '전송 실패'; }
+  }
+  publishMyNation();
+  renderResourcePanel();
+
+  const gainTxt = Object.entries(gained).map(([r, a]) => `${resIcon(r)}${a}`).join(' ') || '없음';
+  body.innerHTML = `파괴율 <b>${pct}%</b><br>
+    획득 ${gainTxt}<br>
+    트로피 ${statusIcon('trophy')}${report.attackerTrophyDelta >= 0 ? '+' : ''}${report.attackerTrophyDelta}
+    ${sendErr ? `<br><span style="color:var(--danger)">상대에게 결과 전달 실패: ${sendErr}</span>`
+              : '<br><span class="dim">상대에게 습격 기록을 남겼습니다</span>'}`;
 }
 
 // ---------- 여행(원정) 패널 ----------
@@ -1135,7 +1546,10 @@ function renderTravelPanel() {
     return;
   }
 
-  let html = `<div class="pd">${resIcon('labor')} 인력 ${labor} <span class="dim">(수도가 매 틱 생산)</span></div>`;
+  const farms = game.myNation.structures.filter(s2 => s2.key === 'farm');
+  const laborRate = farms.reduce((a, f) => a + (STRUCTURES.farm.laborIncome || 0) * f.level, 0);
+  let html = `<div class="pd">${resIcon('labor')} 인력 ${labor} <span class="dim">(농지 ${farms.length}개 · +${laborRate}/틱)</span></div>`;
+  if (!farms.length) html += `<div class="pd err">인력은 농지에서만 나옵니다 — 물가에 농지를 지으세요</div>`;
   const capLevel = getCapitalLevel(n);
   for (const [key, exp] of Object.entries(EXPEDITIONS)) {
     const lvOk = capLevel >= (exp.capitalLevel || 1);
@@ -1181,12 +1595,21 @@ function checkExpeditionDone() {
 }
 
 // ---------- 자원 패널 ----------
+/**
+ * 상단 자원 표시줄.
+ * 자원 종류가 80가지가 넘어가면서 "지금 가진 것"만 띄우면 순서가 계속 바뀌어
+ * 눈으로 좇기 어려웠다. 이제 **한 번이라도 손에 넣어 본 자원(해금된 자원)**을
+ * 정해진 순서(RESOURCES 정의 순 = 기초 → 가공 → 식품 → 군수)로 고정 배치하고,
+ * 지금 0이면 흐리게 표시한다.
+ */
 function renderResourcePanel() {
   const el = document.getElementById('resource-bar');
   if (!game.myNation) { el.innerHTML = ''; return; }
   const res = game.myNation.resources;
-  const keys = Object.keys(RESOURCES).filter(k => res[k]);
-  let html = keys.map(k => `<span class="res">${resIcon(k)}${Math.floor(res[k])}</span>`).join('');
+  for (const k of Object.keys(RESOURCES)) if (res[k] > 0) seenResources.add(k);
+  const keys = Object.keys(RESOURCES).filter(k => seenResources.has(k));
+  let html = keys.map(k =>
+    `<span class="res${res[k] > 0 ? '' : ' empty'}" title="${RESOURCES[k].name}">${resIcon(k)}${Math.floor(res[k] || 0)}</span>`).join('');
   html += `<span class="res" title="트로피">${statusIcon('trophy')} ${game.myNation.trophies || 0}</span>`;
   const shieldMs = (game.myNation.shieldUntil || 0) - Date.now();
   if (shieldMs > 0) {
@@ -1217,14 +1640,21 @@ function updateCapitalSites() {
 // ---------- 건설 미리보기(고스트) ----------
 // 커서/마지막 터치 지점에 배치 결과를 매 프레임 다시 계산해 보여준다.
 // (자원이 틱마다 변해 "자원 부족" 여부가 바뀌므로 매 프레임 재검증한다)
+/**
+ * 고스트와 "설치" 바를 현재 건설 목표 칸(buildTarget) 기준으로 갱신한다.
+ * 고스트는 손을 떼도 그 자리에 남아 있어야 설치 버튼을 누를 수 있으므로,
+ * 마우스 hover가 아니라 buildTarget을 따라간다.
+ */
 function updateBuildPreview() {
-  if (!game.myNation || !selectedStruct || !renderer.hover) {
+  const bar = document.getElementById('build-bar');
+  const hintEl = document.getElementById('preview-hint');
+  if (!game.myNation || !selectedStruct || !buildTarget) {
     renderer.buildPreview = null;
-    const hintEl = document.getElementById('preview-hint');
+    if (bar) bar.classList.add('hidden');
     if (hintEl) { hintEl.textContent = ''; hintEl.className = 'preview-hint'; }
     return;
   }
-  const { x, y } = renderer.hover;
+  const { x, y } = buildTarget;
   const def = STRUCTURES[selectedStruct];
   const check = validatePlacement(game.myNation, selectedStruct, x, y);
   renderer.buildPreview = {
@@ -1233,11 +1663,31 @@ function updateBuildPreview() {
     territoryRadius: def.territoryRadius || 0,
     powerRadius: def.powerRadius || 0,
   };
-  // 좌측 패널 비용 줄에 현재 위치 기준 사유를 함께 보여준다
-  const hint = document.getElementById('preview-hint');
-  if (hint) {
-    hint.textContent = check.ok ? `(${x}, ${y}) 건설 가능` : `(${x}, ${y}) ${check.error}`;
-    hint.className = `preview-hint ${check.ok ? 'ok' : 'err'}`;
+
+  // 자원 노드를 깔고 앉으면 그 노드는 영영 못 쓴다 (철거 수단이 없다).
+  // 막지는 않되 반드시 알려준다 — 광산 자리를 창고로 덮는 실수가 흔하다.
+  const buried = def.requiresNode ? [] : buriedNodes(x, y, def.footprint);
+  const buriedNames = buried.map(k => TERRAIN_NODES[k]?.name || k).join(', ');
+
+  // 필드 위 설치 바 — 무엇을 어디에 짓는지와 지금 지을 수 있는지를 보여준다
+  if (bar) {
+    bar.classList.remove('hidden');
+    document.getElementById('build-bar-art').src = structureIcon(selectedStruct);
+    document.getElementById('build-bar-name').textContent =
+      `${def.name}${isRotatable(selectedStruct) ? ` ${DIR_ARROW[beltDir]}` : ''} (${x}, ${y})`;
+    const st = document.getElementById('build-bar-status');
+    if (!check.ok) { st.textContent = check.error; st.className = 'build-bar-status err'; }
+    else if (buried.length) { st.textContent = `⚠ ${buriedNames}을(를) 덮습니다 (되돌릴 수 없음)`; st.className = 'build-bar-status warn'; }
+    else { st.textContent = '설치할 수 있습니다'; st.className = 'build-bar-status ok'; }
+    document.getElementById('build-confirm').disabled = !check.ok;
+  }
+
+  // 좌측 패널 비용 줄에도 같은 사유를 남긴다
+  if (hintEl) {
+    hintEl.textContent = !check.ok ? `(${x}, ${y}) ${check.error}`
+      : (buried.length ? `(${x}, ${y}) ⚠ ${buriedNames} 위 — 그 자원을 못 쓰게 됩니다`
+                       : `(${x}, ${y}) 건설 가능`);
+    hintEl.className = `preview-hint ${!check.ok ? 'err' : (buried.length ? 'warn' : 'ok')}`;
   }
 }
 
@@ -1258,3 +1708,16 @@ window.addEventListener('resize', () => renderer.resize());
 window.__game = game;
 window.__showStruct = showStructPanel;
 window.__renderer = renderer;
+// 전투 멀티플레이 훅 — 두 탭이 실제로 싸우는지 자동 테스트에서 확인한다
+window.__mp = {
+  get net() { return net; },
+  get mode() { return netMode; },
+  get peers() { return peers; },
+  get session() { return battleSession; },
+  get defenseReports() { return defenseReports; },
+  get attackReports() { return attackReports; },
+  publish: publishMyNation,
+  refreshWar: () => renderWarPanel(peers),
+  deploy: (key, x, y) => deployUnit(battleSession, key, x, y),
+  endNow: () => retreatBattle(battleSession),
+};

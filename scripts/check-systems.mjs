@@ -140,6 +140,77 @@ assert.deepStrictEqual(Array.from(round.unlockedGoods).sort(), Array.from(n.unlo
 assert.strictEqual(round.structures.find(s => s.id === placed.id).crop, placed.crop);
 console.log('✓ 직렬화 왕복 (작물/해금 유지)');
 
+// --- 콘텐츠 규모 (대폭 확장한 뒤 줄어들지 않게 고정) ---
+{
+  const { UNITS } = await import('../js/data.js');
+  const turrets = Object.keys(STRUCTURES).filter(k => STRUCTURES[k].category === 'turret');
+  assert.ok(Object.keys(UNITS.attack).length >= 20, `공격 유닛 ${Object.keys(UNITS.attack).length}종 (20종 이상)`);
+  assert.ok(Object.keys(UNITS.defense).length >= 10, `수비 유닛 ${Object.keys(UNITS.defense).length}종 (10종 이상)`);
+  assert.ok(turrets.length >= 12, `방어 타워 ${turrets.length}종 (12종 이상)`);
+  // 모든 유닛은 장비가 실제로 만들 수 있는 자원이어야 한다
+  for (const g of ['attack', 'defense']) {
+    for (const [k, u] of Object.entries(UNITS[g])) {
+      for (const r of Object.keys(u.equip)) assert.ok(RESOURCES[r], `${k} 장비 ${r} 정의됨`);
+    }
+  }
+  // 벨트 변종
+  assert.ok(STRUCTURES.belt_splitter && STRUCTURES.belt_cross, '분할·교차 컨베이어 존재');
+  assert.ok(STRUCTURES.belt.rotatable && STRUCTURES.belt_splitter.rotatable, '벨트는 방향을 바꿀 수 있어야 한다');
+  // 인력은 농지에서만
+  assert.ok(!STRUCTURES.capital.laborIncome, '수도는 인력을 만들지 않는다');
+  assert.ok(STRUCTURES.farm.laborIncome > 0, '농지가 인력을 만든다');
+  console.log(`✓ 콘텐츠 규모 (요리 ${Object.keys(STRUCTURES.kitchen.recipes).length} · 공격 ${Object.keys(UNITS.attack).length} · 수비 ${Object.keys(UNITS.defense).length} · 터렛 ${turrets.length})`);
+}
+
+// --- 철거 규칙 ---
+{
+  const cap2 = n.structures.find(s2 => s2.key === 'capital');
+  assert.strictEqual(L.canDemolish(n, cap2.id).ok, false, '수도는 철거할 수 없어야 한다');
+
+  // 인벤토리에 든 자원은 철거와 함께 사라진다
+  cap2.store = { wood: 500, stone: 500 }; L.recomputeStock(n);
+  let wh = null;
+  for (const key of Array.from(n.territory)) {
+    const [x, y] = key.split(',').map(Number);
+    const r = L.build(n, 'warehouse', x, y);
+    if (r.ok) { wh = r.structure; break; }
+  }
+  assert.ok(wh, '창고 건설');
+  L.depositInto(wh, 'wood', 120); L.recomputeStock(n);
+  const beforeStock = L.totalStock(n, 'wood');
+  const out = L.demolish(n, wh.id);
+  assert.strictEqual(out.ok, true, out.error);
+  assert.strictEqual(out.lost.wood, 120, '사라진 자원을 보고해야 한다');
+  assert.strictEqual(L.totalStock(n, 'wood'), beforeStock - 120, '국고에서도 빠져야 한다');
+  assert.ok(!n.structures.some(s2 => s2.id === wh.id), '구조물이 목록에서 빠져야 한다');
+
+  // 중심지는 그 영토가 비어 있어야만 철거된다
+  const before = n.territory.size;
+  let hub = null;
+  for (const key of Array.from(n.territory)) {
+    const [x, y] = key.split(',').map(Number);
+    if (Math.hypot(x - cap2.x, y - cap2.y) <= 5) continue;
+    const r = L.build(n, 'hub', x, y);
+    if (r.ok) { hub = r.structure; break; }
+  }
+  if (hub) {
+    assert.ok(n.territory.size > before, '중심지가 영토를 넓혀야 한다');
+    const capR = L.getTerritoryRadius('capital', cap2.level);
+    const onlyHub = L.territoryTilesOf(n, hub)
+      .filter(([x, y]) => Math.hypot(x - (cap2.x + 1), y - (cap2.y + 1)) > capR);
+    let planted = null;
+    for (const [x, y] of onlyHub) { const r = L.build(n, 'warehouse', x, y); if (r.ok) { planted = r.structure; break; } }
+    if (planted) {
+      assert.strictEqual(L.canDemolish(n, hub.id).ok, false, '영토에 구조물이 있으면 중심지 철거 거부');
+      assert.strictEqual(L.demolish(n, planted.id).ok, true);
+    }
+    assert.strictEqual(L.canDemolish(n, hub.id).ok, true, '비우면 중심지 철거 가능');
+    assert.strictEqual(L.demolish(n, hub.id).ok, true);
+    assert.strictEqual(n.territory.size, before, '철거하면 영토가 원래대로 줄어야 한다');
+  }
+  console.log('✓ 철거 규칙 (수도 불가 · 중심지 조건부 · 인벤토리 소멸 · 영토 복구)');
+}
+
 // --- 그림 리소스가 빠진 게 없는지 ---
 {
   const { existsSync } = await import('node:fs');
@@ -154,6 +225,91 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   assert.strictEqual(miss.length, 0, '그림 없음: ' + miss.join(', ') + ' (node scripts/generate-icons.mjs 실행 필요)');
   const nUnits = Object.keys(UNITS.attack).length + Object.keys(UNITS.defense).length;
   console.log(`✓ 그림 리소스 전부 존재 (자원 ${Object.keys(RESOURCES).length} · 구조물 ${Object.keys(STRUCTURES).length} · 유닛 ${nUnits})`);
+}
+
+// --- 전투 멀티플레이: 비동기 습격 · 리플레이 ---
+{
+  const { createBattleSession, createReplaySession, deployUnit, stepBattle, stepReplay, endBattle }
+    = await import('../js/battle.js');
+  const { UNITS, WAR, BATTLE } = await import('../js/data.js');
+
+  // 두 국가를 만들어 실제로 한 판 붙인다
+  const siteA = findNearestCapitalSite(0, 0, 200);
+  const siteB = findNearestCapitalSite(400, 400, 200);
+  const atk = createNation('atkr', '공격국', '#f00', siteA.x, siteA.y);
+  const def = createNation('defr', '방어국', '#00f', siteB.x, siteB.y);
+  def.shieldUntil = 0;                       // 건국 실드를 걷어야 공격할 수 있다
+  L.depositAnywhere(def, 'wood', 800);
+  L.recomputeStock(def);
+  const unitKey = Object.keys(UNITS.attack)[0];
+  atk.units.attack[unitKey] = 6;
+
+  // 공개 스냅샷에 내정 정보가 새지 않는지
+  const snap = L.defenseSnapshot(def);
+  assert.ok(!('unlocked' in snap) && !('research' in snap), '공개 스냅샷에 연구/해금 정보가 들어가면 안 된다');
+  assert.ok(snap.structures.length > 0 && snap.territory.length > 0, '스냅샷에 기지 배치가 담겨야 한다');
+
+  // 매치메이킹: 실드가 없으면 잡히고, 있으면 안 잡힌다
+  assert.ok(L.findMatch(atk, [snap]), '실드 없는 상대는 매칭돼야 한다');
+  assert.strictEqual(L.findMatch(atk, [{ ...snap, shieldUntil: Date.now() + 60000 }]), null,
+    '실드 중인 상대는 매칭되면 안 된다');
+
+  // 전투 — 수도 옆에 병력을 쏟아붓는다
+  const session = createBattleSession(snap, { [unitKey]: 6 }, 12345);
+  const cap = session.structures.find(s => s.key === 'capital');
+  for (let i = 0; i < 6; i++) deployUnit(session, unitKey, cap.cx + 6 + i * 0.5, cap.cy + 6);
+  for (let t = 0; t < BATTLE.durationSec * 10 && !session.ended; t++) stepBattle(session, 0.1);
+  endBattle(session);
+  assert.ok(session.deployLog.length === 6, '배치 기록이 리플레이용으로 남아야 한다');
+
+  const report = L.buildRaidReport(atk, snap, session);
+  assert.ok(report.replay.base.structures.length, '리포트에 그때의 기지 배치가 담겨야 한다');
+
+  // 리플레이 결정론 — 같은 시드/기록이면 같은 결과가 나와야 한다
+  const replay = createReplaySession(report.replay.base, report.replay);
+  for (let t = 0; t < BATTLE.durationSec * 10 && !replay.ended; t++) stepReplay(replay, 0.1);
+  endBattle(replay);
+  assert.strictEqual(
+    Math.round(replay.result.destructionPercent * 1000),
+    Math.round(session.result.destructionPercent * 1000),
+    '리플레이는 원래 전투와 같은 파괴율이 나와야 한다');
+
+  // 양쪽 반영 — 공격자는 받고, 방어자는 잃는다
+  const beforeUnits = atk.units.attack[unitKey];
+  const gain = L.applyRaidToAttacker(atk, report);
+  assert.ok(atk.units.attack[unitKey] < beforeUnits, '배치한 유닛은 로스터에서 소모돼야 한다');
+  assert.strictEqual(atk.shieldUntil, 0, '공격하면 내 실드는 풀린다');
+
+  const defWoodBefore = L.totalStock(def, 'wood');
+  const applied = L.applyRaidToDefender(def, report);
+  assert.strictEqual(applied.applied, true);
+  assert.ok(def.shieldUntil > Date.now(), '공격당한 쪽은 실드를 얻는다');
+  if (report.loot.wood) assert.ok(L.totalStock(def, 'wood') < defWoodBefore, '약탈당한 만큼 재고가 줄어야 한다');
+
+  // 멱등성 — 같은 리포트를 다시 받아도 두 번 빠지지 않는다
+  const woodAfter = L.totalStock(def, 'wood');
+  const again = L.applyRaidToDefender(def, report);
+  assert.strictEqual(again.applied, false, '같은 습격 리포트는 한 번만 반영돼야 한다');
+  assert.strictEqual(L.totalStock(def, 'wood'), woodAfter, '중복 반영으로 재고가 더 줄면 안 된다');
+
+  // 조작 방어 — 파괴율 0인데 전부 약탈했다고 우겨도 통하지 않는다
+  const victim = createNation('vic', '피해국', '#0f0', siteB.x, siteB.y);
+  L.depositAnywhere(victim, 'wood', 500); L.recomputeStock(victim);
+  const before = L.totalStock(victim, 'wood');
+  const forged = { ...report, id: 'forged-1', win: true, destructionPercent: 0, perfectVictory: false,
+                   loot: { wood: 99999 }, defenderTrophyDelta: -9999 };
+  const forgedRes = L.applyRaidToDefender(victim, forged);
+  assert.strictEqual(L.totalStock(victim, 'wood'), before, '파괴율 0이면 약탈도 0이어야 한다');
+  assert.strictEqual(forgedRes.trophyDelta, 0, '파괴율 0이면 트로피도 잃지 않는다');
+
+  // 트로피 조작도 규칙 범위로 잘린다
+  const victim2 = createNation('vic2', '피해국2', '#0f0', siteB.x, siteB.y);
+  victim2.trophies = 500;
+  L.applyRaidToDefender(victim2, { ...report, id: 'forged-2', destructionPercent: 1,
+                                   perfectVictory: true, loot: {}, defenderTrophyDelta: -9999 });
+  assert.ok(victim2.trophies >= 500 - WAR.maxTrophyTrade, '트로피 손실은 규칙 상한을 넘을 수 없다');
+
+  console.log('✓ 전투 멀티플레이 (비동기 습격 · 리플레이 재현 · 멱등 · 조작 방어)');
 }
 
 console.log('\n✅ 회귀 테스트 전부 통과');
