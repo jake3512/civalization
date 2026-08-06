@@ -5,20 +5,12 @@
 import { getTileRange } from './world.js';
 import { STRUCTURES, UNITS, structureIcon } from './data.js';
 import { tileKey } from './logic.js';
-import { TILT, getIconImage } from './render.js';
+import { TILT, getIconImage, structScale } from './render.js';
 
 const TERRAIN_COLORS = { plain: '#1a201c', water: '#15303a' };
 
-// 전투 화면도 필드와 같은 기울어진 카메라를 쓴다 (화면이 바뀌어도 감각이 유지되도록)
+// 전투 화면도 필드와 같은 기울어진 카메라·크기 규칙을 쓴다 (화면이 바뀌어도 감각이 유지되도록)
 const PLINTH = 0.22;
-const STRUCT_HEIGHT = {
-  capital: 1.7, hub: 1.15, lab: 1.35,
-  factory: 1.3, smelter: 1.25, refinery: 1.3, power_plant: 1.4,
-  warehouse: 1.15, barn: 1.15, kitchen: 1.15, slaughterhouse: 1.1,
-  mine: 0.95, lumber_mill: 1.0, farm: 0.8, oil_well: 1.1, extractor: 1.0,
-  wall: 0.7, outpost: 1.3,
-};
-const structHeight = (key) => STRUCT_HEIGHT[key] ?? (key.startsWith('turret') ? 1.1 : 1.0);
 
 export class BattleRenderer {
   constructor(canvas) {
@@ -147,10 +139,9 @@ export class BattleRenderer {
 
     const img = getIconImage(structureIcon(s.key));
     if (img.complete && img.naturalWidth > 0) {
-      const art = Math.min(w, h) * tile * 1.1;
-      const artH = art * structHeight(s.key);
+      const art = Math.min(w, h) * tile * 1.15 * structScale(s.key);
       ctx.globalAlpha = unpowered ? 0.6 : 1;
-      ctx.drawImage(img, sx + bw / 2 - art / 2, sy + bh * 0.72 - lift - artH, art, artH);
+      ctx.drawImage(img, sx + bw / 2 - art / 2, sy + bh * 0.72 - lift - art, art, art);
       ctx.globalAlpha = 1;
     }
 

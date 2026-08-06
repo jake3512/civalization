@@ -1,6 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>
-    <path d="M32 6 L46 28 H38 L50 46 H14 L26 28 H18 Z" fill="#3fae3f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M32 6 L46 28 H38 L50 46 H32 Z" fill="#1f6b28" opacity="0.45"/>
-    <rect x="28" y="44" width="8" height="12" rx="2" fill="#6f4319" stroke="#161018" stroke-width="3"/>
+    <ellipse cx="32" cy="51" rx="9" ry="3.06" fill="#6f4319" stroke="#161018" stroke-width="3"/>
+    <rect x="28" y="34" width="8" height="16" rx="2" fill="#a86a2e" stroke="#161018" stroke-width="3"/>
+    <path d="M32 34 h4 v16 h-4 Z" fill="#6f4319" opacity="0.5"/>
+    <path d="M32 4 L47 30 H17 Z" fill="#3fae3f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 4 L47 30 H32 Z" fill="#1f6b28" opacity="0.42"/>
+    <path d="M32 16 L50 40 H14 Z" fill="#3fae3f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 16 L50 40 H32 Z" fill="#1f6b28" opacity="0.42"/>
+    <path d="M32 10 L24 22 L32 20 Z" fill="#7ede6a" opacity="0.85"/>
 </svg>

@@ -23,17 +23,19 @@ export const TILT = 0.58;
 const PLINTH = 0.22;
 
 /**
- * 구조물별로 그림을 얼마나 높이 세울지 (타일 단위).
+ * 구조물 그림을 발판 대비 얼마나 크게 세울지.
+ * 그림 자체가 이미 "정면 + 윗면"으로 높이를 담고 있으므로 세로만 늘이면
+ * 찌그러진다 — 가로세로 비율은 그대로 두고 전체 크기만 조절한다.
  * 순전히 보기용 값이라 규칙서(data.js)가 아니라 여기에 둔다.
  */
-const STRUCT_HEIGHT = {
-  capital: 1.7, hub: 1.15, lab: 1.35,
-  factory: 1.3, smelter: 1.25, refinery: 1.3, power_plant: 1.4,
-  warehouse: 1.15, barn: 1.15, kitchen: 1.15, slaughterhouse: 1.1,
-  mine: 0.95, lumber_mill: 1.0, farm: 0.8, oil_well: 1.1, extractor: 1.0,
-  wall: 0.7, outpost: 1.3,
+const STRUCT_SCALE = {
+  capital: 1.15, hub: 1.0, lab: 1.15,
+  factory: 1.1, smelter: 1.1, refinery: 1.1, power_plant: 1.15,
+  warehouse: 1.05, barn: 1.05, kitchen: 1.05, slaughterhouse: 1.0,
+  mine: 1.0, lumber_mill: 1.05, farm: 0.95, oil_well: 1.15, extractor: 1.0,
+  wall: 0.95, outpost: 1.2,
 };
-const structHeight = (key) => STRUCT_HEIGHT[key] ?? (key.startsWith('turret') ? 1.1 : 1.0);
+export const structScale = (key) => STRUCT_SCALE[key] ?? 1.0;
 
 // ---- 아이콘 이미지 캐시 ----
 // data.js의 아이콘은 이제 이모지 문자가 아니라 assets/icons/*.svg 경로다.
@@ -137,15 +139,14 @@ export class Renderer {
     const bw = w * this.tile, bh = h * this.tileY;
     if (s.key === 'belt') return { left: sx, right: sx + bw, top: sy, bottom: sy + bh, sx, sy, bw, bh };
     const lift = PLINTH * this.tile;
-    const art = Math.min(w, h) * this.tile * 1.1;
-    const artH = art * structHeight(s.key);
+    const art = Math.min(w, h) * this.tile * 1.15 * structScale(s.key); // 정사각형 (비율 유지)
     const footY = sy + bh * 0.72 - lift;            // 그림이 서 있는 바닥선
     return {
       left: Math.min(sx, sx + bw / 2 - art / 2),
       right: Math.max(sx + bw, sx + bw / 2 + art / 2),
-      top: Math.min(sy - lift, footY - artH),
+      top: Math.min(sy - lift, footY - art),
       bottom: sy + bh,
-      sx, sy, bw, bh, lift, art, artH, footY,
+      sx, sy, bw, bh, lift, art, footY,
     };
   }
 
@@ -244,7 +245,7 @@ export class Renderer {
       ctx.fillStyle = ok ? 'rgba(74,157,143,0.28)' : 'rgba(193,68,60,0.28)';
       ctx.fillRect(f.sx, f.sy, 3 * tile, 3 * tileY);
       this._drawStandingArt(structureIcon('capital'), f.sx + 1.5 * tile, f.sy + 3 * tileY * 0.72,
-        3 * tile * 0.95, structHeight('capital'), 0.9);
+        3 * tile * 1.15 * structScale('capital'), 0.9);
       ctx.strokeStyle = ok ? '#4a9d8f' : '#c1443c';
       ctx.lineWidth = 3;
       ctx.strokeRect(f.sx, f.sy, 3 * tile, 3 * tileY);
@@ -283,7 +284,7 @@ export class Renderer {
     ctx.fillRect(sx, sy, bw, bh);
     if (p.key !== 'belt') {
       this._drawStandingArt(structureIcon(p.key), sx + bw / 2, sy + bh * 0.72,
-        Math.min(w, h) * tile * 1.1, structHeight(p.key), 0.8);
+        Math.min(w, h) * tile * 1.15 * structScale(p.key), 0.8);
     }
     ctx.strokeStyle = p.ok ? '#4a9d8f' : '#c1443c';
     ctx.lineWidth = 2;
@@ -341,43 +342,45 @@ export class Renderer {
     }
 
     const { sx, sy, bw, bh, lift } = b;
+    // 받침은 발판보다 살짝 안쪽으로 들여 깔아, 영토 틴트와 붙어 보이지 않게 한다
+    const px = sx + bw * 0.06, pw = bw * 0.88;
+    const py = sy + bh * 0.06, ph = bh * 0.88;
     ctx.globalAlpha = s.idle ? 0.55 : 1;
 
     // 받침 앞면(그늘) — 바닥에서 lift만큼 솟은 벽
-    ctx.fillStyle = shade(color, -0.45);
-    ctx.fillRect(sx, sy + bh - lift, bw, lift);
+    ctx.fillStyle = shade(color, -0.5);
+    ctx.fillRect(px, py + ph - lift, pw, lift);
     // 받침 윗면(빛) — 발판을 lift만큼 올린 것
     ctx.fillStyle = color;
-    ctx.fillRect(sx, sy - lift, bw, bh);
-    ctx.fillStyle = 'rgba(255,255,255,0.20)';
-    ctx.fillRect(sx, sy - lift, bw, Math.max(1.5, bh * 0.2));
+    ctx.fillRect(px, py - lift, pw, ph);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(px, py - lift, pw, Math.max(1.5, ph * 0.2));
     ctx.globalAlpha = 1;
 
     // 받침 위에 드리우는 그림자 — 건물이 "떠 있지 않고 서 있다"는 인상을 만든다
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(0,0,0,0.32)';
-    ctx.ellipse(sx + bw / 2, b.footY - b.art * 0.04, b.art * 0.36, b.art * 0.36 * TILT, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.ellipse(sx + bw / 2, b.footY - b.art * 0.03, b.art * 0.32, b.art * 0.32 * TILT, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 그림을 받침 위에 세운다 (일러스트가 정면도라 그대로 건물 입면이 된다)
-    this._drawStandingArt(structureIcon(s.key), sx + bw / 2, b.footY, b.art,
-      structHeight(s.key), s.idle ? 0.55 : 1);
+    // 그림을 받침 위에 세운다 (일러스트가 정면 + 윗면이라 그대로 건물이 된다)
+    this._drawStandingArt(structureIcon(s.key), sx + bw / 2, b.footY, b.art, s.idle ? 0.55 : 1);
 
     // 굵은 검은 외곽선 + 정지 상태면 빨간 테두리 (아케이드풍 대비)
     ctx.strokeStyle = '#120e14';
     ctx.lineWidth = 2;
-    ctx.strokeRect(sx, sy - lift, bw, bh + lift);
+    ctx.strokeRect(px, py - lift, pw, ph + lift);
     if (s.idle) {
       ctx.strokeStyle = '#ff4d3d';
       ctx.lineWidth = 2;
-      ctx.strokeRect(sx + 1.5, sy - lift + 1.5, bw - 3, bh + lift - 3);
+      ctx.strokeRect(px + 1.5, py - lift + 1.5, pw - 3, ph + lift - 3);
     }
     ctx.lineWidth = 1;
 
     // 레벨 배지는 받침 앞면 우측에 (건물 그림을 가리지 않는다)
     if (tile >= 16) {
       const badgeW = Math.max(11, tile * 0.42), badgeH = Math.max(9, tile * 0.3);
-      const bx = sx + bw - badgeW - 1, by = sy + bh - badgeH - 1;
+      const bx = px + pw - badgeW - 1, by = py + ph - badgeH - 1;
       ctx.fillStyle = 'rgba(12,14,12,0.82)';
       ctx.fillRect(bx, by, badgeW, badgeH);
       ctx.fillStyle = '#f0e8de';
@@ -388,16 +391,15 @@ export class Renderer {
   }
 
   /**
-   * 그림을 바닥선(footY)에 세워서 그린다. 가로 폭은 width, 높이는 그 폭에
-   * heightMul을 곱한 값 — 눌린 바닥과 달리 세로를 줄이지 않아서 "서 있는" 것처럼 보인다.
+   * 그림을 바닥선(footY)에 세워서 그린다. 바닥은 눌러 그리지만 그림은 원래
+   * 비율(정사각형) 그대로 세우기 때문에 "서 있는 물체"로 읽힌다.
    */
-  _drawStandingArt(src, centerX, footY, width, heightMul, alpha = 1) {
+  _drawStandingArt(src, centerX, footY, size, alpha = 1) {
     const { ctx } = this;
     const img = getIconImage(src);
     if (!img.complete || img.naturalWidth === 0) return;
-    const h = width * heightMul;
     ctx.globalAlpha = alpha;
-    ctx.drawImage(img, centerX - width / 2, footY - h, width, h);
+    ctx.drawImage(img, centerX - size / 2, footY - size, size, size);
     ctx.globalAlpha = 1;
   }
 
