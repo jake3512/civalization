@@ -37,8 +37,17 @@ export const NET_MODE = {
   FUNCTIONS: 'functions',
 };
 
-/** 어떤 백엔드를 쓸지 결정한다 (배포 상태에 따라 자동). */
-export function pickMode() {
+/**
+ * 어떤 백엔드를 쓸지 결정한다 (배포 상태에 따라 자동).
+ *
+ * 주소에 ?mp=local / ?mp=firestore 를 붙이면 강제로 고를 수 있다.
+ * 온라인이 켜져 있으면 **같은 브라우저의 두 탭은 익명 로그인 uid가 같아서**
+ * 서로를 같은 국가로 본다 — 한 기기에서 둘이 붙어보려면 ?mp=local 이 필요하다.
+ */
+export function pickMode(search = (typeof location !== 'undefined' ? location.search : '')) {
+  const forced = new URLSearchParams(search || '').get('mp');
+  if (forced === NET_MODE.LOCAL) return NET_MODE.LOCAL;
+  if (forced === NET_MODE.FIRESTORE && FIREBASE_ENABLED) return NET_MODE.FIRESTORE;
   if (FUNCTIONS_DEPLOYED && FIREBASE_ENABLED) return NET_MODE.FUNCTIONS;
   if (FIREBASE_ENABLED) return NET_MODE.FIRESTORE;
   return NET_MODE.LOCAL;

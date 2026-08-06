@@ -21,6 +21,7 @@ import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlac
 import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS } from './mpNet.js';
+import { saveGame, loadGame, listSaves, clearSave, storageAvailable, timeAgo } from './storage.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
@@ -125,17 +126,111 @@ document.getElementById('placement-confirm').addEventListener('click', () => {
   game.startNation(name, color, x, y);
   renderer.placementMarker = null;
   document.getElementById('placement-bar').classList.add('hidden');
-  document.getElementById('touch-toolbar').classList.remove('hidden');
-
-  buildBuildMenu();
-  renderTravelPanel();
-  game.onTick = () => renderTravelPanel();
-  game.startLoop();
-  initMultiplayer(name, color, x, y);
+  enterGame();
 
   pendingNation = null;
   selectedCapital = null;
 });
+
+/**
+ * 국가가 준비된 뒤 게임 화면으로 들어가는 공통 경로.
+ * 새로 세운 국가와 저장에서 불러온 국가가 같은 길을 타야 화면 상태가 어긋나지 않는다.
+ */
+function enterGame() {
+  const n = game.myNation;
+  document.getElementById('touch-toolbar').classList.remove('hidden');
+
+  buildBuildMenu();
+  renderTravelPanel();
+  game.onTick = () => { renderTravelPanel(); autoSave(); };
+  game.startLoop();
+  initMultiplayer(n.name, n.color, n.capital.x, n.capital.y);
+  autoSave(true);
+}
+
+// ---------- 저장 / 이어하기 ----------
+// 최종 테크까지 5시간짜리 게임이라, 새로고침 한 번에 나라가 사라지면 안 된다.
+let lastSaveAt = 0;
+const SAVE_EVERY_MS = 10_000;
+
+/** 일정 시간마다 저장한다 (force=true면 즉시) */
+function autoSave(force = false) {
+  if (!game.myNation) return;
+  const now = Date.now();
+  if (!force && now - lastSaveAt < SAVE_EVERY_MS) return;
+  lastSaveAt = now;
+  // 전투 기록도 함께 남긴다 — 새로고침했다고 "누가 나를 털었는지"가 사라지면 안 된다.
+  // 리플레이 기록(기지 배치)까지 들어 있어 크기가 있으므로 최근 것 몇 개만 남긴다.
+  const res = saveGame(game.myNation, {
+    raids: { defense: defenseReports.slice(0, 5), attack: attackReports.slice(0, 5) },
+  });
+  if (!res.ok && !autoSave._warned) {
+    autoSave._warned = true;   // 매 틱 경고를 띄우면 게임을 못 한다 — 한 번만 알린다
+    flashMessage(`자동 저장 실패: ${res.error}`, true);
+  }
+}
+
+// 탭을 닫거나 다른 앱으로 넘어갈 때는 마지막 상태를 반드시 남긴다
+// (모바일에서는 pagehide만 오고 unload는 오지 않는 경우가 있다)
+window.addEventListener('pagehide', () => autoSave(true));
+window.addEventListener('visibilitychange', () => { if (document.hidden) autoSave(true); });
+
+/** 시작 화면에 "이어하기" 카드를 그린다 */
+function renderResumeBox() {
+  const box = document.getElementById('resume-box');
+  if (!box) return;
+  if (!storageAvailable()) {
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="resume-warn">이 브라우저는 저장을 쓸 수 없습니다(사생활 보호 모드 등).
+      새로고침하면 진행이 사라집니다.</div>`;
+    return;
+  }
+  const saves = listSaves();
+  if (!saves.length) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.innerHTML = saves.map(s => `
+    <div class="resume-card">
+      <div class="resume-head">
+        <span class="dot" style="background:${safeColor(s.color)}"></span>
+        <span class="nm">${esc(s.name)}</span>
+        <span class="when">${timeAgo(s.savedAt)} 저장</span>
+      </div>
+      <div class="resume-meta">수도 Lv.${s.capitalLevel} · 구조물 ${s.structures}동 · 해금 ${s.unlocked}종
+        · ${statusIcon('trophy')}${s.trophies}</div>
+      <div class="resume-actions">
+        <button class="resume-btn" data-resume="${esc(s.id)}">이어하기</button>
+        <button class="discard-btn" data-discard="${esc(s.id)}">지우기</button>
+      </div>
+    </div>`).join('')
+    + `<div class="resume-hint">저장된 그 시점 그대로 이어집니다 — 자리를 비운 동안 생산은 진행되지 않습니다.
+        아래에서 새 국가를 세우면 별도로 저장됩니다.</div>`;
+
+  box.querySelectorAll('[data-resume]').forEach(b =>
+    b.addEventListener('click', () => resumeSavedGame(b.dataset.resume)));
+  box.querySelectorAll('[data-discard]').forEach(b =>
+    b.addEventListener('click', () => {
+      clearSave(b.dataset.discard);
+      renderResumeBox();
+      flashMessage('저장된 국가를 지웠습니다', false);
+    }));
+}
+
+function resumeSavedGame(id = null) {
+  const data = loadGame(id);
+  if (!data) { flashMessage('저장을 불러오지 못했습니다', true); renderResumeBox(); return; }
+  game.myNation = Nation.fromJSON(data.nation);
+  defenseReports = (data.raids && data.raids.defense) || [];
+  attackReports = (data.raids && data.raids.attack) || [];
+
+  startScreen.classList.add('hidden');
+  const cap = game.myNation.capital;
+  renderer.centerOn(cap.x + 1, cap.y + 1);
+  requestAnimationFrame(loop);
+  enterGame();
+  flashMessage(`${game.myNation.name} 이어하기 — ${timeAgo(data.savedAt)} 저장된 상태입니다`, false);
+}
+
+renderResumeBox();
 
 async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
@@ -145,8 +240,11 @@ async function initMultiplayer(name, color, cx, cy) {
   // 아니면 mpNet의 local/firestore 백엔드로 전투 멀티플레이만 켠다.
   if (mode !== NET_MODE.FUNCTIONS) return startCombatNet(mode, statusEl);
 
-  const ok = await initFirebase();
-  if (!ok) { statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (firebase-config.js 미설정)'; return; }
+  const conn = await initFirebase();
+  if (!conn.ok) {
+    statusEl.innerHTML = `<span class="dot off"></span> 로컬 모드 (${esc(conn.message)})`;
+    return startCombatNet(NET_MODE.LOCAL, statusEl, conn.message);
+  }
 
   const res = await callInitNation(name, color, cx, cy);
   if (res.error && !res.existed) { flashMessage('서버 연결 실패: ' + res.error, true); return; }
@@ -184,20 +282,29 @@ let peers = [];                 // 다른 플레이어 국가 스냅샷
 let defenseReports = [];        // 나를 공격한 리포트 (최근 것 먼저)
 let attackReports = [];         // 내가 보낸 습격 (최근 것 먼저)
 let publishTimer = null;
+let netTrouble = null;          // 온라인이 안 될 때 사람이 읽을 수 있는 사유
+let netStatusEl = null;
 
-async function startCombatNet(mode, statusEl) {
+async function startCombatNet(mode, statusEl, trouble = null) {
+  netStatusEl = statusEl || netStatusEl;
+  netTrouble = trouble;
   let handles = null;
+
   if (mode === NET_MODE.FIRESTORE) {
-    const ok = await initFirebase();
-    handles = ok ? getFirestoreHandles() : null;
+    const conn = await initFirebase();
+    handles = conn.ok ? getFirestoreHandles() : null;
     if (handles) {
-      // 습격 리포트는 국가 id로 주고받으므로 로그인 uid를 그대로 쓴다
+      // 습격 리포트는 국가 id로 주고받으므로 로그인 uid를 그대로 쓴다.
+      // (저장에서 이어할 때도 같은 uid로 돌아오므로 나에게 온 습격이 계속 도착한다)
       game.myNation.id = getUid();
     } else {
-      mode = NET_MODE.LOCAL;    // Firebase 연결 실패 → 같은 기기 대전으로 폴백
+      // 온라인이 안 되면 같은 기기 대전으로 내려가되, **왜** 안 되는지는 남긴다
+      netTrouble = conn.message || '온라인 연결에 실패했습니다';
+      mode = NET_MODE.LOCAL;
     }
   }
   netMode = mode;
+  if (net) net.close();
   net = createNet(mode, game.myNation.id, handles);
 
   net.watchPeers((list) => {
@@ -205,31 +312,56 @@ async function startCombatNet(mode, statusEl) {
     game.otherNations.clear();
     for (const p of list) game.otherNations.set(p.id, p);
     renderWarPanel(list);
-    updateNetStatus(statusEl);
+    updateNetStatus();
   });
   net.watchRaids(handleIncomingRaid);
 
-  publishMyNation();
+  await publishMyNation();
   if (publishTimer) clearInterval(publishTimer);
   publishTimer = setInterval(publishMyNation, PUBLISH_INTERVAL_MS);
-  updateNetStatus(statusEl);
+  updateNetStatus();
   renderWarPanel(peers);
   renderBattleLog();
 }
 
-function updateNetStatus(statusEl) {
-  if (!statusEl || !netMode) return;
-  const on = peers.length > 0;
-  statusEl.innerHTML = `<span class="dot ${on ? 'on' : 'off'}"></span> ${MODE_LABEL[netMode]} · 상대 ${peers.length}`;
+/** 온라인으로 다시 붙어본다 (전쟁 패널의 재연결 버튼) */
+async function retryOnline() {
+  const mode = pickMode();
+  if (mode === NET_MODE.LOCAL) {
+    flashMessage('js/firebase-config.js에 Firebase 설정이 없어 온라인으로 붙을 수 없습니다', true);
+    return;
+  }
+  flashMessage('온라인으로 다시 연결하는 중...', false);
+  await startCombatNet(mode, netStatusEl);
+  flashMessage(netTrouble ? `온라인 연결 실패: ${netTrouble}` : '온라인으로 연결됐습니다', !!netTrouble);
 }
 
-/** 내 기지를 다른 플레이어가 공격할 수 있도록 공개한다 */
-function publishMyNation() {
+function updateNetStatus() {
+  if (!netStatusEl || !netMode) return;
+  const online = netMode !== NET_MODE.LOCAL;
+  netStatusEl.innerHTML = `<span class="dot ${online ? 'on' : 'off'}"></span> ${MODE_LABEL[netMode]} · 상대 ${peers.length}`;
+}
+
+/**
+ * 내 기지를 다른 플레이어가 공격할 수 있도록 공개한다.
+ * 온라인 모드에서 쓰기가 막히면(보안 규칙 미배포 등) 그 사유를 화면에 남긴다 —
+ * 조용히 실패하면 "상대가 아무도 없네"로만 보여서 원인을 찾을 수 없다.
+ */
+async function publishMyNation() {
   if (!net || !game.myNation) return;
   const snap = defenseSnapshot(game.myNation);
   // 지역 버킷 — 서버 권위 모드의 주변 국가 쿼리와 같은 형식을 맞춰둔다
   snap.region = regionKey(game.myNation.capital.x, game.myNation.capital.y);
-  net.publish(snap);
+  try {
+    await net.publish(snap);
+    if (netTrouble && netMode !== NET_MODE.LOCAL) { netTrouble = null; renderWarPanel(peers); }
+  } catch (e) {
+    const denied = /permission|insufficient/i.test(e?.message || '') || e?.code === 'permission-denied';
+    const next = denied
+      ? '서버가 쓰기를 거부했습니다 — firestore.rules를 배포해야 합니다 (firebase deploy --only firestore:rules)'
+      : `기지 공개 실패: ${e?.message || '알 수 없는 오류'}`;
+    if (next !== netTrouble) { netTrouble = next; renderWarPanel(peers); }
+  }
 }
 
 /**
@@ -1114,12 +1246,25 @@ function renderWarPanel(nations) {
     ? `<div class="pd shield-on">내 보호막 ${Math.ceil(shieldLeft / 60000)}분 남음 — 공격하면 즉시 풀립니다</div>`
     : `<div class="pd">내 보호막 없음 — 다른 플레이어가 나를 공격할 수 있습니다</div>`;
 
+  // 온라인이 아닐 때는 왜 아닌지와 어떻게 하면 되는지를 같이 보여준다
+  const offline = netMode === NET_MODE.LOCAL;
+  const netBox = offline
+    ? `<div class="net-box">
+         <div class="net-line">${netTrouble ? `온라인 연결 실패 — ${esc(netTrouble)}` : '같은 기기(다른 탭)끼리만 대전 중입니다'}</div>
+         <button id="retry-online-btn" class="retry-btn">온라인으로 연결</button>
+       </div>`
+    : (netTrouble ? `<div class="net-box err"><div class="net-line">${esc(netTrouble)}</div>
+         <button id="retry-online-btn" class="retry-btn">다시 시도</button></div>` : '');
+
   el.innerHTML = `
     <div class="pd">접속한 상대 ${nations.length}명 · 내 트로피 ${statusIcon('trophy')} ${game.myNation.trophies || 0}</div>
     ${shieldTxt}
+    ${netBox}
     <button id="find-match-btn" class="find-match-btn">⚔️ 상대 찾기</button>
     <div id="match-card"></div>
   `;
+  const retryBtn = document.getElementById('retry-online-btn');
+  if (retryBtn) retryBtn.addEventListener('click', retryOnline);
   document.getElementById('find-match-btn').addEventListener('click', () => {
     currentMatch = findMatch(game.myNation, knownNations, Date.now());
     attackDeck = null;

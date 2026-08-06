@@ -428,10 +428,21 @@ export function canDemolish(nation, structId) {
 
 /** 영토를 처음부터 다시 계산한다 (철거로 줄어들 수 있으므로 누적이 아니라 재구성) */
 function recomputeTerritory(nation) {
-  nation.territory = new Set();
-  for (const s of nation.structures) {
-    for (const [x, y] of territoryTilesOf(nation, s)) nation.territory.add(tileKey(x, y));
+  nation.territory = territoryFromStructures(nation.structures);
+}
+
+/**
+ * 구조물 목록만으로 영토를 다시 만든다.
+ * 영토는 수도·중심지의 위치와 레벨에서 나오는 값이라 따로 들고 다닐 필요가 없다.
+ * 멀티플레이에서 기지 스냅샷을 주고받을 때 이걸 쓰면 타일 수천 개를 네트워크로
+ * 보내지 않아도 된다 (공격자 쪽에서 같은 규칙으로 다시 만든다).
+ */
+export function territoryFromStructures(structures) {
+  const set = new Set();
+  for (const s of structures || []) {
+    for (const [x, y] of territoryTilesOf(null, s)) set.add(tileKey(x, y));
   }
+  return set;
 }
 
 /** 구조물을 철거한다. 안에 있던 자원은 전부 사라지고 건설비도 돌려주지 않는다. */
@@ -837,9 +848,9 @@ export function buildRaidReport(attacker, defenderSnapshot, session, now = Date.
       seed: session.seed,
       deploys: (session.deployLog || []).map(d => ({ ...d })),
       base: {
+        // 영토는 담지 않는다 — 구조물에서 다시 만들어진다 (territoryFromStructures)
         id: defenderSnapshot.id, name: defenderSnapshot.name, color: defenderSnapshot.color,
         capital: defenderSnapshot.capital,
-        territory: Array.from(defenderSnapshot.territory || []),
         structures: (defenderSnapshot.structures || []).map(s => ({ ...s })),
         units: { defense: { ...((defenderSnapshot.units && defenderSnapshot.units.defense) || {}) } },
       },
@@ -972,6 +983,8 @@ export function findMatch(myNation, candidates, now = Date.now()) {
  * 연구 진행이나 레시피 같은 내정 정보는 넘기지 않는다.
  */
 export function defenseSnapshot(nation, now = Date.now()) {
+  // 영토(타일 수천 개)는 담지 않는다 — 구조물에서 다시 만들 수 있다
+  // (territoryFromStructures). 스냅샷은 접속자 수만큼 오가므로 작을수록 좋다.
   return {
     id: nation.id,
     name: nation.name,
@@ -979,7 +992,6 @@ export function defenseSnapshot(nation, now = Date.now()) {
     capital: nation.capital,
     trophies: nation.trophies || 0,
     shieldUntil: nation.shieldUntil || 0,
-    territory: Array.from(nation.territory || []),
     structures: (nation.structures || []).map(s => ({
       id: s.id, key: s.key, x: s.x, y: s.y, level: s.level, dir: s.dir || 0, idle: !!s.idle,
     })),

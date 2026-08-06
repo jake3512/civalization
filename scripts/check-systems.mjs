@@ -247,7 +247,12 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   // 공개 스냅샷에 내정 정보가 새지 않는지
   const snap = L.defenseSnapshot(def);
   assert.ok(!('unlocked' in snap) && !('research' in snap), '공개 스냅샷에 연구/해금 정보가 들어가면 안 된다');
-  assert.ok(snap.structures.length > 0 && snap.territory.length > 0, '스냅샷에 기지 배치가 담겨야 한다');
+  assert.ok(snap.structures.length > 0, '스냅샷에 기지 배치가 담겨야 한다');
+  // 영토는 실어 보내지 않고 구조물에서 다시 만든다 (스냅샷이 접속자 수만큼 오간다)
+  assert.ok(!snap.territory, '스냅샷에 영토 타일 목록을 담으면 안 된다');
+  assert.deepStrictEqual(
+    L.territoryFromStructures(snap.structures), def.territory,
+    '구조물만으로 되살린 영토가 원본과 같아야 한다 (소환 금지 구역이 어긋나면 안 된다)');
 
   // 매치메이킹: 실드가 없으면 잡히고, 있으면 안 잡힌다
   assert.ok(L.findMatch(atk, [snap]), '실드 없는 상대는 매칭돼야 한다');
@@ -310,6 +315,68 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   assert.ok(victim2.trophies >= 500 - WAR.maxTrophyTrade, '트로피 손실은 규칙 상한을 넘을 수 없다');
 
   console.log('✓ 전투 멀티플레이 (비동기 습격 · 리플레이 재현 · 멱등 · 조작 방어)');
+}
+
+// --- 저장/불러오기: 무엇 하나 빠지면 이어하기가 반쪽이 된다 ---
+{
+  // localStorage가 없는 node에서도 storage.js를 그대로 돌려보기 위한 최소 구현
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => mem.set(k, String(v)),
+    removeItem: (k) => mem.delete(k),
+  };
+  const S = await import('../js/storage.js');
+  const { UNITS } = await import('../js/data.js');
+
+  const site = findNearestCapitalSite(0, 0, 200);
+  const a = createNation('save-a', '저장국', '#abc', site.x, site.y);
+  // 저장돼야 할 것들을 골고루 만들어둔다
+  const cap = a.structures.find(s => s.key === 'capital');
+  L.depositAnywhere(a, 'wood', 120); L.recomputeStock(a);
+  const woodBefore = L.totalStock(a, 'wood');   // 시작 재고 + 들어간 만큼 (수도 용량까지)
+  a.unlocked.add('smelter');
+  a.unlockedGoods.add('dish:bread');
+  a.research = { key: 'factory', ticksLeft: 7 };
+  a.trophies = 42;
+  a.shieldUntil = 1234567890;
+  a.units.attack[Object.keys(UNITS.attack)[0]] = 3;
+  a.seenRaids = ['raid-1'];
+  cap.level = 4;
+
+  assert.strictEqual(S.saveGame(a).ok, true);
+  const back = Nation.fromJSON(S.loadGame().nation);
+  assert.strictEqual(back.id, a.id);
+  assert.strictEqual(back.name, a.name);
+  assert.strictEqual(L.totalStock(back, 'wood'), woodBefore, '창고 재고가 그대로 살아나야 한다');
+  assert.ok(back.unlocked.has('smelter'), '해금이 유지돼야 한다');
+  assert.ok(back.unlockedGoods.has('dish:bread'), '요리법 습득이 유지돼야 한다');
+  assert.strictEqual(back.research.ticksLeft, 7, '진행 중인 연구가 유지돼야 한다');
+  assert.strictEqual(back.trophies, 42);
+  assert.strictEqual(back.shieldUntil, 1234567890, '보호막 만료 시각이 유지돼야 한다');
+  assert.deepStrictEqual(back.units, a.units, '병력 로스터가 유지돼야 한다');
+  assert.deepStrictEqual(back.seenRaids, ['raid-1'], '이미 반영한 습격 기록이 유지돼야 한다(중복 반영 방지)');
+  assert.strictEqual(back.structures.find(s => s.key === 'capital').level, 4, '구조물 레벨이 유지돼야 한다');
+  assert.strictEqual(back.territory.size, a.territory.size, '영토가 유지돼야 한다');
+
+  // 슬롯 분리 — 같은 브라우저의 두 탭(= 두 플레이어)이 서로를 덮어쓰면 안 된다
+  const b = createNation('save-b', '이웃국', '#cba', site.x, site.y);
+  S.saveGame(b);
+  assert.strictEqual(S.listSaves().length, 2, '국가별로 따로 저장돼야 한다');
+  assert.strictEqual(S.loadGame('save-a').nation.name, '저장국');
+  assert.strictEqual(S.loadGame('save-b').nation.name, '이웃국');
+  S.clearSave('save-b');
+  assert.strictEqual(S.listSaves().length, 1, '하나만 지우면 나머지는 남아야 한다');
+
+  // 형식이 안 맞는 저장은 조용히 무시한다 (반쯤 복원되는 것보다 낫다)
+  mem.set('civ:saves', JSON.stringify({ x: { v: 999, savedAt: Date.now(), nation: {} } }));
+  assert.strictEqual(S.loadGame(), null, '형식 버전이 다른 저장은 불러오지 않는다');
+  mem.set('civ:saves', '{망가진 JSON');
+  assert.strictEqual(S.loadGame(), null, '깨진 저장은 불러오지 않는다');
+  assert.deepStrictEqual(S.listSaves(), [], '깨진 저장은 목록에도 안 나온다');
+
+  delete globalThis.localStorage;
+  console.log('✓ 저장/불러오기 (전체 상태 왕복 · 국가별 슬롯 · 깨진 저장 무시)');
 }
 
 console.log('\n✅ 회귀 테스트 전부 통과');

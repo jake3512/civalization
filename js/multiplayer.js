@@ -35,7 +35,7 @@ function neighborRegions(x, y) {
 export async function initFirebase() {
   if (!FIREBASE_ENABLED) {
     console.warn('[multiplayer] Firebase 설정이 비어있어 로컬 모드로 실행됩니다. js/firebase-config.js 를 채워주세요.');
-    return false;
+    return { ok: false, reason: 'config', message: 'js/firebase-config.js가 비어 있습니다' };
   }
   try {
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
@@ -55,10 +55,29 @@ export async function initFirebase() {
         if (user) { uid = user.uid; unsub(); resolve(); }
       }, reject);
     });
-    return true;
+    return { ok: true, uid };
   } catch (e) {
-    console.warn('[multiplayer] Firebase 연결 실패, 로컬 모드로 전환합니다.', e);
-    return false;
+    // 왜 안 됐는지가 중요하다. 예전에는 전부 "로컬 모드"로 뭉뚱그려서, 콘솔을
+    // 열어보기 전에는 무엇을 고쳐야 하는지 알 수 없었다.
+    const code = (e && (e.code || '')) + '';
+    const msg = (e && e.message) || '';
+    let reason = 'unknown', message = msg || '알 수 없는 오류';
+    if (/Failed to fetch|dynamically imported module|NetworkError|importing/i.test(msg)) {
+      reason = 'sdk';
+      message = 'Firebase SDK를 내려받지 못했습니다 (네트워크 차단 또는 오프라인)';
+    } else if (code.includes('auth/operation-not-allowed') || /operation-not-allowed/i.test(msg)) {
+      reason = 'auth-disabled';
+      message = 'Firebase 콘솔에서 익명 로그인(Anonymous)을 켜야 합니다';
+    } else if (code.includes('auth/configuration-not-found') || /configuration-not-found/i.test(msg)) {
+      // 프로젝트에서 Authentication을 한 번도 켠 적이 없을 때 나온다
+      reason = 'auth-missing';
+      message = 'Firebase 콘솔 → Authentication을 "시작하기"로 켜고 익명 로그인을 활성화하세요';
+    } else if (code.includes('auth/')) {
+      reason = 'auth';
+      message = `로그인 실패 (${code})`;
+    }
+    console.warn('[multiplayer] Firebase 연결 실패:', reason, e);
+    return { ok: false, reason, message };
   }
 }
 

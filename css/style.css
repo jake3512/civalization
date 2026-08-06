@@ -65,6 +65,29 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   display: block; font-size: 12px; color: var(--text-dim);
   margin-bottom: 16px; letter-spacing: 0.5px;
 }
+
+/* 이어하기 — 저장된 국가가 있을 때만 시작 화면에 뜬다 */
+.resume-box { margin-bottom: 22px; }
+.resume-card {
+  background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 4px; padding: 12px; margin-bottom: 10px; text-align: left;
+}
+.resume-head { display: flex; align-items: center; gap: 8px; }
+.resume-head .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.resume-head .nm { flex: 1; font-family: var(--font-display); font-size: 15px; color: var(--text); }
+.resume-head .when { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+.resume-meta { font-size: 12px; color: var(--text-dim); margin: 6px 0 10px; }
+.resume-actions { display: flex; gap: 8px; }
+.resume-btn {
+  flex: 2; padding: 10px; background: var(--accent); color: #14100a; border: none;
+  border-radius: 3px; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.5px;
+}
+.discard-btn {
+  flex: 1; padding: 10px; background: transparent; color: var(--text-dim);
+  border: 1px solid var(--line); border-radius: 3px; font-size: 12px;
+}
+.resume-hint { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.resume-warn { font-size: 12px; color: var(--danger); line-height: 1.5; text-align: left; }
 .start-card input[type="text"] {
   display: block; width: 100%; margin-top: 6px;
   background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
@@ -417,6 +440,18 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 }
 .deck-plus:active, .deck-minus:active { background: var(--accent); color: #14100a; }
 .shield-on { color: var(--accent); }
+
+/* 온라인 연결 상태 — 안 될 때 사유와 재시도 버튼을 같이 보여준다 */
+.net-box {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px; font-size: 11px; color: var(--text-dim); line-height: 1.5;
+}
+.net-box.err { border-color: var(--danger); }
+.net-line { margin-bottom: 6px; }
+.retry-btn {
+  width: 100%; padding: 7px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 3px; font-size: 11px; min-height: 30px;
+}
 
 .battle-log { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
 .log-row b { color: var(--text); }
