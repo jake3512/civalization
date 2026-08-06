@@ -40,6 +40,9 @@ export class Nation {
     this.nextStructId = 1;
     this.unlocked = new Set(BASE_UNLOCKED);
     this.research = null;
+    this.expedition = null;            // 진행 중인 여행 { key, ticksLeft }
+    this.unlockedGoods = new Set();    // 여행으로 얻은 작물/가축/요리법 ('crop:wheat' 등)
+    this.lastExpedition = null;        // 방금 끝난 여행 결과 (UI 알림용)
     this.trophies = 0;
     this.shieldUntil = 0; // 타임스탬프(ms). 이 값이 현재 시각보다 크면 보호막 활성.
     this.units = { attack: {}, defense: {} }; // 무장 완료된 병력 로스터 (unitKey -> 보유 수)
@@ -67,6 +70,18 @@ export class Nation {
     const res = logic.recruitUnit(this, structId, unitKey, isDefense);
     return res.ok ? null : res.error;
   }
+  setCrop(structId, cropKey) {
+    const res = logic.setCrop(this, structId, cropKey);
+    return res.ok ? null : res.error;
+  }
+  setAnimal(structId, animalKey) {
+    const res = logic.setAnimal(this, structId, animalKey);
+    return res.ok ? null : res.error;
+  }
+  startExpedition(key) {
+    const res = logic.startExpedition(this, key);
+    return res.ok ? null : res.error;
+  }
   getDefensePower() { return logic.getDefensePower(this); }
   isShielded(now) { return logic.isShielded(this, now); }
 
@@ -78,6 +93,8 @@ export class Nation {
       structures: this.structures, territory: Array.from(this.territory),
       resources: this.resources, unlocked: Array.from(this.unlocked),
       research: this.research,
+      expedition: this.expedition, unlockedGoods: Array.from(this.unlockedGoods),
+      lastExpedition: this.lastExpedition,
       trophies: this.trophies, shieldUntil: this.shieldUntil, units: this.units,
     };
   }
@@ -89,6 +106,9 @@ export class Nation {
     n.resources = data.resources || {};
     n.unlocked = new Set(data.unlocked || BASE_UNLOCKED);
     n.research = data.research || null;
+    n.expedition = data.expedition || null;
+    n.unlockedGoods = new Set(data.unlockedGoods || []);
+    n.lastExpedition = data.lastExpedition || null;
     n.trophies = data.trophies || 0;
     n.shieldUntil = data.shieldUntil || 0;
     n.units = data.units || { attack: {}, defense: {} };

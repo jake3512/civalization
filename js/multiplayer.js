@@ -84,6 +84,12 @@ export const callSetRecipe = (structId, recipeKey) => callFn('submitSetRecipe', 
 export const callStartResearch = (structKey) => callFn('submitStartResearch', { structKey });
 export const callRecruitUnit = (structId, unitKey, isDefense) => callFn('submitRecruitUnit', { structId, unitKey, isDefense });
 export const callRaidResult = (defenderId, raidResult) => callFn('submitRaidResult', { defenderId, raidResult });
+export const callSetCrop = (structId, cropKey) => callFn('submitSetCrop', { structId, cropKey });
+export const callSetAnimal = (structId, animalKey) => callFn('submitSetAnimal', { structId, animalKey });
+export const callStartExpedition = (key) => callFn('submitStartExpedition', { key });
+export const callSell = (res, amount) => callFn('submitSell', { res, amount });
+export const callManualMove = (mode, structId, res, amount, toId) => callFn('submitManualMove', { mode, structId, res, amount, toId });
+export const callManualOperate = (structId, cycles, heldMs) => callFn('submitManualOperate', { structId, cycles, heldMs });
 
 // ---------------- Firestore 구독 ----------------
 

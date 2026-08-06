@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="#8f6a41" stroke="#482300" stroke-width="2.5"/>
-  <path d="M32 12 L48 18 V30 C48 42 42 50 32 54 C22 50 16 42 16 30 V18 Z" fill="#f2ede0"/>
-    <path d="M32 20 L41 24 V31 C41 39 37 44 32 47 C27 44 23 39 23 31 V24 Z" fill="#b2ada0"/>
+  <ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>
+    <path d="M32 6 L52 14 V30 C52 44 44 52 32 58 C20 52 12 44 12 30 V14 Z" fill="#d59a54" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 6 L52 14 V30 C52 44 44 52 32 58 Z" fill="#6f4319" opacity="0.45"/>
+    <path d="M32 16 L44 21 V30 C44 39 39 45 32 49 Z" fill="#a86a2e" opacity="0.6"/>
+    <path d="M32 6 V58" stroke="#161018" stroke-width="2.5"/>
 </svg>

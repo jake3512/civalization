@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="#8c4a34" stroke="#450300" stroke-width="2.5"/>
-  <rect x="12" y="14" width="40" height="36" rx="6" fill="#f2ede0"/><line x1="14" y1="26" x2="50" y2="26" stroke="#a6a194" stroke-width="2"/>
-      <line x1="14" y1="38" x2="50" y2="38" stroke="#a6a194" stroke-width="2"/>
-      <line x1="32" y1="14" x2="32" y2="26" stroke="#a6a194" stroke-width="2"/>
-      <line x1="22" y1="26" x2="22" y2="38" stroke="#a6a194" stroke-width="2"/>
-      <line x1="42" y1="26" x2="42" y2="38" stroke="#a6a194" stroke-width="2"/>
-      <line x1="32" y1="38" x2="32" y2="50" stroke="#a6a194" stroke-width="2"/>
+  <ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>
+    <path d="M8 24 H56 L50.72 15 H13.28 Z" fill="#e07a54" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <rect x="8" y="24" width="48" height="26" rx="2" fill="#c0603f" stroke="#161018" stroke-width="3"/>
+    <path d="M8 38 H56 V50 H8 Z" fill="#8a3a22" opacity="0.42"/>
+    <path d="M8 32 H56 M8 41 H56" stroke="#161018" stroke-width="2.5"/>
+    <path d="M22 24 V32 M40 24 V32 M15 32 V41 M33 32 V41 M49 32 V41 M22 41 V50 M40 41 V50" stroke="#161018" stroke-width="2.5"/>
 </svg>

@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>
-    <rect x="8" y="26" width="48" height="28" rx="3" fill="#b9c3cc" stroke="#161018" stroke-width="3"/>
-    <path d="M32 26 H56 V54 H32 Z" fill="#5d6773" opacity="0.4"/>
-    <path d="M14 12 h26 a6 6 0 0 1 6 6 v8 h-32 Z" fill="#e2ebf2" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
-    <rect x="24" y="26" width="6" height="12" rx="1" fill="#5f7080" stroke="#161018" stroke-width="3"/>
-    <rect x="12" y="34" width="9" height="8" rx="1" fill="#ffe9a8"/><rect x="40" y="34" width="9" height="8" rx="1" fill="#ffe9a8"/>
+    <path d="M10 26 h30 a8 8 0 0 1 8 8 v2 H10 Z" fill="#ff7a59" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 26 h8 a8 8 0 0 1 8 8 v2 H32 Z" fill="#9c2418" opacity="0.35"/>
+    <path d="M8 36 H56 L50.72 30 H13.28 Z" fill="#dfe6ec" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <rect x="8" y="36" width="48" height="18" rx="1" fill="#b9c3cc" stroke="#161018" stroke-width="3"/><path d="M8 47.16 h48 v6.84 h-48 Z" fill="#161018" opacity="0.16"/>
+    <rect x="13" y="41" width="10" height="8" rx="1" fill="#ffe9a8"/><rect x="41" y="41" width="10" height="8" rx="1" fill="#ffe9a8"/>
+    <path d="M27 41 h10 v13 h-10 Z" fill="#5f7080" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M8 42 H56" stroke="#161018" stroke-width="2"/>
 </svg>

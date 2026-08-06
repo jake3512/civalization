@@ -1,7 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>
-    <path d="M18 8 h28 v20 l-14 26 l-14 -26 Z" fill="#c9a6ff" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M32 8 h14 v20 l-14 26 Z" fill="#542ea8" opacity="0.45"/>
-    <path d="M18 20 H46 M22 30 H42" stroke="#161018" stroke-width="3"/>
-    <circle cx="32" cy="14" r="4" fill="#ffe9a8" stroke="#161018" stroke-width="2"/>
+    <ellipse cx="32" cy="52" rx="12" ry="4.08" fill="#542ea8" stroke="#161018" stroke-width="3"/>
+    <path d="M16 26 H48 L44.480000000000004 18 H19.52 Z" fill="#d9c4ff" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <rect x="16" y="26" width="32" height="12" rx="1" fill="#8b5cf6" stroke="#161018" stroke-width="3"/><path d="M16 33.44 h32 v4.5600000000000005 h-32 Z" fill="#161018" opacity="0.16"/>
+    <path d="M18 38 h28 l-11 14 h-6 Z" fill="#c9a6ff" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 38 h14 l-11 14 h-3 Z" fill="#542ea8" opacity="0.42"/>
+    <circle cx="32" cy="20" r="5" fill="#ffe9a8" stroke="#161018" stroke-width="2.5"/>
+    <path d="M16 32 H48" stroke="#161018" stroke-width="2.2"/>
 </svg>
