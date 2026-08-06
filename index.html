@@ -54,6 +54,20 @@
           <button id="placement-confirm" disabled>이 위치에 수도 건설</button>
         </div>
 
+        <!-- 건설 확정 바: 고스트를 원하는 칸으로 옮긴 뒤 "설치"를 눌러야 실제로 지어진다 -->
+        <div id="build-bar" class="build-bar hidden">
+          <img id="build-bar-art" class="build-bar-art" src="" alt="">
+          <div class="build-bar-info">
+            <div id="build-bar-name" class="build-bar-name"></div>
+            <div id="build-bar-status" class="build-bar-status"></div>
+          </div>
+          <label class="build-bar-repeat" title="설치 후에도 선택을 유지해 연달아 짓습니다">
+            <input type="checkbox" id="build-repeat"> 연속
+          </label>
+          <button id="build-cancel" class="build-cancel">취소</button>
+          <button id="build-confirm" class="build-confirm">설치</button>
+        </div>
+
         <!-- 터치 전용 툴바: 키보드 없이도 회전/전력범위/줌 조작 -->
         <div id="touch-toolbar" class="touch-toolbar hidden">
           <button id="rotate-btn" class="toolbar-btn" title="벨트 방향 회전" disabled>⟳ 회전</button>

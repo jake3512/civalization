@@ -5,7 +5,7 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
          LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput,
          CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon } from './data.js';
 import { Game, Nation } from './game.js';
@@ -172,7 +172,12 @@ function buildBuildMenu() {
       const rotateBtn = document.getElementById('rotate-btn');
       if (rotateBtn) rotateBtn.disabled = (key !== 'belt');
       renderCostPreview(def);
+      // 고를 때 곧바로 화면 한가운데에 고스트를 띄워, 어디를 눌러야 할지 알려준다
+      buildTarget = renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
     });
+    // 메뉴를 다시 그려도 지금 고른 구조물의 강조 표시가 풀리지 않게 한다
+    // (연속 설치 중에 건설할 때마다 선택이 사라져 보이던 문제)
+    if (selectedStruct === key) btn.classList.add('active');
     menu.appendChild(btn);
   }
 }
@@ -191,6 +196,8 @@ document.getElementById('rotate-btn').addEventListener('click', () => {
   beltDir = (beltDir + 1) % 4;
   renderCostPreview(STRUCTURES.belt);
 });
+document.getElementById('build-confirm').addEventListener('click', confirmBuild);
+document.getElementById('build-cancel').addEventListener('click', clearSelectedStruct);
 document.getElementById('power-btn').addEventListener('click', (e) => {
   renderer.showPower = !renderer.showPower;
   e.currentTarget.classList.toggle('active', renderer.showPower);
@@ -212,23 +219,29 @@ window.addEventListener('keydown', (e) => {
     renderer.showPower = !renderer.showPower;
     document.getElementById('power-btn').classList.toggle('active', renderer.showPower);
   }
+  // 키보드가 있으면 Enter로 설치, Esc로 취소 (터치에서는 화면 버튼을 쓴다)
+  if (selectedStruct) {
+    if (e.key === 'Enter') { e.preventDefault(); confirmBuild(); }
+    if (e.key === 'Escape') { e.preventDefault(); clearSelectedStruct(); }
+  }
 });
 
 // ---------- 캔버스 조작: 마우스 + 터치(팬/탭/핀치줌) 공용 ----------
 let dragging = false, lastX = 0, lastY = 0, dragged = false;
 let pinching = false, pinchStartDist = 0;
 
-// ---------- 드래그 건설 ----------
+// ---------- 건설 배치 (고스트를 옮긴 뒤 "설치" 버튼으로 확정) ----------
 // 구조물을 고른 상태에서 지도를 드래그하면 지나가는 칸마다 이어서 설치된다
 // (벨트·방벽처럼 여러 개를 줄줄이 놓을 때 편하도록). 손을 떼면 그 구조물은
 // 자동으로 선택 해제되어, 실수로 계속 지어지는 일이 없다.
-let placing = false;
-const placedThisDrag = new Set();
+let placing = false;          // 고스트를 끌어 옮기는 중
+let buildTarget = null;       // 설치 버튼이 지을 칸 { x, y }
 let suppressNextTap = false;
 
 /** 건설 모드 해제 (카탈로그 강조·회전 버튼·미리보기까지 함께 정리) */
 function clearSelectedStruct() {
   selectedStruct = null;
+  buildTarget = null;
   document.querySelectorAll('.build-item.active').forEach(b => b.classList.remove('active'));
   const rotateBtn = document.getElementById('rotate-btn');
   if (rotateBtn) rotateBtn.disabled = true;
@@ -237,34 +250,52 @@ function clearSelectedStruct() {
   if (hint) { hint.textContent = ''; hint.className = 'preview-hint'; }
 }
 
-/** 화면 좌표를 타일로 바꿔 그 자리에 한 번 설치한다 (같은 칸 중복 시도는 건너뜀) */
-async function placeAtScreen(clientX, clientY) {
+/**
+ * 건설 위치(고스트)를 화면 좌표가 가리키는 칸으로 옮긴다.
+ * 손가락이 닿는 순간 지어지면 오조작이 잦아서, 여기서는 자리만 잡고
+ * 실제 건설은 "설치" 버튼(confirmBuild)에서만 일어난다.
+ */
+function moveBuildTargetTo(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const { x, y } = renderer.screenToWorld(clientX - rect.left, clientY - rect.top);
-  const key = `${x},${y}`;
-  if (placedThisDrag.has(key)) return;
-  placedThisDrag.add(key);
+  buildTarget = renderer.screenToWorld(clientX - rect.left, clientY - rect.top);
+}
 
+/** "설치" 버튼 — 지금 고스트가 있는 칸에 실제로 짓는다 */
+async function confirmBuild() {
   const structKey = selectedStruct;
-  if (!structKey) return;
+  if (!structKey || !buildTarget || !game.myNation) return;
+  const { x, y } = buildTarget;
+  const repeat = document.getElementById('build-repeat')?.checked;
+
   if (isMultiplayer()) {
     const res = await callBuild(structKey, x, y, beltDir);
-    if (res.error) flashMessage(res.error, true);
-    else flashMessage(`${STRUCTURES[structKey].name} 건설 요청 완료`, false);
+    if (res.error) { flashMessage(res.error, true); return; }
+    flashMessage(`${STRUCTURES[structKey].name} 건설 요청 완료`, false);
   } else {
     const err = game.myNation.build(structKey, x, y, beltDir);
-    if (err) flashMessage(err, true);
-    else { flashMessage(`${STRUCTURES[structKey].name} 건설 완료`, false); buildBuildMenu(); }
+    if (err) { flashMessage(err, true); return; }
+    flashMessage(`${STRUCTURES[structKey].name} 건설 완료`, false);
+    buildBuildMenu();
+  }
+  // 기본은 한 번 설치하면 선택 해제. "연속"을 켜두면 벨트처럼 여러 개를
+  // 이어 지을 때 매번 카탈로그로 돌아가지 않아도 된다.
+  if (repeat) {
+    if (structKey === 'belt') {
+      // 벨트는 흐르는 방향으로 한 칸 밀어줘야 자연스럽게 이어 깔린다
+      const [dx, dy] = DIR_VECT[beltDir] || [1, 0];
+      buildTarget = { x: x + dx, y: y + dy };
+    }
+  } else {
+    clearSelectedStruct();
   }
 }
 
 function pointerDown(x, y) {
   dragged = false; lastX = x; lastY = y;
-  // 건설 모드에서는 드래그가 "이동"이 아니라 "설치"가 된다
+  // 건설 모드에서 드래그는 "설치"가 아니라 "고스트 옮기기"다
   if (selectedStruct && game.myNation) {
     placing = true;
-    placedThisDrag.clear();
-    placeAtScreen(x, y);
+    moveBuildTargetTo(x, y);
     return;
   }
   dragging = true;
@@ -272,7 +303,7 @@ function pointerDown(x, y) {
 function pointerMove(x, y) {
   const rect = canvas.getBoundingClientRect();
   renderer.hover = renderer.screenToWorld(x - rect.left, y - rect.top);
-  if (placing) { placeAtScreen(x, y); lastX = x; lastY = y; return; }
+  if (placing) { moveBuildTargetTo(x, y); lastX = x; lastY = y; return; }
   if (dragging) {
     const dx = x - lastX, dy = y - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 3) dragged = true;
@@ -283,8 +314,6 @@ function pointerMove(x, y) {
 function pointerUp() {
   if (placing) {
     placing = false;
-    placedThisDrag.clear();
-    clearSelectedStruct();   // 한 번 설치했으면 선택 해제
     suppressNextTap = true;  // 뒤이어 오는 click이 타일 정보를 열지 않도록
   }
   dragging = false;
@@ -302,7 +331,7 @@ async function handleTap(clientX, clientY) {
     return;
   }
   if (!game.myNation) return;
-  // 건설은 pointerDown/Move에서 이미 처리된다 (드래그 건설)
+  // 건설 모드에서는 탭이 "고스트 옮기기"라 타일 정보를 열지 않는다
   if (selectedStruct) return;
 
   // 카메라가 기울어져 있어서 건물은 자기 타일보다 위로 솟아 보인다.
@@ -356,7 +385,7 @@ canvas.addEventListener('touchmove', (e) => {
 canvas.addEventListener('touchend', (e) => {
   if (pinching) { pinching = false; dragged = true; pointerUp(); return; }
   const wasPlacing = placing;
-  pointerUp(); // 설치 중이었다면 여기서 선택이 해제된다
+  pointerUp(); // 고스트를 옮기는 중이었다면 여기서 끝난다 (설치는 설치 버튼에서만)
   if (!wasPlacing && !dragged && e.changedTouches.length === 1) {
     handleTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
   }
@@ -1217,14 +1246,21 @@ function updateCapitalSites() {
 // ---------- 건설 미리보기(고스트) ----------
 // 커서/마지막 터치 지점에 배치 결과를 매 프레임 다시 계산해 보여준다.
 // (자원이 틱마다 변해 "자원 부족" 여부가 바뀌므로 매 프레임 재검증한다)
+/**
+ * 고스트와 "설치" 바를 현재 건설 목표 칸(buildTarget) 기준으로 갱신한다.
+ * 고스트는 손을 떼도 그 자리에 남아 있어야 설치 버튼을 누를 수 있으므로,
+ * 마우스 hover가 아니라 buildTarget을 따라간다.
+ */
 function updateBuildPreview() {
-  if (!game.myNation || !selectedStruct || !renderer.hover) {
+  const bar = document.getElementById('build-bar');
+  const hintEl = document.getElementById('preview-hint');
+  if (!game.myNation || !selectedStruct || !buildTarget) {
     renderer.buildPreview = null;
-    const hintEl = document.getElementById('preview-hint');
+    if (bar) bar.classList.add('hidden');
     if (hintEl) { hintEl.textContent = ''; hintEl.className = 'preview-hint'; }
     return;
   }
-  const { x, y } = renderer.hover;
+  const { x, y } = buildTarget;
   const def = STRUCTURES[selectedStruct];
   const check = validatePlacement(game.myNation, selectedStruct, x, y);
   renderer.buildPreview = {
@@ -1233,11 +1269,23 @@ function updateBuildPreview() {
     territoryRadius: def.territoryRadius || 0,
     powerRadius: def.powerRadius || 0,
   };
-  // 좌측 패널 비용 줄에 현재 위치 기준 사유를 함께 보여준다
-  const hint = document.getElementById('preview-hint');
-  if (hint) {
-    hint.textContent = check.ok ? `(${x}, ${y}) 건설 가능` : `(${x}, ${y}) ${check.error}`;
-    hint.className = `preview-hint ${check.ok ? 'ok' : 'err'}`;
+
+  // 필드 위 설치 바 — 무엇을 어디에 짓는지와 지금 지을 수 있는지를 보여준다
+  if (bar) {
+    bar.classList.remove('hidden');
+    document.getElementById('build-bar-art').src = structureIcon(selectedStruct);
+    document.getElementById('build-bar-name').textContent =
+      `${def.name}${selectedStruct === 'belt' ? ` ${DIR_ARROW[beltDir]}` : ''} (${x}, ${y})`;
+    const st = document.getElementById('build-bar-status');
+    st.textContent = check.ok ? '설치할 수 있습니다' : check.error;
+    st.className = `build-bar-status ${check.ok ? 'ok' : 'err'}`;
+    document.getElementById('build-confirm').disabled = !check.ok;
+  }
+
+  // 좌측 패널 비용 줄에도 같은 사유를 남긴다
+  if (hintEl) {
+    hintEl.textContent = check.ok ? `(${x}, ${y}) 건설 가능` : `(${x}, ${y}) ${check.error}`;
+    hintEl.className = `preview-hint ${check.ok ? 'ok' : 'err'}`;
   }
 }
 
