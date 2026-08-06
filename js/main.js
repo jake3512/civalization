@@ -535,6 +535,37 @@ function renderChoiceHtml(struct, table, kind, title, lockHint) {
 }
 
 /** 창고/수도에 든 자원을 팔아 골드로 바꾸는 UI (요리일수록 단가가 높다) */
+/**
+ * 제작(레시피) 목록 — 이름만 있던 작은 버튼 대신 큰 카드로 보여준다.
+ * 무엇을 넣어 무엇이 나오는지, 지금 재료가 있는지, 팔면 얼마인지가
+ * 카드 하나에 다 들어와서 팝업을 닫지 않고도 고를 수 있다.
+ */
+function renderRecipeHtml(struct, def) {
+  const isKitchen = struct.key === 'kitchen';
+  const buf = struct.inputBuffer || {};
+  let html = `<div class="pd">${isKitchen ? '요리법' : '제작 레시피'} 선택:</div><div class="craft-list">`;
+  for (const [key, r] of Object.entries(def.recipes)) {
+    const active = struct.recipe === key ? ' active' : '';
+    const label = RESOURCES[key]?.name || key;
+    // 조리소 요리법은 여행으로 배워와야 쓸 수 있다 (logic.setRecipe와 같은 규칙)
+    const learned = !isKitchen || hasGood(game.myNation, `dish:${key}`);
+    const ing = Object.entries(r.in || {}).map(([res, need]) => {
+      const have = buf[res] || 0;
+      return `<span class="craft-ing${have >= need ? ' ok' : ' short'}">${resIcon(res)}${have}/${need}</span>`;
+    }).join('');
+    html += `<button class="craft-card${active}${learned ? '' : ' locked'}" data-recipe="${key}"
+      ${learned ? '' : 'disabled title="여행으로 배워오세요"'}>
+      <img class="craft-art" src="${RESOURCES[key]?.icon || ''}" alt="">
+      <span class="craft-info">
+        <span class="craft-name">${learned ? '' : '🔒 '}${label}<span class="craft-out">×${r.out || 1}</span></span>
+        <span class="craft-ings">${ing || '<span class="craft-ing ok">재료 없음</span>'}</span>
+      </span>
+      <span class="craft-price">${resIcon('gold')}${getSellPrice(key)}</span>
+    </button>`;
+  }
+  return html + `</div>`;
+}
+
 function renderSellHtml(struct) {
   const entries = Object.entries(struct.store || {}).filter(([, v]) => v > 0);
   if (!entries.length) return '';
@@ -643,28 +674,7 @@ function showStructPanel(struct, x, y) {
   if (struct.key === 'barn') html += renderChoiceHtml(struct, ANIMALS, 'animal', '기를 가축', '여행으로 데려오세요');
   if (STRUCTURES[struct.key].storageCapacity) html += renderSellHtml(struct);
 
-  if (def.recipes) {
-    // 조리소는 레시피가 많고 재료가 중요해서 재료·산출·판매가를 같이 보여준다
-    const isKitchen = struct.key === 'kitchen';
-    html += `<div class="pd">${isKitchen ? '요리법' : '레시피'} 선택:</div><div class="recipe-list${isKitchen ? ' recipe-list-wide' : ''}">`;
-    for (const [key, r] of Object.entries(def.recipes)) {
-      const active = struct.recipe === key ? 'active' : '';
-      const label = RESOURCES[key]?.name || key;
-      const learned = !isKitchen || hasGood(game.myNation, `dish:${key}`);
-      if (!isKitchen) {
-        html += `<button class="recipe-btn ${active}" data-recipe="${key}">${label}</button>`;
-        continue;
-      }
-      const ing = Object.entries(r.in || {}).map(([k2, v]) => `${resIcon(k2)}${v}`).join(' ');
-      html += `<button class="recipe-btn recipe-card ${active}" data-recipe="${key}"
-        ${learned ? '' : 'disabled title="여행으로 배워오세요"'}>
-        <span class="recipe-card-head">${learned ? '' : '🔒 '}${resIcon(key)} ${label}</span>
-        <span class="recipe-card-io">${ing} → ${resIcon(key)}${r.out || 1}</span>
-        <span class="recipe-card-price">${resIcon('gold')}${getSellPrice(key)}</span>
-      </button>`;
-    }
-    html += `</div>`;
-  }
+  if (def.recipes) html += renderRecipeHtml(struct, def);
 
   html += renderUpgradeHtml(struct, def);
 
@@ -676,7 +686,7 @@ function showStructPanel(struct, x, y) {
 
   // 작물/가축/연구/모병 버튼도 모양을 맞추려고 .recipe-btn 클래스를 공유하므로,
   // 레시피 핸들러는 반드시 data-recipe가 있는 버튼에만 걸어야 한다.
-  body.querySelectorAll('.recipe-btn[data-recipe]').forEach(btn => {
+  body.querySelectorAll('[data-recipe]').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (isMultiplayer()) {
         const res = await callSetRecipe(struct.id, btn.dataset.recipe);
@@ -731,7 +741,7 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
-  body.querySelectorAll('.recruit-btn').forEach(btn => {
+  body.querySelectorAll('.recruit-card').forEach(btn => {
     btn.addEventListener('click', async () => {
       const unitKey = btn.dataset.unit;
       const isDefense = btn.dataset.defense === '1';
@@ -748,8 +758,6 @@ function showStructPanel(struct, x, y) {
 
 function renderOutpostHtml(struct) {
   const nation = game.myNation;
-  const fmtEquip = (equip) => Object.entries(equip).map(([r, a]) => `${resIcon(r)}${a}`).join(' ');
-
   let html = `<div class="pd">국고 골드: ${resIcon('gold')} ${Math.floor(nation.resources.gold || 0)}</div>`;
 
   const queue = struct.recruitQueue || [];
@@ -770,16 +778,39 @@ function renderOutpostHtml(struct) {
   ].join(', ');
   html += `<div class="pd">보유 병력: ${rosterTxt || '없음'}</div>`;
 
-  html += `<div class="pd">공격 유닛 모집:</div><div class="recipe-list">`;
-  for (const [key, unit] of Object.entries(UNITS.attack)) {
-    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="0">${unitArtIcon(key)} ${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
-  }
-  html += `</div><div class="pd">수비 유닛 모집:</div><div class="recipe-list">`;
-  for (const [key, unit] of Object.entries(UNITS.defense)) {
-    html += `<button class="recipe-btn recruit-btn" data-unit="${key}" data-defense="1">${unitArtIcon(key)} ${unit.name} · ${resIcon('gold')}${unit.gold} · ${fmtEquip(unit.equip)}</button>`;
-  }
-  html += `</div>`;
+  const gold = Math.floor(nation.resources.gold || 0);
+  html += renderRecruitList('공격 유닛 모집', UNITS.attack, 0, gold);
+  html += renderRecruitList('수비 유닛 모집', UNITS.defense, 1, gold);
   return html;
+}
+
+/**
+ * 모병 목록 — 한 줄짜리 작은 버튼 대신, 유닛 그림과 성능 수치를 함께 담은
+ * 큰 카드로 보여준다. 골드가 모자라면 비용을 빨갛게 강조하고 카드를 잠근다.
+ */
+function renderRecruitList(title, table, isDefense, gold) {
+  let html = `<div class="pd">${title}:</div><div class="recruit-list">`;
+  for (const [key, unit] of Object.entries(table)) {
+    const afford = gold >= unit.gold;
+    const equip = Object.entries(unit.equip)
+      .map(([r, a]) => `<span class="ru-eq">${resIcon(r)}${a}</span>`).join('');
+    const stats = [
+      ['공격', unit.power], ['체력', unit.hp],
+      ['속도', unit.speed === 0 ? '고정' : unit.speed], ['사거리', unit.range],
+    ].map(([k, v]) => `<span class="ru-stat"><b>${k}</b>${v}</span>`).join('');
+    html += `<button class="recruit-card${afford ? '' : ' short'}" data-unit="${key}" data-defense="${isDefense}"
+      ${afford ? '' : 'title="국고 골드가 모자랍니다"'}>
+      <img class="ru-art" src="${unitIcon(key)}" alt="">
+      <span class="ru-info">
+        <span class="ru-name">${unit.name}
+          <span class="ru-cost${afford ? '' : ' err'}">${resIcon('gold')}${unit.gold}</span>
+        </span>
+        <span class="ru-stats">${stats}</span>
+        <span class="ru-equips"><b>장비</b>${equip}</span>
+      </span>
+    </button>`;
+  }
+  return html + `</div>`;
 }
 
 function renderLabHtml() {
