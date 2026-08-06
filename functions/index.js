@@ -139,6 +139,17 @@ export const submitDemolish = onCall(async (request) => {
   return { ok: true };
 });
 
+export const submitRotate = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const nation = await loadNation(uid);
+  if (!nation) throw new HttpsError('not-found', '국가를 찾을 수 없습니다');
+  const { structId, dir } = request.data || {};
+  const err = nation.rotateStructure(structId, dir);
+  if (err) return { error: err };
+  await saveNation(uid, nation);
+  return { ok: true };
+});
+
 // ---------------- 농사 · 목축 · 여행 · 판매 ----------------
 export const submitSetCrop = onCall(async (request) => {
   const uid = requireAuth(request);

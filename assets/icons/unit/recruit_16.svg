@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>
+  <path d="M8 40 h48 a6 6 0 0 1 0 14 H8 a6 6 0 0 1 0 -14 Z" fill="#4a444f" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="14" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="24" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="34" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="44" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/><circle cx="52" cy="47" r="4" fill="#2f2a33" stroke="#161018" stroke-width="2"/>
+  <path d="M12 40 H52 L47.6 34 H16.4 Z" fill="#33254a" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M12 26 h40 v14 h-40 Z" fill="#5c4a7a" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M32 26 h20 v14 h-20 Z" fill="#33254a" opacity="0.4"/>
+    <!-- 마도 포격단 -->
+    <path d="M20 12 h24 v14 h-24 Z" fill="#7a63a0" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M26 12 V2" stroke="#161018" stroke-width="5" stroke-linecap="round"/>
+      <path d="M26 12 V2" stroke="#8b5cf6" stroke-width="2.6" stroke-linecap="round"/><path d="M32 12 V2" stroke="#161018" stroke-width="5" stroke-linecap="round"/>
+      <path d="M32 12 V2" stroke="#8b5cf6" stroke-width="2.6" stroke-linecap="round"/><path d="M38 12 V2" stroke="#161018" stroke-width="5" stroke-linecap="round"/>
+      <path d="M38 12 V2" stroke="#8b5cf6" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="32" cy="19" r="5" fill="#c9a6ff" stroke="#161018" stroke-width="2.5"/>
+</svg>

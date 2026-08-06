@@ -105,6 +105,8 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   font-family: var(--font-mono); font-size: 13px;
 }
 .resource-bar .res { display: flex; gap: 5px; align-items: center; color: var(--text); white-space: nowrap; font-weight: 500; }
+/* 해금은 됐지만 지금 재고가 0인 자원 — 자리는 지키되 흐리게 */
+.resource-bar .res.empty { opacity: 0.38; }
 .resource-bar .res.teal { color: var(--teal); }
 .mp-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 
@@ -144,10 +146,15 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   font-size: 13px; letter-spacing: 2px; color: var(--text-dim);
   margin: 0 0 12px; text-transform: uppercase;
 }
-.cost-preview {
-  font-family: var(--font-mono); font-size: 11px; color: var(--accent);
-  min-height: 16px; margin-bottom: 4px;
-}
+/* ---- 고른 구조물의 필요 자원 ---- */
+.cost-preview { min-height: 18px; margin-bottom: 6px; font-size: 11px; }
+.cost-title { font-family: var(--font-display); font-size: 13px; color: var(--accent); letter-spacing: 0.3px; }
+.cost-items { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.cost-item { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.cost-item b { color: var(--text); font-weight: 600; }
+.cost-item.short, .cost-item.short b { color: var(--danger); }
+.cost-item .ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 2px; }
+.cost-note { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); margin-top: 4px; }
 /* 건설 미리보기(고스트) 상태 줄 — 커서 위치의 건설 가능 여부/사유 */
 .preview-hint {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
@@ -157,6 +164,38 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .preview-hint.err { color: var(--danger); }
 .preview-hint.warn { color: var(--accent); }
 .build-menu { display: flex; flex-direction: column; gap: 4px; }
+
+/* ---- 카탈로그 세트 ----
+   구조물이 35종이라 한 줄로 늘어놓으면 못 찾는다. 종류별로 묶어 세트를 먼저
+   고르고, 펼친 세트 안에서 구조물을 고른다. */
+.build-group {
+  display: grid; grid-template-columns: 30px 1fr auto auto;
+  gap: 8px; align-items: center; text-align: left;
+  background: var(--panel-2); border: 2px solid var(--line); color: var(--text);
+  padding: 8px 10px; border-radius: 5px; font-size: 13px;
+}
+.build-group.open { border-color: var(--accent); background: rgba(255,168,46,0.10); }
+.build-group.locked { opacity: 0.45; }
+.build-group .gic { width: 26px; height: 26px; justify-self: center; filter: saturate(0.8); }
+.build-group .gnm { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.3px; line-height: 1.2; }
+.build-group .gdesc { display: block; font-family: var(--font-body); font-size: 10.5px; color: var(--text-dim); letter-spacing: 0; }
+.build-group .gcnt { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.build-group .gcaret { color: var(--accent); font-size: 12px; }
+.build-sublist {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 2px 0 6px 10px; padding-left: 8px;
+  border-left: 2px solid var(--line);
+}
+
+/* ---- 설치된 벨트 방향 바꾸기 ---- */
+.rot-row { display: flex; gap: 6px; margin: 6px 0 10px; }
+.rot-btn {
+  flex: 1; padding: 10px 0; font-size: 18px; line-height: 1;
+  background: var(--panel); border: 2px solid var(--line); color: var(--text); border-radius: 5px;
+}
+.rot-btn.active { border-color: var(--teal); color: var(--teal); background: rgba(47,224,176,0.12); }
+.rot-btn:active { transform: translateY(1px); }
+.rot-now { color: var(--teal); font-size: 15px; }
 .build-item {
   display: grid; grid-template-columns: 38px 1fr auto;
   gap: 8px; align-items: center;

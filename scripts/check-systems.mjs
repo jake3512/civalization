@@ -140,6 +140,28 @@ assert.deepStrictEqual(Array.from(round.unlockedGoods).sort(), Array.from(n.unlo
 assert.strictEqual(round.structures.find(s => s.id === placed.id).crop, placed.crop);
 console.log('✓ 직렬화 왕복 (작물/해금 유지)');
 
+// --- 콘텐츠 규모 (대폭 확장한 뒤 줄어들지 않게 고정) ---
+{
+  const { UNITS } = await import('../js/data.js');
+  const turrets = Object.keys(STRUCTURES).filter(k => STRUCTURES[k].category === 'turret');
+  assert.ok(Object.keys(UNITS.attack).length >= 20, `공격 유닛 ${Object.keys(UNITS.attack).length}종 (20종 이상)`);
+  assert.ok(Object.keys(UNITS.defense).length >= 10, `수비 유닛 ${Object.keys(UNITS.defense).length}종 (10종 이상)`);
+  assert.ok(turrets.length >= 12, `방어 타워 ${turrets.length}종 (12종 이상)`);
+  // 모든 유닛은 장비가 실제로 만들 수 있는 자원이어야 한다
+  for (const g of ['attack', 'defense']) {
+    for (const [k, u] of Object.entries(UNITS[g])) {
+      for (const r of Object.keys(u.equip)) assert.ok(RESOURCES[r], `${k} 장비 ${r} 정의됨`);
+    }
+  }
+  // 벨트 변종
+  assert.ok(STRUCTURES.belt_splitter && STRUCTURES.belt_cross, '분할·교차 컨베이어 존재');
+  assert.ok(STRUCTURES.belt.rotatable && STRUCTURES.belt_splitter.rotatable, '벨트는 방향을 바꿀 수 있어야 한다');
+  // 인력은 농지에서만
+  assert.ok(!STRUCTURES.capital.laborIncome, '수도는 인력을 만들지 않는다');
+  assert.ok(STRUCTURES.farm.laborIncome > 0, '농지가 인력을 만든다');
+  console.log(`✓ 콘텐츠 규모 (요리 ${Object.keys(STRUCTURES.kitchen.recipes).length} · 공격 ${Object.keys(UNITS.attack).length} · 수비 ${Object.keys(UNITS.defense).length} · 터렛 ${turrets.length})`);
+}
+
 // --- 철거 규칙 ---
 {
   const cap2 = n.structures.find(s2 => s2.key === 'capital');

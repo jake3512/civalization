@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>                       <!-- 마도 기갑 거신 -->
+    <path d="M14 46 h11 v14 h-11 Z" fill="#3a2c50" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M39 46 h11 v14 h-11 Z" fill="#3a2c50" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M10 22 h44 v24 a7 7 0 0 1 -7 7 H17 a7 7 0 0 1 -7 -7 Z" fill="#6b5590" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 22 h22 v24 a7 7 0 0 1 -7 7 H32 Z" fill="#3d2c57" opacity="0.45"/>
+    <path d="M2 24 h10 v22 h-10 Z" fill="#6b5590" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M52 24 h10 v22 h-10 Z" fill="#6b5590" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M20 6 h24 v12 h-24 Z" fill="#5f7080" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <circle cx="26" cy="12" r="3" fill="#ff8f6b"/><circle cx="38" cy="12" r="3" fill="#ff8f6b"/>
+    <circle cx="32" cy="34" r="9" fill="#c9a6ff" stroke="#161018" stroke-width="2.5"/><circle cx="32" cy="34" r="4" fill="#ffffff" stroke="#161018" stroke-width="3"/>
+</svg>

@@ -84,6 +84,7 @@ export const callSetRecipe = (structId, recipeKey) => callFn('submitSetRecipe', 
 export const callStartResearch = (structKey) => callFn('submitStartResearch', { structKey });
 export const callRecruitUnit = (structId, unitKey, isDefense) => callFn('submitRecruitUnit', { structId, unitKey, isDefense });
 export const callRaidResult = (defenderId, raidResult) => callFn('submitRaidResult', { defenderId, raidResult });
+export const callRotate = (structId, dir) => callFn('submitRotate', { structId, dir });
 export const callDemolish = (structId) => callFn('submitDemolish', { structId });
 export const callSetCrop = (structId, cropKey) => callFn('submitSetCrop', { structId, cropKey });
 export const callSetAnimal = (structId, animalKey) => callFn('submitSetAnimal', { structId, animalKey });

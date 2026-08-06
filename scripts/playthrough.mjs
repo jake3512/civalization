@@ -103,6 +103,14 @@ function neededNow() {
   return m;
 }
 
+/** 자원 하나를 목표량만큼 쌓으려면 창고가 몇 개 있어야 하는가 */
+function warehousesFor(res, amount) {
+  const per = STRUCTURES.warehouse.storageCapacity;      // 레벨 1 기준 용량
+  const have = structsOf('warehouse').filter(s => (s.store || {})[res] > 0)
+    .reduce((sum, s) => sum + per * s.level, 0);
+  return Math.max(0, Math.ceil((amount - have) / per));
+}
+
 /** 지금 다루는 자원 종류 수 + 여유분 (창고 하나에 한 종류만 들어가므로) */
 function warehouseTarget() {
   const kinds = new Set();
@@ -110,16 +118,23 @@ function warehouseTarget() {
     for (const [r, a] of Object.entries(s.store || {})) if (a > 0) kinds.add(r);
     for (const [r, a] of Object.entries(s.outputBuffer || {})) if (a > 0) kinds.add(r);
   }
-  return Math.min(45, Math.max(8, kinds.size + 6));
+  // 한 종류를 창고 하나(500)보다 많이 모아야 하는 자원은 그만큼 창고가 더 필요하다.
+  // (수도 상위 레벨은 석재를 2600개씩 요구해서, 종류 수만 세면 용량이 모자라 영영 못 모은다)
+  let extra = 0;
+  for (const [res, need] of neededNow()) {
+    if (VIRTUAL_RESOURCES.has(res)) continue;
+    extra += Math.max(0, warehousesFor(res, need) - 1);
+  }
+  return Math.min(70, Math.max(8, kinds.size + 6 + extra));
 }
 
 /** 창고를 늘린다 (창고 하나에 한 종류만 들어가므로 자원 종류만큼 필요하다) */
 function ensureWarehouses(count) {
   let made = 0;
   while (structsOf('warehouse').length < count) {
-    // 첫 창고 몇 개는 필수(보관 없이는 아무것도 못 쌓는다), 그 다음부터는 여유분으로만
-    const essential = structsOf('warehouse').length < 8;
-    if (!(essential ? afford(STRUCTURES.warehouse.baseCost) : affordSpare(STRUCTURES.warehouse.baseCost))) break;
+    // 보관 공간은 곧 목표 자원을 모을 수 있느냐의 문제라 항상 필수로 본다.
+    // (예비분으로만 짓게 했더니 석재가 용량 상한에 걸려 수도 Lv.3에서 멈췄다)
+    if (!afford(STRUCTURES.warehouse.baseCost)) break;
     if (!buildSomewhere('warehouse')) break;
     made++;
   }
@@ -339,9 +354,13 @@ function act() {
     for (const s of n.structures) {
       if (s.key === 'capital' || s.key === 'belt') continue;
       const c = getUpgradeCost(s.key, s.level);
-      // 창고는 용량이 곧 물류 한계라 우선 올린다
-      const priority = s.key === 'warehouse';
-      if (c && affordSpare(c) && (priority || stockRich())) L.upgrade(n, s.id);
+      // 채굴·가공 구조물의 레벨업은 곧 생산량이라 "투자"로 본다.
+      // 수도 업그레이드 예비분에 묶어두면 생산이 안 늘어 영영 못 모은다
+      // (수도 비용 배율을 올렸더니 실제로 그렇게 정체했다).
+      const invest = s.key === 'warehouse'
+        || STRUCTURES[s.key].category === 'extraction'
+        || STRUCTURES[s.key].category === 'production';
+      if (c && (invest ? afford(c) : affordSpare(c))) L.upgrade(n, s.id);
     }
   }
 }

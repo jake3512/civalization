@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <ellipse cx="32" cy="55" rx="24" ry="5" fill="#000" opacity="0.28"/>                       <!-- 왕립 근위 군단 — 금빛 갑주 -->
+    <path d="M22 44 h7 v14 h-7 Z" fill="#a8730a" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M35 44 h7 v14 h-7 Z" fill="#a8730a" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M16 20 h32 v24 a6 6 0 0 1 -6 6 H22 a6 6 0 0 1 -6 -6 Z" fill="#ffe066" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 20 h16 v24 a6 6 0 0 1 -6 6 H32 Z" fill="#a8730a" opacity="0.42"/>
+    <path d="M6 22 h10 v20 h-10 Z" fill="#f5b921" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/><path d="M48 22 h10 v20 h-10 Z" fill="#f5b921" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="32" cy="12" r="9" fill="#f0c9a0" stroke="#161018" stroke-width="3"/>
+    <path d="M22 11 a10 10 0 0 1 20 0 v3 h-20 Z" fill="#a8730a" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 0 L36 6 h-8 Z" fill="#ff8f6b" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="32" cy="32" r="7" fill="#e04b3a" stroke="#161018" stroke-width="2.5"/><circle cx="32" cy="32" r="3" fill="#ffe066" stroke="#161018" stroke-width="3"/>
+</svg>

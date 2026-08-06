@@ -7,20 +7,21 @@
 // ============================================================
 import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
          LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput,
-         CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon } from './data.js';
+         CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon, VIRTUAL_RESOURCES } from './data.js';
 import { Game, Nation } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, deployUnit, stepBattle, retreat as retreatBattle, getDestructionPercent } from './battle.js';
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
-         storedTotal, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
+         storedTotal, totalStock, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
          hasGood, sellFromStorage, buriedNodes, canDemolish } from './logic.js';
+import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
-  callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish,
+  callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish, callRotate,
 } from './multiplayer.js';
 
 const game = new Game();
@@ -45,6 +46,8 @@ const resIcon = (key) => `<img class="ic" src="${RESOURCES[key]?.icon || ''}" al
 const statusIcon = (key) => `<img class="ic" src="${STATUS_ICONS[key]}" alt="${key}">`;
 const unitArtIcon = (key, cls = 'uic') => `<img class="${cls}" src="${unitIcon(key)}" alt="">`;
 
+// 한 번이라도 손에 넣어 본 자원 — 상단 표시줄을 고정 순서로 유지하기 위해 기억한다
+const seenResources = new Set();
 let selectedStruct = null;   // 현재 건설 모드로 선택된 구조물 key
 let beltDir = 0;              // 벨트 건설 시 방향 (회전 버튼 / R키)
 let pendingNation = null;     // { name, color } — 수도 위치를 아직 못 고른 상태
@@ -153,48 +156,94 @@ async function initMultiplayer(name, color, cx, cy) {
 }
 
 // ---------- 건설 메뉴 ----------
+/**
+ * 건설 카탈로그. 구조물이 35종까지 늘면서 한 줄로 늘어놓으면 찾기 어려워져서,
+ * **같은 종류끼리 세트로 묶고 세트를 먼저 고르게** 한다 (터렛만 14종이다).
+ * 세트를 열면 그 안의 구조물이 나오고, 거기서 하나를 골라 짓는다.
+ */
+let openBuildGroup = null;   // 지금 펼쳐 둔 세트 key
+
 function buildBuildMenu() {
   const menu = document.getElementById('build-menu');
   menu.innerHTML = '';
-  for (const [key, def] of Object.entries(STRUCTURES)) {
-    const btn = document.createElement('button');
-    btn.className = 'build-item';
-    btn.dataset.struct = key;
-    btn.disabled = !game.myNation.unlocked.has(key);
-    btn.innerHTML = `<img class="sic" src="${structureIcon(key)}" alt=""><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
-    btn.title = def.desc;
-    btn.addEventListener('click', () => {
-      const wasSelected = selectedStruct === key;
-      clearSelectedStruct();          // 미리보기/힌트까지 같이 지운다
-      if (wasSelected) return;        // 같은 버튼을 다시 누르면 선택 해제
-      selectedStruct = key;
-      btn.classList.add('active');
-      const rotateBtn = document.getElementById('rotate-btn');
-      if (rotateBtn) rotateBtn.disabled = (key !== 'belt');
-      renderCostPreview(def);
-      // 고를 때 곧바로 화면 한가운데에 고스트를 띄워, 어디를 눌러야 할지 알려준다
-      buildTarget = renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
+
+  for (const group of BUILD_GROUPS) {
+    const keys = Object.keys(STRUCTURES).filter(k => buildGroupOf(k) === group.key);
+    if (!keys.length) continue;
+    const unlockedKeys = keys.filter(k => game.myNation.unlocked.has(k));
+    const open = openBuildGroup === group.key;
+
+    const head = document.createElement('button');
+    head.className = `build-group${open ? ' open' : ''}${unlockedKeys.length ? '' : ' locked'}`;
+    head.dataset.group = group.key;
+    head.innerHTML =
+      `<img class="gic" src="${structureIcon(unlockedKeys[0] || keys[0])}" alt="">
+       <span class="gnm">${group.name}<span class="gdesc">${group.desc}</span></span>
+       <span class="gcnt">${unlockedKeys.length}/${keys.length}</span>
+       <span class="gcaret">${open ? '▾' : '▸'}</span>`;
+    head.addEventListener('click', () => {
+      openBuildGroup = open ? null : group.key;
+      buildBuildMenu();
     });
-    // 메뉴를 다시 그려도 지금 고른 구조물의 강조 표시가 풀리지 않게 한다
-    // (연속 설치 중에 건설할 때마다 선택이 사라져 보이던 문제)
-    if (selectedStruct === key) btn.classList.add('active');
-    menu.appendChild(btn);
+    menu.appendChild(head);
+    if (!open) continue;
+
+    const list = document.createElement('div');
+    list.className = 'build-sublist';
+    for (const key of keys) {
+      const def = STRUCTURES[key];
+      const btn = document.createElement('button');
+      btn.className = 'build-item';
+      btn.dataset.struct = key;
+      btn.disabled = !game.myNation.unlocked.has(key);
+      btn.innerHTML = `<img class="sic" src="${structureIcon(key)}" alt=""><span class="nm">${def.name}</span><span class="vol">부피 ${def.volume}</span>`;
+      btn.title = def.desc;
+      btn.addEventListener('click', () => {
+        const wasSelected = selectedStruct === key;
+        clearSelectedStruct();          // 미리보기/힌트까지 같이 지운다
+        if (wasSelected) return;        // 같은 버튼을 다시 누르면 선택 해제
+        selectedStruct = key;
+        btn.classList.add('active');
+        const rotateBtn = document.getElementById('rotate-btn');
+        if (rotateBtn) rotateBtn.disabled = !isRotatable(key);
+        renderCostPreview(def);
+        // 고를 때 곧바로 화면 한가운데에 고스트를 띄워, 어디를 눌러야 할지 알려준다
+        buildTarget = renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
+      });
+      // 메뉴를 다시 그려도 지금 고른 구조물의 강조 표시가 풀리지 않게 한다
+      // (연속 설치 중에 건설할 때마다 선택이 사라져 보이던 문제)
+      if (selectedStruct === key) btn.classList.add('active');
+      list.appendChild(btn);
+    }
+    menu.appendChild(list);
   }
 }
 
+/**
+ * 고른 구조물의 필요 자원을 "보유/필요"로 보여준다.
+ * 모자란 자원은 빨갛게 떠서, 짓기 전에 무엇이 부족한지 바로 알 수 있다.
+ */
 function renderCostPreview(def) {
   const el = document.getElementById('cost-preview');
-  const parts = Object.entries(def.baseCost).map(([r, a]) => `${resIcon(r)} ${RESOURCES[r]?.name || r} ${a}`);
-  let html = parts.length ? `건설 비용: ${parts.join(' · ')}` : '건설 비용 없음';
-  if (def === STRUCTURES.belt) html += `  ·  방향 ${DIR_ARROW[beltDir]} (우측 하단 ⟳ 버튼으로 회전)`;
+  if (!def) { el.innerHTML = '구조물을 선택하세요'; return; }
+  const stockOf = (r) => Math.floor(game.myNation
+    ? (VIRTUAL_RESOURCES.has(r) ? (game.myNation.resources[r] || 0) : totalStock(game.myNation, r))
+    : 0);
+  const parts = Object.entries(def.baseCost).map(([r, need]) => {
+    const have = stockOf(r);
+    return `<span class="cost-item${have >= need ? '' : ' short'}">${resIcon(r)}<b>${have}</b>/${need}</span>`;
+  });
+  let html = `<div class="cost-title">${def.name} · 필요 자원</div>`;
+  html += parts.length ? `<div class="cost-items">${parts.join('')}</div>` : `<div class="cost-items">건설 비용 없음</div>`;
+  if (isRotatable(selectedStruct)) html += `<div class="cost-note">방향 ${DIR_ARROW[beltDir]} — ⟳ 버튼이나 R 키로 회전</div>`;
   el.innerHTML = html;
 }
 
 // ---------- 터치 툴바 버튼 (회전 / 전력범위 / 줌) ----------
 document.getElementById('rotate-btn').addEventListener('click', () => {
-  if (selectedStruct !== 'belt') return;
+  if (!isRotatable(selectedStruct)) return;
   beltDir = (beltDir + 1) % 4;
-  renderCostPreview(STRUCTURES.belt);
+  renderCostPreview(STRUCTURES[selectedStruct]);
 });
 document.getElementById('build-confirm').addEventListener('click', confirmBuild);
 document.getElementById('build-cancel').addEventListener('click', clearSelectedStruct);
@@ -211,9 +260,9 @@ document.getElementById('zoom-out-btn').addEventListener('click', () => {
 
 // ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
 window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 'r' && selectedStruct === 'belt') {
+  if (e.key.toLowerCase() === 'r' && isRotatable(selectedStruct)) {
     beltDir = (beltDir + 1) % 4;
-    renderCostPreview(STRUCTURES.belt);
+    renderCostPreview(STRUCTURES[selectedStruct]);
   }
   if (e.key.toLowerCase() === 'p') {
     renderer.showPower = !renderer.showPower;
@@ -280,7 +329,7 @@ async function confirmBuild() {
   // 기본은 한 번 설치하면 선택 해제. "연속"을 켜두면 벨트처럼 여러 개를
   // 이어 지을 때 매번 카탈로그로 돌아가지 않아도 된다.
   if (repeat) {
-    if (structKey === 'belt') {
+    if (isBeltKey(structKey)) {
       // 벨트는 흐르는 방향으로 한 칸 밀어줘야 자연스럽게 이어 깔린다
       const [dx, dy] = DIR_VECT[beltDir] || [1, 0];
       buildTarget = { x: x + dx, y: y + dy };
@@ -678,7 +727,7 @@ function renderUpgradeHtml(struct, def) {
   }
   if (def.defense) add('방어력', def.defense * cur, def.defense * next);
   if (def.baseHp) add('내구도', getStructureMaxHp(struct.key, cur), getStructureMaxHp(struct.key, next));
-  if (struct.key === 'belt') add('처리량', beltThroughput(cur), beltThroughput(next), '/틱');
+  if (isBeltKey(struct.key)) add('처리량', beltThroughput(cur), beltThroughput(next), '/틱');
 
   if (gains.length) {
     html += `<div class="up-gains">` + gains.map(g =>
@@ -729,6 +778,12 @@ function showStructPanel(struct, x, y) {
   if (struct.key === 'barn') html += renderChoiceHtml(struct, ANIMALS, 'animal', '기를 가축', '여행으로 데려오세요');
   if (STRUCTURES[struct.key].storageCapacity) html += renderSellHtml(struct);
 
+  if (isRotatable(struct.key)) {
+    html += `<div class="pd">흐르는 방향: <b class="rot-now">${DIR_ARROW[struct.dir || 0]}</b></div>
+      <div class="rot-row">
+        ${[0, 1, 2, 3].map(d => `<button class="rot-btn${(struct.dir || 0) === d ? ' active' : ''}" data-rot="${d}">${DIR_ARROW[d]}</button>`).join('')}
+      </div>`;
+  }
   if (def.recipes) html += renderRecipeHtml(struct, def);
 
   html += renderUpgradeHtml(struct, def);
@@ -753,6 +808,17 @@ function showStructPanel(struct, x, y) {
       }
     });
   });
+  body.querySelectorAll('[data-rot]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const dir = Number(btn.dataset.rot);
+      const res = await dispatch(
+        () => ({ error: game.myNation.rotateStructure(struct.id, dir) }),
+        () => callRotate(struct.id, dir));
+      if (res.error) flashMessage(res.error, true);
+      else showStructPanel(game.myNation.structures.find(s2 => s2.id === struct.id) || null, x, y);
+    });
+  });
+
   // 철거는 되돌릴 수 없어서 두 번 눌러야 실행된다 (첫 탭은 확인 요청)
   const db2 = document.getElementById('demolish-btn');
   if (db2) {
@@ -1212,7 +1278,10 @@ function renderTravelPanel() {
     return;
   }
 
-  let html = `<div class="pd">${resIcon('labor')} 인력 ${labor} <span class="dim">(수도가 매 틱 생산)</span></div>`;
+  const farms = game.myNation.structures.filter(s2 => s2.key === 'farm');
+  const laborRate = farms.reduce((a, f) => a + (STRUCTURES.farm.laborIncome || 0) * f.level, 0);
+  let html = `<div class="pd">${resIcon('labor')} 인력 ${labor} <span class="dim">(농지 ${farms.length}개 · +${laborRate}/틱)</span></div>`;
+  if (!farms.length) html += `<div class="pd err">인력은 농지에서만 나옵니다 — 물가에 농지를 지으세요</div>`;
   const capLevel = getCapitalLevel(n);
   for (const [key, exp] of Object.entries(EXPEDITIONS)) {
     const lvOk = capLevel >= (exp.capitalLevel || 1);
@@ -1258,12 +1327,21 @@ function checkExpeditionDone() {
 }
 
 // ---------- 자원 패널 ----------
+/**
+ * 상단 자원 표시줄.
+ * 자원 종류가 80가지가 넘어가면서 "지금 가진 것"만 띄우면 순서가 계속 바뀌어
+ * 눈으로 좇기 어려웠다. 이제 **한 번이라도 손에 넣어 본 자원(해금된 자원)**을
+ * 정해진 순서(RESOURCES 정의 순 = 기초 → 가공 → 식품 → 군수)로 고정 배치하고,
+ * 지금 0이면 흐리게 표시한다.
+ */
 function renderResourcePanel() {
   const el = document.getElementById('resource-bar');
   if (!game.myNation) { el.innerHTML = ''; return; }
   const res = game.myNation.resources;
-  const keys = Object.keys(RESOURCES).filter(k => res[k]);
-  let html = keys.map(k => `<span class="res">${resIcon(k)}${Math.floor(res[k])}</span>`).join('');
+  for (const k of Object.keys(RESOURCES)) if (res[k] > 0) seenResources.add(k);
+  const keys = Object.keys(RESOURCES).filter(k => seenResources.has(k));
+  let html = keys.map(k =>
+    `<span class="res${res[k] > 0 ? '' : ' empty'}" title="${RESOURCES[k].name}">${resIcon(k)}${Math.floor(res[k] || 0)}</span>`).join('');
   html += `<span class="res" title="트로피">${statusIcon('trophy')} ${game.myNation.trophies || 0}</span>`;
   const shieldMs = (game.myNation.shieldUntil || 0) - Date.now();
   if (shieldMs > 0) {
@@ -1328,7 +1406,7 @@ function updateBuildPreview() {
     bar.classList.remove('hidden');
     document.getElementById('build-bar-art').src = structureIcon(selectedStruct);
     document.getElementById('build-bar-name').textContent =
-      `${def.name}${selectedStruct === 'belt' ? ` ${DIR_ARROW[beltDir]}` : ''} (${x}, ${y})`;
+      `${def.name}${isRotatable(selectedStruct) ? ` ${DIR_ARROW[beltDir]}` : ''} (${x}, ${y})`;
     const st = document.getElementById('build-bar-status');
     if (!check.ok) { st.textContent = check.error; st.className = 'build-bar-status err'; }
     else if (buried.length) { st.textContent = `⚠ ${buriedNames}을(를) 덮습니다 (되돌릴 수 없음)`; st.className = 'build-bar-status warn'; }

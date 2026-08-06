@@ -15,6 +15,14 @@ export const structureIcon = (structKey) => `${ICON_DIR}/struct/${structKey}.svg
 /** 유닛 그림 (전투 화면 · 덱 트레이 · 모병 버튼 공용) */
 export const unitIcon = (unitKey) => `${ICON_DIR}/unit/${unitKey}.svg`;
 
+/**
+ * 벨트류(일반 벨트 · 분할 컨베이어 · 교차로)인가.
+ * 바닥에 눕혀 그리고, 방향을 돌릴 수 있고, 물류 체인에 참여하는 것들.
+ */
+export const isBeltKey = (key) => key === 'belt' || !!STRUCTURES[key]?.beltKind;
+/** 설치 후에도 방향을 바꿀 수 있는가 */
+export const isRotatable = (key) => !!STRUCTURES[key]?.rotatable;
+
 // ---- 원자재 / 가공자원 / 부품 / 화폐 정의 ----
 export const RESOURCES = {
   wood:        { name: '목재',     icon: iconPath('wood'), color: '#4a7c3f' },
@@ -60,6 +68,11 @@ export const RESOURCES = {
   cheese:      { name: '치즈',   icon: iconPath('cheese'), color: '#f2b93c' },
   dough:       { name: '반죽',   icon: iconPath('dough'), color: '#e8d5b0' },
   boiled_rice: { name: '밥',     icon: iconPath('boiled_rice'), color: '#f5f0e2' },
+  sugar:       { name: '설탕',   icon: iconPath('sugar'), color: '#f2ece0' },
+  cooking_oil: { name: '식용유', icon: iconPath('cooking_oil'), color: '#e8c84a' },
+  noodle:      { name: '면',     icon: iconPath('noodle'), color: '#f0e2b8' },
+  cream:       { name: '크림',   icon: iconPath('cream'), color: '#f7f0e0' },
+  broth:       { name: '육수',   icon: iconPath('broth'), color: '#c98a45' },
 
   // ---- 완성 요리 (조리소에서 제작 — 판매가가 높다) ----
   bread:         { name: '빵',         icon: iconPath('bread'), color: '#c98a45' },
@@ -74,6 +87,23 @@ export const RESOURCES = {
   bibimbap:      { name: '비빔밥',     icon: iconPath('bibimbap'), color: '#d95f45' },
   fruit_pie:     { name: '과일파이',   icon: iconPath('fruit_pie'), color: '#e08a4c' },
   cake:          { name: '케이크',     icon: iconPath('cake'), color: '#f5a8c0' },
+  noodle_soup:   { name: '국수',       icon: iconPath('noodle_soup'), color: '#e8d9a8' },
+  pasta:         { name: '파스타',     icon: iconPath('pasta'), color: '#e8a83c' },
+  pizza:         { name: '피자',       icon: iconPath('pizza'), color: '#e0703c' },
+  dumpling:      { name: '만두',       icon: iconPath('dumpling'), color: '#efe4cc' },
+  curry:         { name: '카레',       icon: iconPath('curry'), color: '#d9962c' },
+  stew:          { name: '스튜',       icon: iconPath('stew'), color: '#b0542c' },
+  samgyetang:    { name: '삼계탕',     icon: iconPath('samgyetang'), color: '#e8ddc0' },
+  cheeseburger:  { name: '치즈버거',   icon: iconPath('cheeseburger'), color: '#d99a45' },
+  hotdog:        { name: '핫도그',     icon: iconPath('hotdog'), color: '#e07a50' },
+  donut:         { name: '도넛',       icon: iconPath('donut'), color: '#e8a0c0' },
+  cookie:        { name: '쿠키',       icon: iconPath('cookie'), color: '#c98a4c' },
+  pancake:       { name: '팬케이크',   icon: iconPath('pancake'), color: '#e0b060' },
+  pudding:       { name: '푸딩',       icon: iconPath('pudding'), color: '#f2d078' },
+  ice_cream:     { name: '아이스크림', icon: iconPath('ice_cream'), color: '#f7e2ef' },
+  apple_jam:     { name: '사과잼',     icon: iconPath('apple_jam'), color: '#d9503c' },
+  wine:          { name: '와인',       icon: iconPath('wine'), color: '#8b2f52' },
+  bbq:           { name: '바비큐',     icon: iconPath('bbq'), color: '#a8482c' },
 
   electricity: { name: '전력',   icon: iconPath('electricity'), color: '#f5d94e' },
   gold:        { name: '국고 골드', icon: iconPath('gold'), color: '#f2c94c' }, // 병력 모집·터렛 건설용 화폐
@@ -149,7 +179,7 @@ export const STRUCTURES = {
     id: 1, name: '수도', volume: 9, footprint: [3, 3],
     desc: '국가의 시작 지점. 국가당 1개, 게임 시작 시 자동 배치됩니다. 레벨에 비례해 국고 골드를 생산하고, 레벨이 오를수록 주변 영토도 넓어집니다.',
     baseCost: {}, maxLevel: 10, upgradeCostMul: 1.8,
-    category: 'core', baseHp: 600, goldIncome: 5, laborIncome: 3, territoryRadius: 7,
+    category: 'core', baseHp: 600, goldIncome: 5, territoryRadius: 7,
     // 수도는 여러 종류를 함께 보관하는 중앙 창고 역할도 한다
     // (건국 직후 창고를 짓기 전까지 자원을 둘 곳이 필요하므로).
     storageCapacity: 300,
@@ -250,9 +280,10 @@ export const STRUCTURES = {
   },
   farm: {
     id: 9, name: '농지', volume: 9, footprint: [3, 3],
-    desc: '씨앗에 따라 다른 식량을 생산. 물(강/호수) 옆에만 설치 가능합니다.',
+    desc: '씨앗에 따라 다른 식량을 생산하고, 여행에 쓰는 인력도 여기서 나옵니다. 물(강/호수) 옆에만 설치 가능합니다.',
     baseCost: { wood: 30 }, maxLevel: 5, upgradeCostMul: 1.5,
     category: 'production', baseHp: 150, requiresAdjacent: 'water', baseProduction: 4,
+    laborIncome: 3,   // 인력은 오직 농지에서만 나온다 (여행의 유일한 연료)
   },
   barn: {
     id: 10, name: '축사', volume: 4, footprint: [2, 2],
@@ -286,19 +317,41 @@ export const STRUCTURES = {
       cheese:        { in: { milk: 3 },                        out: 1, time: 4 },
       popcorn:       { in: { corn: 2 },                        out: 3, time: 2 },
       grape_juice:   { in: { grape: 3 },                       out: 2, time: 3 },
+      sugar:         { in: { corn: 3 },                        out: 2, time: 3 },
+      cooking_oil:   { in: { corn: 4 },                        out: 2, time: 3 },
+      cream:         { in: { milk: 4 },                        out: 2, time: 3 },
+      apple_jam:     { in: { apple: 3 },                       out: 2, time: 3 },
       // --- 2차 조리 (1차 가공품이 재료로 들어간다) ---
       dough:         { in: { flour: 2, egg: 1 },               out: 2, time: 3 },
+      noodle:        { in: { flour: 2, cooking_oil: 1 },       out: 2, time: 3 },
+      broth:         { in: { beef: 1, chicken_meat: 1 },       out: 3, time: 4 },
+      wine:          { in: { grape: 4, sugar: 1 },             out: 2, time: 5 },
       steak:         { in: { beef: 2, butter: 1 },             out: 2, time: 4 },
       grilled_pork:  { in: { pork: 2, corn: 1 },               out: 2, time: 4 },
       fried_chicken: { in: { chicken_meat: 2, flour: 1 },      out: 2, time: 4 },
       roast_duck:    { in: { duck_meat: 2, apple: 1 },         out: 2, time: 5 },
       omelet:        { in: { egg: 3, cheese: 1 },              out: 2, time: 4 },
+      cookie:        { in: { flour: 2, butter: 1, sugar: 1 },  out: 3, time: 4 },
+      pancake:       { in: { flour: 2, egg: 1, milk: 1 },      out: 2, time: 4 },
+      pudding:       { in: { egg: 2, milk: 2, sugar: 1 },      out: 2, time: 4 },
+      bbq:           { in: { pork: 2, sugar: 1, cooking_oil: 1 }, out: 2, time: 5 },
       // --- 3차 조리 (2차 가공품이 재료로 들어간다 — 판매가가 크게 뛴다) ---
       bread:         { in: { dough: 2, butter: 1 },            out: 2, time: 4 },
       bibimbap:      { in: { boiled_rice: 2, beef: 1, egg: 1 }, out: 2, time: 5 },
       fruit_pie:     { in: { dough: 2, apple: 2, grape: 1 },   out: 1, time: 6 },
+      dumpling:      { in: { dough: 2, pork: 2, cooking_oil: 1 }, out: 2, time: 5 },
+      noodle_soup:   { in: { noodle: 2, broth: 2 },            out: 2, time: 5 },
+      curry:         { in: { boiled_rice: 2, chicken_meat: 2, broth: 1 }, out: 2, time: 6 },
+      stew:          { in: { beef: 2, broth: 2, apple: 1 },    out: 2, time: 6 },
+      samgyetang:    { in: { chicken_meat: 2, boiled_rice: 1, broth: 2 }, out: 2, time: 6 },
+      donut:         { in: { dough: 2, sugar: 2, cooking_oil: 1 }, out: 3, time: 5 },
+      ice_cream:     { in: { cream: 2, sugar: 2, milk: 1 },    out: 2, time: 5 },
+      hotdog:        { in: { bread: 1, pork: 2, sugar: 1 },    out: 2, time: 5 },
       // --- 4차 조리 (최고급) ---
       sandwich:      { in: { bread: 1, cheese: 1, pork: 1 },   out: 2, time: 5 },
+      cheeseburger:  { in: { bread: 1, beef: 2, cheese: 1 },   out: 2, time: 6 },
+      pasta:         { in: { noodle: 2, cheese: 1, butter: 1, broth: 1 }, out: 2, time: 7 },
+      pizza:         { in: { dough: 2, cheese: 2, pork: 1, cooking_oil: 1 }, out: 2, time: 7 },
       cake:          { in: { dough: 2, butter: 2, grape: 2, cheese: 1 }, out: 1, time: 8 },
     },
   },
@@ -349,9 +402,57 @@ export const STRUCTURES = {
   },
   turret_06: {
     id: 14, code: 'TR-06', name: 'TR-06 마도 빔 레이저', volume: 1, footprint: [1, 1],
-    desc: '최고의 화력을 가진 최상위 터렛.',
+    desc: '먼 거리를 관통하는 마도 광선 터렛.',
     baseCost: { gold: 800, mana_stone: 5 }, maxLevel: 5, upgradeCostMul: 1.7,
     category: 'turret', baseHp: 200, attack: 50, range: 7, powerDraw: 80,
+  },
+  turret_07: {
+    id: 14, code: 'TR-07', name: 'TR-07 다연장 로켓', volume: 1, footprint: [1, 1],
+    desc: '한 번에 여러 발을 퍼붓는 광역 포탑.',
+    baseCost: { gold: 1000, rebar: 8, circuit_board: 4 }, maxLevel: 5, upgradeCostMul: 1.7,
+    category: 'turret', baseHp: 220, attack: 62, range: 6, powerDraw: 95,
+  },
+  turret_08: {
+    id: 14, code: 'TR-08', name: 'TR-08 레일건 포대', volume: 1, footprint: [1, 1],
+    desc: '단발 화력이 가장 강한 초장거리 포대.',
+    baseCost: { gold: 1300, rebar: 10, gold_ingot: 6 }, maxLevel: 5, upgradeCostMul: 1.7,
+    category: 'turret', baseHp: 240, attack: 88, range: 9, powerDraw: 120,
+  },
+  turret_09: {
+    id: 14, code: 'TR-09', name: 'TR-09 화염 방벽', volume: 1, footprint: [1, 1],
+    desc: '근접한 적을 태우는 초근접 방어 장치.',
+    baseCost: { gold: 1500, petroleum: 30, plastic: 10 }, maxLevel: 5, upgradeCostMul: 1.7,
+    category: 'turret', baseHp: 300, attack: 74, range: 2, powerDraw: 90,
+  },
+  turret_10: {
+    id: 14, code: 'TR-10', name: 'TR-10 대공 격자포', volume: 1, footprint: [1, 1],
+    desc: '공중 유닛을 집중 요격하는 대공 전용 포탑.',
+    baseCost: { gold: 1800, circuit_board: 10, copper_wire: 12 }, maxLevel: 5, upgradeCostMul: 1.7,
+    category: 'turret', baseHp: 230, attack: 96, range: 8, powerDraw: 130,
+  },
+  turret_11: {
+    id: 14, code: 'TR-11', name: 'TR-11 마도 결계탑', volume: 1, footprint: [1, 1],
+    desc: '주변을 결계로 감싸 버티는 고내구 방어탑.',
+    baseCost: { gold: 2200, mana_stone: 12, rebar: 10 }, maxLevel: 5, upgradeCostMul: 1.8,
+    category: 'turret', baseHp: 460, attack: 68, range: 5, powerDraw: 150,
+  },
+  turret_12: {
+    id: 14, code: 'TR-12', name: 'TR-12 플라즈마 포탑', volume: 1, footprint: [1, 1],
+    desc: '고온 플라즈마를 쏘아 보내는 상위 포탑.',
+    baseCost: { gold: 2800, mana_stone: 16, circuit_board: 14 }, maxLevel: 5, upgradeCostMul: 1.8,
+    category: 'turret', baseHp: 320, attack: 124, range: 7, powerDraw: 180,
+  },
+  turret_13: {
+    id: 14, code: 'TR-13', name: 'TR-13 궤도 강하포', volume: 1, footprint: [1, 1],
+    desc: '하늘에서 내리꽂는 광역 강하 포격 장치.',
+    baseCost: { gold: 3600, mana_stone: 20, gold_ingot: 14, rebar: 14 }, maxLevel: 5, upgradeCostMul: 1.8,
+    category: 'turret', baseHp: 360, attack: 158, range: 10, powerDraw: 220,
+  },
+  turret_14: {
+    id: 14, code: 'TR-14', name: 'TR-14 차원 방벽포', volume: 1, footprint: [1, 1],
+    desc: '국가 방어의 정점. 압도적인 화력과 사거리를 갖췄습니다.',
+    baseCost: { gold: 5000, mana_stone: 28, gold_ingot: 20, circuit_board: 20 }, maxLevel: 5, upgradeCostMul: 1.8,
+    category: 'turret', baseHp: 520, attack: 210, range: 11, powerDraw: 300,
   },
 
   outpost: {
@@ -368,9 +469,21 @@ export const STRUCTURES = {
   },
   belt: {
     id: 17, name: '컨베이어 벨트', volume: 1, footprint: [1, 1],
-    desc: '자원을 다른 구조물로 이동시킵니다.',
+    desc: '자원을 화살표 방향으로 옮깁니다. 설치한 뒤에도 선택해서 방향을 바꿀 수 있습니다.',
     baseCost: { wood: 2, stone: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
-    category: 'utility', baseHp: 25,
+    category: 'utility', baseHp: 25, rotatable: true,
+  },
+  belt_splitter: {
+    id: 21, name: '분할 컨베이어', volume: 1, footprint: [1, 1],
+    desc: '들어온 자원을 정면·좌·우 세 방향으로 번갈아 나눠 보냅니다. 한 생산 라인을 여러 창고로 갈라줄 때 씁니다.',
+    baseCost: { wood: 8, stone: 6, iron_ingot: 1 }, maxLevel: 3, upgradeCostMul: 1.3,
+    category: 'utility', baseHp: 30, rotatable: true, beltKind: 'splitter',
+  },
+  belt_cross: {
+    id: 22, name: '컨베이어 교차로', volume: 1, footprint: [1, 1],
+    desc: '두 벨트 라인이 서로 섞이지 않고 교차합니다. 들어온 방향 그대로 반대편으로 내보냅니다.',
+    baseCost: { wood: 10, stone: 8, iron_ingot: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
+    category: 'utility', baseHp: 30, beltKind: 'cross',
   },
   warehouse: {
     id: 19, name: '창고', volume: 4, footprint: [2, 2],
@@ -439,14 +552,41 @@ export const EXPEDITIONS = {
     name: '대도시 요리 유학', desc: '이름난 조리사에게 고급 요리법을 배웁니다.',
     labor: 160, ticks: 28, capitalLevel: 5,
     rewards: { milk: 60, apple: 40 },
-    unlocks: ['dish:bread', 'dish:fruit_pie', 'dish:sandwich', 'dish:cake', 'dish:bibimbap', 'dish:roast_duck'],
+    unlocks: ['dish:bread', 'dish:fruit_pie', 'dish:bibimbap', 'dish:roast_duck'],
+  },
+  bakery_town: {
+    name: '제과 마을 수련', desc: '빵과 과자를 굽는 마을에서 단 것 만드는 법을 배웁니다.',
+    labor: 210, ticks: 32, capitalLevel: 5,
+    rewards: { wheat: 90, milk: 70 },
+    unlocks: ['dish:cookie', 'dish:pancake', 'dish:pudding', 'dish:donut', 'dish:ice_cream'],
+  },
+  noodle_valley: {
+    name: '면 요리 협곡', desc: '면을 뽑고 육수를 우리는 마을에서 국물 요리를 배웁니다.',
+    labor: 260, ticks: 36, capitalLevel: 6,
+    rewards: { wheat: 110, beef: 40 },
+    unlocks: ['dish:noodle_soup', 'dish:dumpling', 'dish:curry', 'dish:samgyetang'],
+  },
+  grill_harbor: {
+    name: '항구 구이 축제', desc: '불에 굽는 요리를 하는 항구 축제에 참가합니다.',
+    labor: 320, ticks: 40, capitalLevel: 7,
+    rewards: { pork: 70, corn: 90 },
+    unlocks: ['dish:bbq', 'dish:hotdog', 'dish:cheeseburger', 'dish:stew'],
+  },
+  grand_kitchen: {
+    name: '왕실 주방 초빙', desc: '왕실 주방장에게 최고급 요리를 사사합니다.',
+    labor: 420, ticks: 48, capitalLevel: 8,
+    rewards: { cheese: 50, grape: 90 },
+    unlocks: ['dish:sandwich', 'dish:cake', 'dish:pasta', 'dish:pizza', 'dish:wine'],
   },
 };
 
 // 처음부터 알고 있는 요리법 (나머지는 여행으로 배운다)
 export const START_DISHES = [
+  // 1차 손질 — 재료를 다듬는 수준이라 처음부터 알고 있다
   'boiled_rice', 'flour', 'butter', 'cheese', 'popcorn', 'grape_juice',
-  'dough', 'steak', 'grilled_pork',
+  'sugar', 'cooking_oil', 'cream', 'apple_jam',
+  // 2차 기본 조리
+  'dough', 'noodle', 'broth', 'steak', 'grilled_pork',
 ];
 
 // ============================================================
@@ -514,6 +654,18 @@ export const UNITS = {
     recruit_08: { name: '공성 투석/전차',  gold: 600,  equip: { rebar: 2, circuit_board: 2, coal: 2 },          power: 18, hp: 90,  speed: 0.8, range: 2.0, atkInterval: 1.0, targetPriority: 'military' },
     recruit_09: { name: '마도 중갑 전차',  gold: 850,  equip: { rebar: 3, circuit_board: 3, mana_stone: 2 },    power: 24, hp: 110, speed: 0.9, range: 1.5, atkInterval: 1.0, targetPriority: 'any' },
     recruit_10: { name: '마도 돌격 거인',  gold: 1000, equip: { gun: 1, vest: 1, mana_stone: 3 },               power: 30, hp: 160, speed: 0.7, range: 0.8, atkInterval: 1.0, targetPriority: 'any' },
+    recruit_11: { name: '방패 돌격대',     gold: 1200, equip: { iron_shield: 3, vest: 2, rebar: 2 },            power: 22, hp: 220, speed: 0.9, range: 0.7, atkInterval: 1.0, targetPriority: 'any' },
+    recruit_12: { name: '장궁 저격병',     gold: 1400, equip: { gun: 2, circuit_board: 2, plank: 3 },           power: 26, hp: 40,  speed: 1.2, range: 4.0, atkInterval: 1.2, targetPriority: 'military' },
+    recruit_13: { name: '공병 파괴반',     gold: 1600, equip: { rebar: 3, petroleum: 4, brick: 3 },             power: 34, hp: 70,  speed: 1.1, range: 0.6, atkInterval: 0.9, targetPriority: 'wall_suicide', suicideMul: 8 },
+    recruit_14: { name: '중장 화염 전차',  gold: 1900, equip: { rebar: 4, petroleum: 6, circuit_board: 3 },     power: 40, hp: 200, speed: 0.8, range: 1.6, atkInterval: 1.0, targetPriority: 'any' },
+    recruit_15: { name: '전투 드론 편대',  gold: 2200, equip: { circuit_board: 4, plastic: 4, copper_wire: 4 }, power: 44, hp: 90,  speed: 1.8, range: 1.4, atkInterval: 0.8, targetPriority: 'flying_core', flying: true },
+    recruit_16: { name: '마도 포격단',     gold: 2600, equip: { mana_stone: 4, circuit_board: 3, gun: 2 },      power: 52, hp: 110, speed: 0.9, range: 3.2, atkInterval: 1.1, targetPriority: 'military' },
+    recruit_17: { name: '강습 강화병',     gold: 3000, equip: { vest: 3, gun: 3, mana_stone: 2 },               power: 58, hp: 150, speed: 1.5, range: 1.0, atkInterval: 0.9, targetPriority: 'any' },
+    recruit_18: { name: '공성 파쇄기',     gold: 3600, equip: { rebar: 6, circuit_board: 4, iron_ingot: 8 },    power: 70, hp: 320, speed: 0.6, range: 1.2, atkInterval: 1.2, targetPriority: 'military' },
+    recruit_19: { name: '비행 폭격단',     gold: 4200, equip: { circuit_board: 6, plastic: 6, mana_stone: 3 },  power: 78, hp: 130, speed: 1.6, range: 2.0, atkInterval: 1.0, targetPriority: 'flying_core', flying: true },
+    recruit_20: { name: '마도 기갑 거신',  gold: 5000, equip: { mana_stone: 6, rebar: 6, vest: 4 },             power: 92, hp: 420, speed: 0.6, range: 1.0, atkInterval: 1.0, targetPriority: 'any' },
+    recruit_21: { name: '차원 침투 특공대', gold: 6000, equip: { mana_stone: 8, circuit_board: 6, gun: 4 },     power: 105, hp: 180, speed: 2.0, range: 1.2, atkInterval: 0.8, targetPriority: 'flying_core', flying: true },
+    recruit_22: { name: '왕립 근위 군단',  gold: 7500, equip: { gold_ingot: 10, vest: 6, gun: 6, mana_stone: 4 }, power: 130, hp: 500, speed: 0.9, range: 1.4, atkInterval: 0.9, targetPriority: 'any' },
   },
   // role: 'tank'(가장 가까운 적에게 이동해 어그로를 끔) · 'sniper'(제자리에서 사거리 내 적 저격)
   //   · 'repair'(가장 가까운 손상된 터렛/방벽으로 이동해 지속 회복) · 'guard'(느리게 이동하는 강한 근접 수비병)
@@ -522,8 +674,40 @@ export const UNITS = {
     def_02: { name: '수리 공병',   gold: 200, equip: { rebar: 1, circuit_board: 1, plank: 2 },     power: 4,  hp: 30, speed: 1.0, range: 0.6, healRate: 8, role: 'repair' },
     def_03: { name: '저격 수비병', gold: 350, equip: { gun: 1, circuit_board: 1, wood_spear: 1 },  power: 7,  hp: 25, speed: 0,   range: 3.0, atkInterval: 1.0, role: 'sniper' },
     def_04: { name: '마도 결계병', gold: 800, equip: { mana_stone: 2, circuit_board: 2, iron_shield: 1 }, power: 16, hp: 90, speed: 0.6, range: 1.0, atkInterval: 1.0, role: 'guard' },
+    def_05: { name: '창벽 방어병', gold: 500,  equip: { iron_spear: 2, iron_shield: 2 },                    power: 9,  hp: 130, speed: 0.9, range: 0.8, atkInterval: 1.0, role: 'tank' },
+    def_06: { name: '중장 수리반', gold: 900,  equip: { rebar: 2, circuit_board: 2, plank: 3 },             power: 6,  hp: 70,  speed: 1.0, range: 0.8, healRate: 18, role: 'repair' },
+    def_07: { name: '연사 사수',   gold: 1100, equip: { gun: 2, copper_wire: 3, vest: 1 },                  power: 14, hp: 45,  speed: 0,   range: 3.4, atkInterval: 0.6, role: 'sniper' },
+    def_08: { name: '방벽 거인',   gold: 1500, equip: { rebar: 4, iron_shield: 3, brick: 4 },               power: 20, hp: 260, speed: 0.5, range: 0.9, atkInterval: 1.1, role: 'guard' },
+    def_09: { name: '대공 사격조', gold: 1800, equip: { gun: 3, circuit_board: 3, plastic: 2 },             power: 26, hp: 60,  speed: 0,   range: 4.2, atkInterval: 0.8, role: 'sniper' },
+    def_10: { name: '마도 치유단', gold: 2200, equip: { mana_stone: 3, circuit_board: 2, cheese: 4 },       power: 8,  hp: 110, speed: 0.9, range: 1.2, healRate: 34, role: 'repair' },
+    def_11: { name: '왕궁 근위대', gold: 3000, equip: { gold_ingot: 6, vest: 3, iron_shield: 3 },           power: 38, hp: 340, speed: 0.7, range: 1.0, atkInterval: 0.9, role: 'guard' },
+    def_12: { name: '차원 수호자', gold: 4500, equip: { mana_stone: 6, circuit_board: 5, gold_ingot: 4 },   power: 55, hp: 300, speed: 0.8, range: 2.2, atkInterval: 0.8, role: 'guard' },
   },
 };
+
+/**
+ * 건설 카탈로그의 묶음(세트). 구조물이 35종까지 늘면서 한 줄로 늘어놓으면
+ * 찾기가 어려워져서, 같은 종류끼리 세트로 묶어 세트를 먼저 고르게 한다.
+ * 여기 없는 카테고리는 '기타'로 떨어진다.
+ */
+export const BUILD_GROUPS = [
+  { key: 'core',       name: '중심 시설', desc: '수도와 영토 확장',      match: (k, d) => d.category === 'core' || k === 'hub' },
+  { key: 'extraction', name: '채굴',      desc: '자원 노드에서 캐낸다',  match: (k, d) => d.category === 'extraction' },
+  { key: 'production', name: '생산·가공', desc: '자원을 다른 자원으로',  match: (k, d) => d.category === 'production' },
+  { key: 'logistics',  name: '물류·보관', desc: '옮기고 쌓아둔다',       match: (k, d) => d.category === 'storage' || isBeltKey(k) },
+  { key: 'power',      name: '전력',      desc: '멀리 있는 구조물에 전력', match: (k, d) => k === 'power_plant' },
+  { key: 'research',   name: '연구',      desc: '새 구조물을 해금',      match: (k, d) => k === 'lab' },
+  { key: 'defense',    name: '방어 시설', desc: '터렛과 방벽',           match: (k, d) => d.category === 'turret' || d.category === 'defense' || k === 'wall' },
+  { key: 'military',   name: '군사',      desc: '병력 모집과 출격',      match: (k, d) => k === 'outpost' },
+];
+
+/** 구조물이 속한 카탈로그 세트 key */
+export function buildGroupOf(key) {
+  const def = STRUCTURES[key];
+  if (!def) return 'etc';
+  const g = BUILD_GROUPS.find(gr => gr.match(key, def));
+  return g ? g.key : 'etc';
+}
 
 // ---- 기본으로 해금된 구조물 (연구소 없이도 지을 수 있는 최소 세트) ----
 // 창고는 유일한 자원 보관처라 처음부터 지을 수 있어야 한다.
@@ -600,6 +784,18 @@ export const TECH_TREE = {
   turret_04:      { cost: { copper_wire: 30 },               time: 4, requires: ['turret_03'],               capitalLevel: 8 },
   turret_05:      { cost: { rebar: 25 },                     time: 5, requires: ['turret_04'],               capitalLevel: 8 },
   turret_06:      { cost: { mana_stone: 20 },                time: 6, requires: ['turret_05', 'extractor'],  capitalLevel: 9 },
+  // 물류 확장 — 벨트를 갈래로 나누고 교차시킨다
+  belt_splitter:  { cost: { wood: 40, stone: 30, iron_ingot: 12 }, time: 3, requires: ['smelter'],           capitalLevel: 3 },
+  belt_cross:     { cost: { wood: 60, stone: 45, iron_ingot: 20 }, time: 3, requires: ['belt_splitter'],      capitalLevel: 4 },
+  // 후반 방어 시설 — 수도 레벨이 오를수록 한 단계씩 열린다
+  turret_07:      { cost: { rebar: 40, circuit_board: 20 },  time: 6, requires: ['turret_05', 'factory'],    capitalLevel: 7 },
+  turret_08:      { cost: { rebar: 60, gold_ingot: 30 },     time: 6, requires: ['turret_07'],               capitalLevel: 8 },
+  turret_09:      { cost: { petroleum: 80, plastic: 40 },    time: 6, requires: ['turret_02', 'refinery'],   capitalLevel: 8 },
+  turret_10:      { cost: { circuit_board: 45, copper_wire: 60 }, time: 7, requires: ['turret_03'],          capitalLevel: 9 },
+  turret_11:      { cost: { mana_stone: 45, rebar: 60 },     time: 7, requires: ['turret_06'],               capitalLevel: 9 },
+  turret_12:      { cost: { mana_stone: 70, circuit_board: 70 }, time: 8, requires: ['turret_11'],           capitalLevel: 10 },
+  turret_13:      { cost: { mana_stone: 90, gold_ingot: 70 }, time: 8, requires: ['turret_12', 'turret_08'], capitalLevel: 10 },
+  turret_14:      { cost: { mana_stone: 130, gold_ingot: 100, circuit_board: 110 }, time: 10, requires: ['turret_13'], capitalLevel: 10 },
 };
 
 // ---- 클래시오브클랜식 대전 운영 상수 (트로피 · 실드 · 매치메이킹) ----
@@ -635,13 +831,40 @@ export function getStructureMaxHp(structKey, level) {
 }
 
 // 레벨에 따른 업그레이드 비용 계산 (baseCost * upgradeCostMul^레벨, 구조물마다 개별 산정)
+/**
+ * 전체 플레이 타임을 조절하는 손잡이.
+ *
+ * 수도 레벨업이 사실상 게임의 진도라서, 그 비용에만 배율을 곱하면 다른 밸런스를
+ * 건드리지 않고 목표 시간을 맞출 수 있다. 값은 자동 플레이(scripts/playthrough.mjs)로
+ * 실측해서 정했다 — 1틱 = 2초 기준, 서로 다른 시작 지점 세 판의 결과:
+ *   배율 1.21 → 3315틱 ≈ 1.8시간
+ *   배율 3.30 → 6670 / 7403 / 7294틱 (평균 7122틱 ≈ 4.0시간)
+ *
+ * 여기서 재는 4.0시간은 "봇 시간"이지 사람 시간이 아니다. 봇은 생산 구조물을
+ * 쉬지 않고 최대 레벨까지 올리고, 산출 인벤토리를 한 틱도 놀리지 않고 나르고,
+ * 창고가 모자라면 그 틱에 바로 짓는다. 사람은 화면을 보고 고르고 벨트를 다시
+ * 깔고 전투를 구경하느라 그보다 느려서, 대략 1.25배로 잡으면 목표인 5시간이다.
+ * (봇 시간을 그대로 9000틱에 맞추면 사람 기준으로는 6시간이 넘어간다)
+ * 콘텐츠를 더 넣거나 생산량을 바꿨다면 playthrough를 다시 돌려 이 값을 맞춰라.
+ */
+export const BALANCE = {
+  targetPlayHours: 5,
+  capitalCostScale: 3.3,
+};
+
 export function getUpgradeCost(structKey, currentLevel) {
   const def = STRUCTURES[structKey];
   if (!def) return null;
   if (currentLevel >= def.maxLevel) return null;
 
   // 수도처럼 단계별 비용표가 지정된 구조물은 그 표를 그대로 쓴다
-  if (def.levelCosts) return { ...(def.levelCosts[currentLevel - 1] || {}) };
+  // (전체 진도를 좌우하므로 여기에만 플레이 타임 배율을 곱한다)
+  if (def.levelCosts) {
+    const base = def.levelCosts[currentLevel - 1] || {};
+    const out = {};
+    for (const [res, amt] of Object.entries(base)) out[res] = Math.ceil(amt * BALANCE.capitalCostScale);
+    return out;
+  }
 
   const mul = Math.pow(def.upgradeCostMul, currentLevel);
   const cost = {};

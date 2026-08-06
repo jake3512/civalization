@@ -8,7 +8,7 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES,
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, isBeltKey, isRotatable,
          VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity,
          CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
@@ -328,7 +328,7 @@ export function build(nation, structKey, x, y, dir = 0) {
   pay(nation, def.baseCost);
   const structure = {
     id: nation.nextStructId++, key: structKey, x, y, level: 1,
-    recipe: null, dir: structKey === 'belt' ? dir : undefined,
+    recipe: null, dir: isBeltKey(structKey) ? dir : undefined,
     inputBuffer: {}, outputBuffer: {}, idle: false,
     // 보관 구조물(창고·수도)만 실제 재고를 담는다
     store: def.storageCapacity ? {} : undefined,
@@ -452,6 +452,19 @@ export function demolish(nation, structId) {
   recomputeTerritory(nation);
   recomputeStock(nation);   // 창고가 사라졌으면 국고 표시도 줄어든다
   return { ok: true, removed: s, lost };
+}
+
+/**
+ * 이미 설치된 벨트류의 방향을 바꾼다.
+ * 벨트는 한 칸씩 이어 깔다 보면 방향을 잘못 잡기 쉬운데, 예전에는 방향을
+ * 고치려면 지우고 다시 까는 수밖에 없었다 (철거도 없던 시절엔 아예 불가능).
+ */
+export function rotateStructure(nation, structId, dir = null) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  if (!isRotatable(s.key)) return { ok: false, error: '방향을 바꿀 수 없는 구조물입니다' };
+  s.dir = dir == null ? (((s.dir || 0) + 1) % 4) : (((dir % 4) + 4) % 4);
+  return { ok: true, structure: s, dir: s.dir };
 }
 
 export function setRecipe(nation, structId, recipeKey) {
