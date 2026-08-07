@@ -205,10 +205,151 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
       assert.strictEqual(L.demolish(n, planted.id).ok, true);
     }
     assert.strictEqual(L.canDemolish(n, hub.id).ok, true, '비우면 중심지 철거 가능');
+
+    // 수도 영토와 겹치는 구역에 서 있는 구조물은 중심지 철거를 막지 않는다.
+    // (중심지가 없어져도 그 칸은 수도 반경이 이미 덮고 있어 영토로 남는다)
+    const capCx = cap2.x + 1, capCy = cap2.y + 1;
+    const [ww, wh2] = STRUCTURES.warehouse.footprint;
+    let shared = null;
+    for (const [x, y] of L.territoryTilesOf(n, hub)) {
+      // 창고 발판이 통째로 수도 반경 안에 들어가는 자리만 고른다
+      let allInCap = true;
+      for (let dy = 0; dy < wh2; dy++) for (let dx = 0; dx < ww; dx++) {
+        if (Math.hypot(x + dx - capCx, y + dy - capCy) > capR) allInCap = false;
+      }
+      if (!allInCap) continue;
+      const r = L.build(n, 'warehouse', x, y);
+      if (r.ok) { shared = r.structure; break; }
+    }
+    assert.ok(shared, '수도 영토와 겹치는 칸에 창고를 세울 수 있어야 한다');
+    assert.strictEqual(L.canDemolish(n, hub.id).ok, true,
+      '이미 수도 영토인 구역의 구조물은 부수지 않아도 중심지를 철거할 수 있어야 한다');
+
     assert.strictEqual(L.demolish(n, hub.id).ok, true);
     assert.strictEqual(n.territory.size, before, '철거하면 영토가 원래대로 줄어야 한다');
+    for (const [x, y] of L.footprintTiles(shared.x, shared.y, [ww, wh2])) {
+      assert.ok(n.territory.has(L.tileKey(x, y)), '남은 구조물은 여전히 영토 안이어야 한다');
+    }
   }
-  console.log('✓ 철거 규칙 (수도 불가 · 중심지 조건부 · 인벤토리 소멸 · 영토 복구)');
+  console.log('✓ 철거 규칙 (수도 불가 · 중심지 조건부 · 겹친 영토는 허용 · 인벤토리 소멸 · 영토 복구)');
+}
+
+// --- 배출구: 산출물마다 나가는 면이 다르다 · 창고도 벨트로 뺄 수 있다 ---
+{
+  const { outputPorts, structOutputs, DIR_NAMES } = await import('../js/data.js');
+  const { tickNation, exitBeltOn } = await import('../js/simulate.js');
+
+  // 산출물이 한 가지면 배출구를 따지지 않는다 (예전 배치를 깨지 않기 위해)
+  assert.strictEqual(outputPorts({ key: 'kitchen', recipe: 'bread' }), null, '단일 산출물은 배출구 배정 없음');
+  assert.deepStrictEqual(structOutputs({ key: 'refinery', recipe: 'refine' }), ['petroleum', 'naphtha']);
+  assert.deepStrictEqual(structOutputs({ key: 'barn', animal: 'cattle' }), ['cattle', 'milk'], '목장은 가축+부산물');
+  const refPorts = outputPorts({ key: 'refinery', recipe: 'refine' });
+  assert.strictEqual(Object.keys(refPorts).length, 2, '두 산출물에 배출구 두 개');
+  assert.notStrictEqual(refPorts.petroleum, refPorts.naphtha, '서로 다른 면이어야 한다');
+
+  const n8 = createNation('t8', '물류국', '#00f', site.x, site.y);
+  const cap8 = n8.structures.find(s2 => s2.key === 'capital');
+  cap8.level = 8;
+  for (const [x, y] of L.territoryTilesOf(n8, cap8)) n8.territory.add(L.tileKey(x, y));
+  for (const r of ['wood', 'stone', 'iron_ingot', 'brick', 'plank']) L.depositInto(cap8, r, 400);
+  L.recomputeStock(n8);
+  for (const k of ['warehouse', 'belt', 'refinery', 'power_plant']) n8.unlocked.add(k);
+
+  // 동·남쪽으로 벨트를 붙일 여유가 있는 자리를 고른다
+  const place = (key, avoid, clear = 3) => {
+    const [w, h] = STRUCTURES[key].footprint;
+    for (const t of Array.from(n8.territory)) {
+      const [x, y] = t.split(',').map(Number);
+      if (Math.hypot(x - cap8.x, y - cap8.y) < avoid) continue;
+      let room = true;
+      for (let i = 0; i < clear; i++) {
+        if (!n8.territory.has(L.tileKey(x + w + i, y))) room = false;
+        if (!n8.territory.has(L.tileKey(x, y + h + i))) room = false;
+      }
+      if (!room) continue;
+      const r = L.build(n8, key, x, y);
+      if (r.ok) return r.structure;
+    }
+    return null;
+  };
+
+  const ref = place('refinery', 6);
+  assert.ok(ref, '정제소 건설');
+  L.setRecipe(n8, ref.id, 'refine');
+  ref.outputBuffer = { petroleum: 30, naphtha: 30 };
+  const [rw] = STRUCTURES.refinery.footprint;
+  assert.strictEqual(L.build(n8, 'belt', ref.x + rw, ref.y, 0).ok, true, '동쪽 벨트');
+  const dump = L.build(n8, 'warehouse', ref.x + rw + 1, ref.y);
+  assert.strictEqual(dump.ok, true, '벨트 끝 창고');
+  assert.ok(exitBeltOn(n8, ref, 0), '동쪽 면에 배출 벨트 인식');
+  assert.ok(!exitBeltOn(n8, ref, 1), '남쪽 면에는 벨트 없음');
+
+  tickNation(n8);
+  assert.ok(ref.outputBuffer.petroleum < 30, '석유는 동쪽 배출구로 나가야 한다');
+  assert.strictEqual(ref.outputBuffer.naphtha, 30, '나프타는 제 배출구에 벨트가 없으면 나가지 않는다');
+  assert.ok(!dump.structure.store.naphtha, '다른 자원이 섞여 들어가면 안 된다');
+  assert.ok(dump.structure.store.petroleum > 0, '석유만 창고에 도착');
+
+  // 창고 → 벨트, 면마다 자원 지정
+  const store = place('warehouse', 9);
+  assert.ok(store, '창고 건설');
+  L.depositInto(store, 'stone', 200);
+  const [sw] = STRUCTURES.warehouse.footprint;
+  L.build(n8, 'belt', store.x + sw, store.y, 0);
+  assert.strictEqual(L.build(n8, 'power_plant', store.x + sw + 1, store.y).ok, true, '벨트 끝 발전소');
+  const s0 = store.store.stone;
+  tickNation(n8);
+  assert.ok(store.store.stone < s0, '창고 재고가 벨트로 빠져나가야 한다');
+
+  assert.strictEqual(L.setOutFilter(n8, store.id, 0, 'wood').ok, true);
+  const s1 = store.store.stone;
+  tickNation(n8);
+  assert.strictEqual(store.store.stone, s1, '동쪽 배출구를 나무로 지정하면 돌은 나가지 않는다');
+  assert.strictEqual(L.setOutFilter(n8, store.id, 0, null).ok, true);
+  const s2 = store.store.stone;
+  tickNation(n8);
+  assert.ok(store.store.stone < s2, '지정을 풀면 다시 나간다');
+  assert.strictEqual(L.setOutFilter(n8, store.id, 9, 'wood').ok, false, '없는 방향은 거부');
+  assert.strictEqual(L.setOutFilter(n8, ref.id, 0, 'wood').ok, false, '보관 구조물이 아니면 거부');
+  console.log(`✓ 배출구 (산출물별 전용 면 ${DIR_NAMES.join('·')} · 창고 → 벨트 · 면별 자원 지정)`);
+}
+
+// --- 발전소 연료 (나무 · 석탄 · 석유) ---
+{
+  const { POWER_FUELS, pickPowerFuel } = await import('../js/data.js');
+  const fuels = POWER_FUELS.map(f => f.res);
+  for (const r of fuels) assert.ok(RESOURCES[r], `연료 ${r} 정의됨`);
+  assert.ok(fuels.includes('coal'), '석탄으로도 발전소를 돌릴 수 있어야 한다');
+  assert.strictEqual(pickPowerFuel({}), null, '연료가 없으면 가동 불가');
+  assert.strictEqual(pickPowerFuel({ wood: 1 }), null, '나무 1개로는 부족 (2개 필요)');
+  assert.strictEqual(pickPowerFuel({ coal: 1 }).res, 'coal', '석탄 1개면 가동');
+  assert.strictEqual(pickPowerFuel({ petroleum: 1 }).res, 'petroleum', '석유 1개면 가동');
+  // 흔한 연료를 먼저 태운다 — 석유는 터렛·장비에도 쓰이므로 아껴야 한다
+  assert.strictEqual(pickPowerFuel({ wood: 2, coal: 5, petroleum: 5 }).res, 'wood', '나무부터 태운다');
+  assert.strictEqual(pickPowerFuel({ coal: 5, petroleum: 5 }).res, 'coal', '나무가 없으면 석탄');
+
+  // 실제 틱에서 석탄이 줄고 전력이 늘어야 한다
+  const { tickNation } = await import('../js/simulate.js');
+  const n2 = createNation('t9', '연료국', '#0f0', site.x, site.y);
+  const cap9 = n2.structures.find(s2 => s2.key === 'capital');
+  cap9.level = 5;
+  L.depositInto(cap9, 'stone', 200); L.depositInto(cap9, 'iron_ingot', 100); L.recomputeStock(n2);
+  n2.unlocked.add('power_plant');
+  let pp = null;
+  for (const key of Array.from(n2.territory)) {
+    const [x, y] = key.split(',').map(Number);
+    if (Math.hypot(x - cap9.x, y - cap9.y) < 4) continue;
+    const r = L.build(n2, 'power_plant', x, y);
+    if (r.ok) { pp = r.structure; break; }
+  }
+  assert.ok(pp, '발전소 건설');
+  pp.inputBuffer = { coal: 3 };
+  n2.resources.electricity = 0;
+  tickNation(n2);
+  assert.strictEqual(pp.inputBuffer.coal, 2, '석탄을 1개 태워야 한다');
+  assert.ok(n2.resources.electricity > 0, '석탄으로도 전력이 나와야 한다');
+  assert.strictEqual(pp._fueled, true, '가동 표시');
+  console.log(`✓ 발전소 연료 (${fuels.map(r => RESOURCES[r].name).join(' · ')})`);
 }
 
 // --- 그림 리소스가 빠진 게 없는지 ---

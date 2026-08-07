@@ -16,9 +16,11 @@ import { createBattleSession, createReplaySession, deployUnit, stepBattle, stepR
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
          storedTotal, totalStock, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage, buriedNodes, canDemolish,
+         hasGood, sellFromStorage, buriedNodes, canDemolish, setOutFilter,
          defenseSnapshot, buildRaidReport, applyRaidToAttacker, applyRaidToDefender, canAttack } from './logic.js';
-import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
+import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf, POWER_FUELS, pickPowerFuel,
+         DIR_NAMES, outputPorts } from './data.js';
+import { exitBeltOn } from './simulate.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS, isPeerOnline } from './mpNet.js';
 import { saveGame, loadGame, listSaves, clearSave, storageAvailable, timeAgo } from './storage.js';
@@ -1075,6 +1077,10 @@ function renderInventoryHtml(struct, def) {
     html += `<div class="inv-block"><div class="inv-title">보관 ${Math.floor(used)} / ${cap}${
       def.singleResource ? ` · <span class="dim">${kinds.length ? RESOURCES[kinds[0]]?.name + ' 전용' : '비어 있음 (첫 자원이 종류를 정함)'}</span>` : ''
     }</div>${bar(used, cap)}<div class="inv-items">${rows(struct.store)}</div></div>`;
+
+    // 벨트 배출구 — 창고에 붙은 "밖으로 나가는" 벨트로 재고가 빠져나간다.
+    // 어느 면으로 무엇을 내보낼지 여기서 정한다 (지정 안 하면 아무거나).
+    html += renderOutFilterHtml(struct, def);
   }
 
   const outCap = getOutputCapacity(struct.key, struct.level);
@@ -1082,6 +1088,19 @@ function renderInventoryHtml(struct, def) {
     const outUsed = Object.values(struct.outputBuffer || {}).reduce((a, b) => a + b, 0);
     html += `<div class="inv-block"><div class="inv-title">산출 인벤토리 ${Math.floor(outUsed)} / ${outCap}</div>
       ${bar(outUsed, outCap)}<div class="inv-items">${rows(struct.outputBuffer)}</div>`;
+
+    // 한 번에 두 가지가 나오는 구조물은 산출물마다 배출구(면)가 따로 있다.
+    // 그 면에 벨트를 붙여야 그 자원이 나가고, 다른 자원은 지나가지 않는다.
+    const ports = outputPorts(struct);
+    if (ports) {
+      html += `<div class="pd">배출구 — 산출물마다 나가는 면이 다릅니다:</div><div class="port-list">` +
+        Object.entries(ports).map(([res, dir]) => {
+          const on = !!exitBeltOn(game.myNation, struct, dir);
+          return `<div class="port-row"><span class="port-dir">${DIR_NAMES[dir]}쪽 ${DIR_ARROW[dir]}</span>
+            <span class="port-res">${resIcon(res)}${RESOURCES[res]?.name || res}</span>
+            <span class="${on ? 'port-on' : 'dim'}">${on ? '벨트 연결됨' : '벨트 없음'}</span></div>`;
+        }).join('') + `</div>`;
+    }
     const outKeys = Object.keys(struct.outputBuffer || {}).filter(k => struct.outputBuffer[k] > 0);
     if (outKeys.length) {
       html += `<div class="inv-actions">` + outKeys.map(r =>
@@ -1095,9 +1114,16 @@ function renderInventoryHtml(struct, def) {
   if (wantsInput) {
     html += `<div class="inv-block"><div class="inv-title">투입 버퍼</div>
       <div class="inv-items">${rows(struct.inputBuffer)}</div>`;
+    // 발전소는 여러 연료 중 하나를 골라 태운다 — 무엇을 넣어도 되는지 보여준다
+    if (struct.key === 'power_plant') {
+      const burning = pickPowerFuel(struct.inputBuffer);
+      html += `<div class="pd dim">연료 (하나만 있으면 가동, 틱당) — ` + POWER_FUELS.map(f =>
+        `<span class="${burning && burning.res === f.res ? 'fuel-on' : ''}">${resIcon(f.res)}${f.amount}</span>`
+      ).join(' · ') + `</div>`;
+    }
     // 지금 필요한 재료를 창고에서 바로 끌어오는 버튼
     let needKeys = [];
-    if (struct.key === 'power_plant') needKeys = ['wood', 'petroleum'];
+    if (struct.key === 'power_plant') needKeys = POWER_FUELS.map(f => f.res);
     else if (def.recipes && struct.recipe) needKeys = Object.keys(def.recipes[struct.recipe].in);
     else if (struct.key === 'outpost') {
       const need = new Set();
@@ -1120,6 +1146,37 @@ function renderInventoryHtml(struct, def) {
       <div id="manual-op-status" class="pd dim">전력이 없어도 손으로 돌릴 수 있습니다 (생산량 ${Math.round(LOGISTICS.manualOperateRate * 100)}%)</div>`;
   }
   return html;
+}
+
+/**
+ * 창고·수도의 벨트 배출구 UI (동·남·서·북 네 면).
+ * 창고에 "밖으로 나가는" 벨트를 붙이면 재고가 그 벨트로 빠져나간다. 수도처럼
+ * 여러 자원을 담는 창고는 면마다 자원을 지정해 원하는 것만 뽑아낼 수 있다.
+ */
+function renderOutFilterHtml(struct, def) {
+  const rate = LOGISTICS.warehouseBeltRate * struct.level;
+  const kinds = Object.keys(struct.store || {}).filter(k => struct.store[k] > 0);
+  const filters = struct.outFilter || {};
+  const pickable = !def.singleResource;   // 한 종류만 담는 창고는 고를 게 없다
+
+  let html = `<div class="inv-block"><div class="inv-title">벨트 배출구 (매 틱 최대 ${rate})</div>
+    <div class="pd dim">밖으로 나가는 방향의 벨트를 붙이면 재고가 그 벨트로 빠져나갑니다.</div>
+    <div class="port-list">`;
+  for (let dir = 0; dir < DIR_NAMES.length; dir++) {
+    const on = !!exitBeltOn(game.myNation, struct, dir);
+    const only = filters[dir];
+    let sel = '';
+    if (pickable) {
+      const choices = [...kinds];
+      if (only && !choices.includes(only)) choices.push(only);   // 지금 비어 있어도 지정은 유지
+      sel = `<select class="port-sel" data-out-dir="${dir}">
+        <option value="">전체</option>` + choices.map(r =>
+        `<option value="${r}"${only === r ? ' selected' : ''}>${RESOURCES[r]?.name || r}</option>`).join('') + `</select>`;
+    }
+    html += `<div class="port-row"><span class="port-dir">${DIR_NAMES[dir]}쪽 ${DIR_ARROW[dir]}</span>
+      ${sel}<span class="${on ? 'port-on' : 'dim'}">${on ? '벨트 연결됨' : '벨트 없음'}</span></div>`;
+  }
+  return html + `</div></div>`;
 }
 
 /** 수동 조작 버튼들의 이벤트 배선 (패널을 다시 그릴 때마다 호출) */
@@ -1145,6 +1202,17 @@ function wireInventoryActions(panel, struct, x, y) {
         () => callManualMove('in', struct.id, r, LOGISTICS.manualTransfer));
       if (res.error || res.ok === false) flashMessage(res.error, true);
       else flashMessage(`${RESOURCES[r]?.name} ${res.moved} 투입`, false);
+      refresh();
+    });
+  });
+
+  // 벨트 배출구: 이 면으로 내보낼 자원을 고른다 (빈 값이면 아무거나)
+  panel.querySelectorAll('[data-out-dir]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const dir = Number(sel.dataset.outDir);
+      const r = setOutFilter(game.myNation, struct.id, dir, sel.value || null);
+      if (!r.ok) { flashMessage(r.error, true); return; }
+      flashMessage(`${DIR_NAMES[dir]}쪽 배출구 → ${r.res ? (RESOURCES[r.res]?.name || r.res) : '전체'}`, false);
       refresh();
     });
   });
@@ -1228,7 +1296,15 @@ function renderRecipeHtml(struct, def) {
   let html = `<div class="pd">${isKitchen ? '요리법' : '제작 레시피'} 선택:</div><div class="craft-list">`;
   for (const [key, r] of Object.entries(def.recipes)) {
     const active = struct.recipe === key ? ' active' : '';
-    const label = RESOURCES[key]?.name || key;
+    // 산출이 여러 가지인 레시피(정제: 석유+나프타)는 키가 자원 이름이 아니다.
+    // 그런 레시피는 나오는 자원들을 이름으로 이어 붙여 보여준다 (예전에는
+    // 키 그대로 "refine ×[object Object]"라고 떴다).
+    const outs = typeof r.out === 'number' ? { [key]: r.out } : (r.out || {});
+    const outKeys = Object.keys(outs);
+    const label = RESOURCES[key]?.name || outKeys.map(o => RESOURCES[o]?.name || o).join(' + ') || key;
+    const outTxt = outKeys.map(o => `${resIcon(o)}${outs[o]}`).join(' ');
+    const artKey = RESOURCES[key] ? key : outKeys[0];
+    const price = outKeys.reduce((sum, o) => sum + getSellPrice(o) * outs[o], 0);
     // 조리소 요리법은 여행으로 배워와야 쓸 수 있다 (logic.setRecipe와 같은 규칙)
     const learned = !isKitchen || hasGood(game.myNation, `dish:${key}`);
     const ing = Object.entries(r.in || {}).map(([res, need]) => {
@@ -1237,12 +1313,12 @@ function renderRecipeHtml(struct, def) {
     }).join('');
     html += `<button class="craft-card${active}${learned ? '' : ' locked'}" data-recipe="${key}"
       ${learned ? '' : 'disabled title="여행으로 배워오세요"'}>
-      <img class="craft-art" src="${RESOURCES[key]?.icon || ''}" alt="">
+      <img class="craft-art" src="${RESOURCES[artKey]?.icon || ''}" alt="">
       <span class="craft-info">
-        <span class="craft-name">${learned ? '' : '🔒 '}${label}<span class="craft-out">×${r.out || 1}</span></span>
+        <span class="craft-name">${learned ? '' : '🔒 '}${label}<span class="craft-out">${outTxt}</span></span>
         <span class="craft-ings">${ing || '<span class="craft-ing ok">재료 없음</span>'}</span>
       </span>
-      <span class="craft-price">${resIcon('gold')}${getSellPrice(key)}</span>
+      <span class="craft-price">${resIcon('gold')}${price}</span>
     </button>`;
   }
   return html + `</div>`;
@@ -1267,6 +1343,7 @@ function renderSellHtml(struct) {
 /** 구조물 팝업 닫기 */
 function closeStructModal() {
   document.getElementById('struct-modal').classList.add('hidden');
+  renderer.portsFor = null;   // 바닥의 배출구 표시도 같이 끈다
 }
 document.getElementById('struct-modal-close').addEventListener('click', closeStructModal);
 document.querySelector('.struct-modal-backdrop').addEventListener('click', closeStructModal);
@@ -1366,6 +1443,8 @@ function showStructPanel(struct, x, y) {
     return;
   }
   const def = STRUCTURES[struct.key];
+  // 배출구가 있는 구조물은 어느 칸에 벨트를 붙여야 하는지 바닥에 표시해준다
+  renderer.portsFor = struct.id;
 
   document.getElementById('struct-modal-art').src = structureIcon(struct.key);
   document.getElementById('struct-modal-name').textContent = `${def.name} · Lv.${struct.level}`;

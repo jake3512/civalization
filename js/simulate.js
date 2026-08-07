@@ -9,7 +9,7 @@
 // 까지 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
 // ============================================================
 import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity, isBeltKey,
-         CROPS, ANIMALS } from './data.js';
+         CROPS, ANIMALS, pickPowerFuel, outputPorts } from './data.js';
 import { getTile } from './world.js';
 import { footprintTiles, tileKey, structureAt, getTerritoryRadius,
          depositInto, withdrawFrom, recomputeStock, finishExpedition } from './logic.js';
@@ -50,12 +50,20 @@ function isPowered(circles, s, def) {
 /** 벨트류인가 (일반 벨트 · 분할 · 교차) */
 const isBelt = (s) => !!s && isBeltKey(s.key);
 
-function findAdjacentBelt(nation, s, def, wantFacingAway) {
+/**
+ * 구조물에 붙어있는 벨트를 찾는다.
+ * @param wantFacingAway true면 나가는 벨트(산출), false면 들어오는 벨트(투입)
+ * @param side           0=동 1=남 2=서 3=북. 지정하면 그 면에 붙은 벨트만 본다
+ *                       (배출구 — data.js outputPorts 참고). null이면 아무 면이나.
+ */
+function findAdjacentBelt(nation, s, def, wantFacingAway, side = null) {
   // 구조물 외곽에 붙어있는 벨트 중, 조건(구조물에서 나가는 방향인지)에 맞는 것을 찾는다
   const tiles = footprintTiles(s.x, s.y, def.footprint);
   const inside = new Set(tiles.map(([x, y]) => tileKey(x, y)));
   for (const [x, y] of tiles) {
-    for (const [dx, dy] of DIR_VECT) {
+    for (let d = 0; d < DIR_VECT.length; d++) {
+      if (side != null && d !== side) continue;
+      const [dx, dy] = DIR_VECT[d];
       const nx = x + dx, ny = y + dy;
       if (inside.has(tileKey(nx, ny))) continue;
       const belt = nation.structures.find(b => isBelt(b) && b.x === nx && b.y === ny);
@@ -71,12 +79,17 @@ function findAdjacentBelt(nation, s, def, wantFacingAway) {
   return null;
 }
 
+/** UI용 — 이 면(0=동 1=남 2=서 3=북)에 "밖으로 나가는" 벨트가 붙어 있는가 */
+export function exitBeltOn(nation, s, side) {
+  const def = STRUCTURES[s?.key];
+  return def ? findAdjacentBelt(nation, s, def, true, side) : null;
+}
+
 /**
  * 벨트 체인을 따라 자원을 보낸다. 실제로 목적지에 들어간 양을 반환한다.
  * (들어가지 못한 양은 호출자가 원래 있던 곳에 그대로 남겨둔다 — 예전처럼
  *  국고로 순간이동시키지 않는다. 국고는 창고 재고의 합계일 뿐이기 때문)
- */
-/**
+ *
  * 이 벨트 칸에서 자원이 나갈 방향들을 정한다.
  *  · 일반 벨트: 설정된 방향 하나
  *  · 분할 컨베이어: 정면 · 좌 · 우 세 방향을 번갈아 (막힌 쪽은 건너뛴다)
@@ -182,10 +195,21 @@ function drainOutputToBelt(nation, s, def) {
   s.outputBuffer = s.outputBuffer || {};
   const entries = Object.entries(s.outputBuffer).filter(([, v]) => v > 0);
   if (!entries.length) return;
-  const exitBelt = findAdjacentBelt(nation, s, def, true);
-  if (!exitBelt) return;
+
+  // 두 가지가 한꺼번에 나오는 구조물은 산출물마다 배출구(면)가 정해져 있다.
+  // 그 면에 벨트가 없으면 그 자원은 나가지 못한다 — 라인이 섞이지 않게.
+  const ports = outputPorts(s);
+  let anyBelt;   // 배출구가 없는 자원(레시피를 바꾸기 전에 남은 것)용
   for (const [res, have] of entries) {
-    const moved = pushIntoBeltChain(nation, exitBelt, res, have);
+    let belt;
+    if (ports && ports[res] != null) {
+      belt = findAdjacentBelt(nation, s, def, true, ports[res]);
+    } else {
+      if (anyBelt === undefined) anyBelt = findAdjacentBelt(nation, s, def, true);
+      belt = anyBelt;
+    }
+    if (!belt) continue;
+    const moved = pushIntoBeltChain(nation, belt, res, have);
     if (moved > 0) {
       s.outputBuffer[res] -= moved;
       if (s.outputBuffer[res] <= 0) delete s.outputBuffer[res];
@@ -193,16 +217,28 @@ function drainOutputToBelt(nation, s, def) {
   }
 }
 
-/** 창고도 인접한 나가는 벨트로 재고를 내보낼 수 있다 (창고 → 공장 공급) */
+/**
+ * 창고·수도도 인접한 나가는 벨트로 재고를 내보낸다 (창고 → 공장 공급).
+ * 면마다 자원을 지정해 두면(struct.outFilter) 그 면으로는 그 자원만 나간다.
+ * 지정하지 않은 면은 아무거나 내보낸다. 매 틱 내보낼 수 있는 총량은 면 개수와
+ * 상관없이 창고 하나당 warehouseBeltRate × 레벨로 고정한다.
+ */
 function drainStorageToBelt(nation, s, def) {
-  const entries = Object.entries(s.store || {}).filter(([, v]) => v > 0);
-  if (!entries.length) return;
-  const exitBelt = findAdjacentBelt(nation, s, def, true);
-  if (!exitBelt) return;
-  const rate = LOGISTICS.warehouseBeltRate * s.level;
-  for (const [res, have] of entries) {
-    const moved = pushIntoBeltChain(nation, exitBelt, res, Math.min(rate, have));
-    if (moved > 0) withdrawFrom(s, res, moved);
+  if (!Object.values(s.store || {}).some(v => v > 0)) return;
+  let budget = LOGISTICS.warehouseBeltRate * s.level;
+  const filters = s.outFilter || {};
+
+  for (let dir = 0; dir < DIR_VECT.length && budget > 0; dir++) {
+    const belt = findAdjacentBelt(nation, s, def, true, dir);
+    if (!belt) continue;
+    const only = filters[dir];
+    const entries = Object.entries(s.store || {})
+      .filter(([res, v]) => v > 0 && (!only || res === only));
+    for (const [res, have] of entries) {
+      if (budget <= 0) break;
+      const moved = pushIntoBeltChain(nation, belt, res, Math.min(budget, have));
+      if (moved > 0) { withdrawFrom(s, res, moved); budget -= moved; }
+    }
   }
 }
 
@@ -240,10 +276,9 @@ export function tickNation(nation) {
     if (s.key !== 'power_plant') continue;
     const def = STRUCTURES.power_plant;
     s.inputBuffer = s.inputBuffer || {};
-    const fuel = (s.inputBuffer.wood || 0) >= 2 ? 'wood'
-      : ((s.inputBuffer.petroleum || 0) >= 1 ? 'petroleum' : null);
+    const fuel = pickPowerFuel(s.inputBuffer);   // 나무 · 석탄 · 석유 (data.js POWER_FUELS)
     if (fuel) {
-      s.inputBuffer[fuel] -= fuel === 'wood' ? 2 : 1;
+      s.inputBuffer[fuel.res] -= fuel.amount;
       nation.resources.electricity = (nation.resources.electricity || 0) + def.baseProduction * s.level;
       s._fueled = true;
     } else {

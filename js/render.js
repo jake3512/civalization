@@ -9,7 +9,8 @@
 // 뒤쪽(y가 작은) 것부터 그리면 앞 건물이 뒤 건물을 자연스럽게 가린다.
 // ============================================================
 import { getTileRange } from './world.js';
-import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon, isBeltKey } from './data.js';
+import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon, isBeltKey,
+         DIR_VECT, outputPorts } from './data.js';
 
 // 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
@@ -113,6 +114,7 @@ export class Renderer {
     this.originY = 0;
     this.hover = null;
     this.showPower = false;      // 전력 공급 범위 오버레이 토글
+    this.portsFor = null;        // 배출구를 바닥에 표시할 구조물 id (팝업을 연 구조물)
     this.placementMarker = null; // 수도 위치 선택 중 표시할 마커 { x, y, ok, radius }
     this.buildPreview = null;    // 건설 미리보기(고스트) { key, x, y, dir, ok, error }
     this.capitalSites = null;    // 건국 단계에서 표시할 수도 후보 칸 [[x,y], ...]
@@ -276,6 +278,7 @@ export class Renderer {
     // 전력 공급 범위 오버레이 (바닥에 눕혀 그린다)
     if (this.showPower && nation) this._drawPowerOverlay(nation);
 
+
     // ---- 2) 세워서 그리는 것들: 자원 노드 + 구조물 ----
     // 뒤(y가 작은 쪽)부터 그려야 앞의 것이 뒤의 것을 가린다.
     const standing = [];
@@ -293,6 +296,13 @@ export class Renderer {
     // ---- 3) 머리 위 표시 (보관 중인 아이템 · 경고) ----
     // 건물보다 항상 위에 떠야 하므로 구조물을 다 그린 뒤 한 번에 얹는다.
     if (nation) for (const s of nation.structures) this._drawOverlay(s);
+
+    // 선택한 구조물의 배출구 — 벨트를 어디에 붙여야 하는지 표시한다.
+    // 이미 벨트가 놓인 칸에도 보여야 하므로 구조물보다 위에 그린다.
+    if (this.portsFor && nation) {
+      const sel = nation.structures.find(s => s.id === this.portsFor);
+      if (sel) this._drawOutPorts(sel);
+    }
 
     // 건설 미리보기(고스트) — 건설 모드일 때는 단순 호버 테두리 대신 이걸 그린다
     if (this.buildPreview) this._drawBuildPreview();
@@ -572,6 +582,49 @@ export class Renderer {
     ctx.globalAlpha = alpha;
     ctx.drawImage(img, centerX - size / 2, footY - size, size, size);
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * 선택한 구조물의 배출구를 바닥에 표시한다.
+   * 산출물이 두 가지인 구조물은 자원마다 나가는 면이 정해져 있어서, 어느 칸에
+   * 벨트를 붙여야 하는지 눈으로 봐야 알 수 있다. 창고는 면마다 지정한 자원
+   * (outFilter)을 같은 방식으로 보여준다.
+   */
+  _drawOutPorts(s) {
+    const def = STRUCTURES[s.key];
+    if (!def) return;
+    const ports = outputPorts(s);
+    const byDir = {};
+    if (ports) for (const [res, dir] of Object.entries(ports)) byDir[dir] = res;
+    else if (def.storageCapacity) for (const [dir, res] of Object.entries(s.outFilter || {})) byDir[dir] = res;
+    if (!Object.keys(byDir).length) return;
+
+    const { ctx, tile, tileY } = this;
+    const [w, h] = def.footprint;
+    for (const [dirStr, res] of Object.entries(byDir)) {
+      const dir = Number(dirStr);
+      // 그 면 바깥에 붙는 칸 하나 (벨트를 놓을 자리)
+      const [dx, dy] = DIR_VECT[dir];
+      const bx = s.x + (dx > 0 ? w : dx < 0 ? -1 : (w - 1) / 2);
+      const by = s.y + (dy > 0 ? h : dy < 0 ? -1 : (h - 1) / 2);
+      const { sx, sy } = this.proj(bx, by);
+      const cx = sx + tile / 2, cy = sy + tileY / 2;
+      const r = Math.max(9, tile * 0.4);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(10,20,24,0.82)';
+      ctx.strokeStyle = 'rgba(78,205,196,0.95)';
+      ctx.lineWidth = 2;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      const icon = getIconImage(RESOURCES[res]?.icon);
+      if (icon.complete && icon.naturalWidth > 0) {
+        const size = r * 1.3;
+        ctx.drawImage(icon, cx - size / 2, cy - size / 2, size, size);
+      }
+      ctx.restore();
+    }
   }
 
   _drawPowerOverlay(nation) {
