@@ -406,4 +406,102 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   console.log('✓ 저장/불러오기 (전체 상태 왕복 · 국가별 슬롯 · 깨진 저장 무시)');
 }
 
+// --- 계정 저장(클라우드) 왕복 · 오프라인 상대 공격 ---
+{
+  const { unpackSave } = await import('../js/cloudSave.js');
+  const { isPeerOnline, ONLINE_WINDOW_MS } = await import('../js/mpNet.js');
+
+  const site = findNearestCapitalSite(0, 0, 200);
+  const n2 = createNation('cloud-a', '클라우드국', '#0af', site.x, site.y);
+  n2.unlocked.add('smelter');
+  n2.trophies = 31;
+
+  // 클라우드로 보낼 때는 영토를 빼고(구조물에서 다시 만든다), 받을 때 복원한다
+  const packed = JSON.parse(JSON.stringify({ v: 1, savedAt: Date.now(), nation: n2.toJSON() }));
+  delete packed.nation.territory;
+  const restored = Nation.fromJSON(unpackSave(packed).nation);
+  assert.strictEqual(restored.territory.size, n2.territory.size,
+    '클라우드 저장에서 되살린 영토가 원본과 같아야 한다');
+  assert.ok(restored.unlocked.has('smelter') && restored.trophies === 31, '나머지 상태도 그대로여야 한다');
+
+  // 오프라인 상대도 매칭돼야 한다 (비동기 습격)
+  const me = createNation('me', '나', '#f00', site.x, site.y);
+  const offlineSnap = { ...L.defenseSnapshot(n2), updatedAt: Date.now() - 3 * 24 * 60 * 60 * 1000 };
+  offlineSnap.shieldUntil = 0;
+  assert.strictEqual(isPeerOnline(offlineSnap), false, '3일 전 접속이면 오프라인으로 표시된다');
+  assert.ok(L.findMatch(me, [offlineSnap]), '오프라인 상대도 매칭돼야 한다 (접속 여부와 무관)');
+
+  const onlineSnap = { ...offlineSnap, updatedAt: Date.now() };
+  assert.strictEqual(isPeerOnline(onlineSnap), true, '방금 갱신됐으면 접속 중');
+  assert.ok(ONLINE_WINDOW_MS > 0);
+
+  console.log('✓ 계정 저장 왕복 (영토 재구성) · 오프라인 상대 공격 가능');
+}
+
+// --- 업적: 정의가 온전한가 · 실제로 달성되는가 · 저장에 남는가 ---
+{
+  const A = await import('../js/achievements.js');
+  const { tickNation } = await import('../js/simulate.js');
+
+  // 정의 점검 — key 중복, 잘못된 그룹, 0 이하 목표는 조용히 망가진다
+  const keys = A.ACHIEVEMENTS.map(a => a.key);
+  assert.strictEqual(new Set(keys).size, keys.length, '업적 key가 중복되면 안 된다');
+  const groups = new Set(A.ACH_GROUPS.map(g => g.key));
+  for (const a of A.ACHIEVEMENTS) {
+    assert.ok(groups.has(a.group), `${a.key}: 알 수 없는 분류 ${a.group}`);
+    assert.ok(a.name && a.desc, `${a.key}: 이름/설명이 있어야 한다`);
+    assert.ok(Number.isFinite(a.goal) && a.goal > 0, `${a.key}: 목표치가 양수여야 한다`);
+    assert.strictEqual(typeof a.value, 'function', `${a.key}: value()가 있어야 한다`);
+  }
+
+  // 갓 세운 나라: "건국"만 달성돼 있어야 한다
+  const site = findNearestCapitalSite(0, 0, 200);
+  const n3 = createNation('ach', '업적국', '#fa0', site.x, site.y);
+  let got = A.checkAchievements(n3);
+  assert.ok(got.some(a => a.key === 'found'), '수도를 세우면 건국 업적');
+  assert.strictEqual(A.checkAchievements(n3).length, 0, '같은 업적이 두 번 달성되면 안 된다');
+
+  // 실제 플레이로 달성되는지 — 창고를 다섯 채 짓는다
+  let made = 0;
+  for (const k of n3.territory) {
+    if (made >= 5) break;
+    const [x, y] = k.split(',').map(Number);
+    L.depositAnywhere(n3, 'wood', 60); L.depositAnywhere(n3, 'stone', 40); L.recomputeStock(n3);
+    if (L.build(n3, 'warehouse', x, y).ok) made++;
+  }
+  assert.strictEqual(made, 5, '창고 5채를 지을 수 있어야 한다 (시험 준비)');
+  got = A.checkAchievements(n3);
+  assert.ok(got.some(a => a.key === 'warehouse_5'), '창고 5채 → 보관의 기술');
+  assert.strictEqual(n3.stats.built, 6, '건설 횟수가 누적돼야 한다 (수도 + 창고 5)');
+
+  // 생산 기록이 업적으로 이어지는지 (simulate가 stats.produced를 채운다)
+  const before = (n3.stats.produced || []).length;
+  for (let i = 0; i < 3; i++) tickNation(n3);
+  assert.ok((n3.stats.produced || []).length >= before, '생산한 자원 종류가 기록된다');
+
+  // 철거 업적
+  const wh = n3.structures.find(s => s.key === 'warehouse');
+  L.demolish(n3, wh.id);
+  assert.ok(A.checkAchievements(n3).some(a => a.key === 'demolish'), '철거하면 재정비 업적');
+
+  // 전투 업적 — 습격 리포트를 반영하면 달성된다
+  n3.stats.raidsWon = 0;
+  L.applyRaidToAttacker(n3, {
+    id: 'ach-raid', loot: { wood: 5 }, deployedUnits: {},
+    win: true, perfectVictory: true, attackerTrophyDelta: 10,
+  });
+  const war = A.checkAchievements(n3);
+  assert.ok(war.some(a => a.key === 'raid_1'), '이기면 첫 습격 업적');
+  assert.ok(war.some(a => a.key === 'perfect'), '수도까지 부수면 완벽한 승리 업적');
+
+  // 저장/불러오기를 거쳐도 유지되는지
+  const back = Nation.fromJSON(JSON.parse(JSON.stringify(n3.toJSON())));
+  assert.deepStrictEqual(back.achievements, n3.achievements, '달성 목록이 저장돼야 한다');
+  assert.strictEqual(back.stats.built, n3.stats.built, '누적 기록도 저장돼야 한다');
+  assert.strictEqual(A.checkAchievements(back).length, 0, '불러온 뒤 같은 업적이 또 달성되면 안 된다');
+
+  const score = A.achievementScore(n3);
+  console.log(`✓ 업적 (${A.ACHIEVEMENTS.length}종 · 정의 검증 · 실제 달성 ${score.done}개 · 저장 유지)`);
+}
+
 console.log('\n✅ 회귀 테스트 전부 통과');

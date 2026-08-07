@@ -59,8 +59,15 @@ export const MODE_LABEL = {
   [NET_MODE.FUNCTIONS]: '온라인 대전 (서버 권위)',
 };
 
-// 이 시간 넘게 소식이 없는 국가는 목록에서 지운다 (탭을 닫은 상대)
-const PEER_TTL_MS = 24 * 60 * 60 * 1000;
+// 상대는 **접속해 있지 않아도 공격할 수 있다** (클래시 오브 클랜과 같은 비동기 습격).
+// 그래서 목록에서 지우는 기준은 "지금 접속 중인가"가 아니라 "이 기지가 아직
+// 살아 있는가"다. 아주 오래 방치된 국가만 정리한다.
+const PEER_TTL_MS = 30 * 24 * 60 * 60 * 1000;   // 30일
+// 이 시간 안에 소식이 있었으면 "접속 중"으로 표시한다 (공개 주기 15초의 4배)
+export const ONLINE_WINDOW_MS = 60 * 1000;
+export function isPeerOnline(peer, now = Date.now()) {
+  return now - (peer?.updatedAt || 0) < ONLINE_WINDOW_MS;
+}
 // 내 스냅샷을 다시 올리는 주기
 export const PUBLISH_INTERVAL_MS = 15 * 1000;
 

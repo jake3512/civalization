@@ -1,9 +1,10 @@
 // ============================================================
 // scripts/check-online.mjs — 온라인 대전이 될 상태인지 점검한다.
 //
-// 온라인 전투는 Firebase 쪽 설정 두 가지가 갖춰져야 돌아간다:
-//   1) Authentication → 익명 로그인(Anonymous) 켜기
-//   2) firestore.rules 배포 (클라이언트가 자기 국가 문서를 쓸 수 있어야 한다)
+// Firebase 쪽 설정이 갖춰져야 돌아간다:
+//   1) Authentication → 익명 로그인(Anonymous)   — 게스트로 바로 플레이
+//   2) Authentication → Google + 승인된 도메인    — 계정으로 다른 기기에서 이어하기
+//   3) firestore.rules 배포                        — 기지 공개 · 습격 리포트 · 계정 저장
 //
 // 브라우저에서는 "상대가 아무도 없다"로만 보여서 둘 중 무엇이 빠졌는지
 // 알기 어렵다. 이 스크립트는 프로젝트에 직접 물어봐서 무엇이 빠졌는지 알려준다.
@@ -41,7 +42,7 @@ async function req(url, init = {}, timeoutMs = 15000) {
 }
 
 // 1) 익명 로그인이 켜져 있는가
-console.log('\n[1/3] 익명 로그인');
+console.log('\n[1/4] 익명 로그인 (게스트 플레이용)');
 const auth = await req(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -67,8 +68,59 @@ if (auth.status === 200 && auth.body?.idToken) {
   problems.push(`익명 로그인 응답을 확인하세요 (HTTP ${auth.status})`);
 }
 
+// 2) 구글 로그인이 켜져 있는가 — 계정으로 "이어서 하기"에 필요하다.
+//    가짜 토큰으로 한 번 찔러본다: provider가 꺼져 있으면 OPERATION_NOT_ALLOWED,
+//    켜져 있으면 "토큰이 잘못됐다"는 다른 오류가 온다.
+console.log('\n[2/4] 구글 로그인 (계정 이어하기용)');
+const idp = await req(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${apiKey}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    postBody: 'id_token=invalid&providerId=google.com',
+    requestUri: 'http://localhost', returnSecureToken: true,
+  }),
+});
+const idpMsg = JSON.stringify(idp.body || {});
+if (/OPERATION_NOT_ALLOWED/.test(idpMsg)) {
+  console.log('  ❌ 꺼져 있음 — 계정 없이 게스트로만 플레이됩니다');
+  problems.push('Firebase 콘솔 → Authentication → Sign-in method → Google 사용 설정');
+} else if (/INVALID_IDP_RESPONSE|INVALID_CREDENTIAL|Unable to parse/.test(idpMsg)) {
+  console.log('  ✓ 켜져 있음');
+} else {
+  console.log(`  ⚠️ 확인 불가 (${idp.status}) ${idpMsg.slice(0, 140)}`);
+}
+
+// 2-2) 구글 로그인은 "승인된 도메인"에서만 열린다.
+//      배포 주소가 목록에 없으면 버튼을 눌러도 창이 뜨지 않는다.
+console.log('  — 승인된 도메인 (구글 로그인 창이 열릴 주소)');
+const cfg = await req(`https://identitytoolkit.googleapis.com/v1/projects?key=${apiKey}`);
+const domains = cfg.body?.authorizedDomains || [];
+if (cfg.status === 200) {
+  console.log('  등록된 도메인:', domains.join(', ') || '(없음)');
+  // 배포 주소를 알아낸다: 인자로 받거나, git remote에서 GitHub Pages 주소를 추정
+  let site = process.argv.find(a => a.startsWith('--site='))?.slice(7) || '';
+  if (!site) {
+    try {
+      const { execSync } = await import('node:child_process');
+      const remote = execSync('git remote get-url origin', { encoding: 'utf8' }).trim();
+      const m = remote.match(/github\.com[:/]([^/]+)\//);
+      if (m) site = `${m[1].toLowerCase()}.github.io`;
+    } catch { /* git이 없으면 건너뛴다 */ }
+  }
+  if (site) {
+    if (domains.includes(site)) {
+      console.log(`  ✓ 배포 주소(${site})가 등록돼 있음`);
+    } else {
+      console.log(`  ❌ 배포 주소(${site})가 등록돼 있지 않음 — 구글 로그인이 그 주소에서 열리지 않습니다`);
+      problems.push(`Firebase 콘솔 → Authentication → Settings → 승인된 도메인에 ${site} 추가`);
+    }
+  }
+} else {
+  console.log(`  ⚠️ 확인 불가 (${cfg.status})`);
+}
+
 // 2) 국가 목록을 읽을 수 있는가 (상대를 찾으려면 읽기가 열려 있어야 한다)
-console.log('\n[2/3] 국가 목록 읽기 (nations)');
+console.log('\n[3/4] 국가 목록 읽기 (nations)');
 const read = await req(`${REST}/nations`);
 if (read.status === 200) {
   const n = (read.body?.documents || []).length;
@@ -80,20 +132,57 @@ if (read.status === 200) {
 
 // 3) 습격 리포트 컬렉션에 규칙이 배포됐는가
 //    배포 전에는 raids 규칙 자체가 없어 기본 거부(PERMISSION_DENIED)가 난다.
-console.log('\n[3/3] 습격 리포트 규칙 (raids)');
-const raids = await req(`${REST}/raids`, idToken ? { headers: { Authorization: `Bearer ${idToken}` } } : {});
-if (raids.status === 200) {
-  console.log('  ✓ 규칙 배포됨');
-} else if (raids.status === 403) {
-  // 로그인 없이 조회하면 규칙이 배포돼 있어도 거부된다 — 토큰이 있었는지로 구분한다
-  if (idToken) {
+console.log('\n[4/4] 습격 리포트 · 계정 저장 규칙 (raids · saves)');
+// 게임이 실제로 보내는 질의로 확인해야 한다. 컬렉션 전체를 훑는 조회는
+// **규칙이 제대로 배포돼 있어도** 거부되는 게 정상이다 — 규칙이 문서마다
+// "내가 당사자인가"를 따지므로, 그 조건에 맞는 필터가 질의에 있어야 한다.
+const myUid = idToken
+  ? JSON.parse(Buffer.from(idToken.split('.')[1], 'base64').toString()).user_id
+  : null;
+if (idToken) {
+  const raids = await req(`${REST}:runQuery`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'raids' }],
+        where: { fieldFilter: { field: { fieldPath: 'defenderId' }, op: 'EQUAL', value: { stringValue: myUid } } },
+        limit: 1,
+      },
+    }),
+  });
+  if (raids.status === 200) {
+    console.log('  ✓ 습격 리포트 규칙 배포됨');
+  } else if (raids.status === 403) {
     console.log('  ❌ 거부됨 — raids 규칙이 아직 배포되지 않았습니다');
     problems.push('firestore.rules 배포: firebase deploy --only firestore:rules');
   } else {
-    console.log('  ⚠️ 판정 불가 — 익명 로그인부터 켠 뒤 다시 확인하세요');
+    console.log(`  ⚠️ 예상 밖 응답 ${raids.status}: ${JSON.stringify(raids.body).slice(0, 200)}`);
   }
 } else {
-  console.log(`  ⚠️ 예상 밖 응답 ${raids.status}: ${JSON.stringify(raids.body).slice(0, 200)}`);
+  console.log('  ⚠️ 판정 불가 — 익명 로그인부터 켠 뒤 다시 확인하세요');
+}
+
+// 4) 계정 저장(saves) 규칙 — 다른 기기에서 이어서 하려면 필요하다
+console.log('  — 계정 저장(saves)');
+if (idToken) {
+  const me = myUid;
+  const write = await req(`${REST}/saves/${me}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { v: { integerValue: 1 } } }),
+  });
+  if (write.status === 200) {
+    console.log('  ✓ 내 저장을 쓸 수 있음');
+    await req(`${REST}/saves/${me}`, { method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` } });
+  } else if (write.status === 403) {
+    console.log('  ❌ 거부됨 — saves 규칙이 아직 배포되지 않았습니다');
+    problems.push('firestore.rules 배포: firebase deploy --only firestore:rules');
+  } else {
+    console.log(`  ⚠️ 예상 밖 응답 ${write.status}: ${JSON.stringify(write.body).slice(0, 160)}`);
+  }
+} else {
+  console.log('  ⚠️ 판정 불가 — 익명 로그인부터 켠 뒤 다시 확인하세요');
 }
 
 console.log('\n────────────────');

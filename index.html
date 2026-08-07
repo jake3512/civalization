@@ -23,6 +23,9 @@
       <h1>국가를 설계하라</h1>
       <p>격자 필드 위에 수도를 세우고, 자원을 채굴하며, 다른 국가와 맞서 싸우세요.</p>
 
+      <!-- 계정 — 로그인하면 어느 기기에서든 이어서 할 수 있다 (js/main.js) -->
+      <div id="auth-box" class="auth-box"></div>
+
       <!-- 저장된 국가가 있으면 여기에 "이어하기" 카드가 뜬다 (js/main.js) -->
       <div id="resume-box" class="resume-box hidden"></div>
 
@@ -102,6 +105,11 @@
         <div class="panel-box">
           <div class="ph">전투 기록</div>
           <div id="battle-log" class="battle-log"></div>
+        </div>
+
+        <div class="panel-box">
+          <div class="ph">업적 <span id="ach-score" class="ph-sub"></span></div>
+          <div id="ach-panel" class="ach-panel"><div class="pd">건국 후 표시됩니다.</div></div>
         </div>
 
         <div class="panel-box">

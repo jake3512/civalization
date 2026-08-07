@@ -15,6 +15,16 @@ import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
 
+/**
+ * 업적용 누적 기록. 국가 상태에 얹어두고 저장에 함께 실린다.
+ * (지금 가진 것만으로는 "몇 번 했는가"를 알 수 없어서 따로 센다)
+ */
+export function bumpStat(nation, key, by = 1) {
+  if (!nation) return;
+  nation.stats = nation.stats || {};
+  nation.stats[key] = (nation.stats[key] || 0) + by;
+}
+
 export function footprintTiles(x, y, footprint) {
   const [w, h] = footprint;
   const tiles = [];
@@ -347,6 +357,7 @@ export function build(nation, structKey, x, y, dir = 0) {
   if (!check.ok) return check;
   const def = STRUCTURES[structKey];
 
+  bumpStat(nation, 'built');
   pay(nation, def.baseCost);
   const structure = {
     id: nation.nextStructId++, key: structKey, x, y, level: 1,
@@ -472,6 +483,7 @@ export function demolish(nation, structId) {
   const check = canDemolish(nation, structId);
   if (!check.ok) return check;
   const s = check.structure;
+  bumpStat(nation, 'demolished');
 
   // 사라지는 자원을 알려주기 위해 미리 모아둔다 (UI 경고 문구용)
   const lost = {};
@@ -626,6 +638,7 @@ export function manualOperate(nation, structId) {
       produced[res] = add;
     }
   }
+  if (Object.keys(produced).length) bumpStat(nation, 'manualOps');
   return { ok: true, produced };
 }
 
@@ -643,6 +656,7 @@ export function recruitUnit(nation, structId, unitKey, isDefense) {
   nation.resources.gold -= unit.gold;
   s.recruitQueue = s.recruitQueue || [];
   s.recruitQueue.push({ unitKey, isDefense: !!isDefense, need: { ...unit.equip } });
+  bumpStat(nation, 'recruited');
   return { ok: true };
 }
 
@@ -713,6 +727,7 @@ export function finishExpedition(nation) {
     if (stored > 0) gained[res] = stored; // 창고가 가득 차면 못 받는 몫은 버려진다
   }
   recomputeStock(nation);
+  bumpStat(nation, 'expeditions');
   return { key: cur.key, name: exp.name, gained, unlocks: exp.unlocks || [] };
 }
 
@@ -727,6 +742,7 @@ export function sellFromStorage(nation, res, amount) {
   const earned = price * qty;
   nation.resources.gold = (nation.resources.gold || 0) + earned;
   recomputeStock(nation);
+  bumpStat(nation, 'goldEarned', earned);
   return { ok: true, sold: qty, earned };
 }
 
@@ -900,6 +916,9 @@ export function applyRaidToAttacker(attacker, report, now = Date.now()) {
   attacker.trophies = Math.max(0, (attacker.trophies || 0) + (report.attackerTrophyDelta || 0));
   attacker.shieldUntil = 0;                                 // 공격하면 내 실드는 사라진다
   attacker.raidsSent = (attacker.raidsSent || 0) + 1;
+  bumpStat(attacker, report.win ? 'raidsWon' : 'raidsLost');
+  if (report.perfectVictory) bumpStat(attacker, 'perfectWins');
+  bumpStat(attacker, 'looted', Object.values(gained).reduce((a, b) => a + b, 0));
   return { gained };
 }
 
@@ -946,6 +965,8 @@ export function applyRaidToDefender(defender, report, now = Date.now()) {
 
   defender.seenRaids.push(report.id);
   if (defender.seenRaids.length > 100) defender.seenRaids = defender.seenRaids.slice(-100);
+  bumpStat(defender, win ? 'defensesLost' : 'defensesWon');
+  bumpStat(defender, 'lostToRaids', Object.values(lost).reduce((a, b) => a + b, 0));
   return { applied: true, win, destructionPercent, lost, trophyDelta: delta };
 }
 
