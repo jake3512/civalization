@@ -10,7 +10,8 @@
 // ============================================================
 import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, MIN_CAPITAL_DISTANCE, isBeltKey, isRotatable,
          VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity,
-         CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice } from './data.js';
+         CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice,
+         RESOURCES, DIR_VECT } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -399,8 +400,9 @@ export function upgrade(nation, structId) {
 // 구조물은 원래 한 번 지으면 되돌릴 수 없었다. 그러다 보니 광산 자리를 창고로
 // 덮는 실수 하나가 영구히 남았다. 이제 철거로 되돌릴 수 있되,
 //   · 수도는 국가의 시작점이라 철거할 수 없고
-//   · 중심지는 그 영토에 다른 구조물이 서 있으면 철거할 수 없으며
-//     (영토가 사라지면 그 위의 구조물이 영토 밖에 붕 뜨게 되므로)
+//   · 중심지는 철거하면 영토 밖에 붕 뜨는 구조물이 생길 때만 막히고
+//     (다른 수도·중심지의 반경이 이미 덮고 있는 구역이면 그대로 남으므로
+//      그 위의 구조물은 그냥 둔 채 중심지만 철거할 수 있다)
 //   · 철거하는 구조물 안에 들어 있던 자원은 전부 사라진다 (되돌리기 비용)
 // 는 규칙을 둔다. 건설비도 돌려주지 않는다.
 // ============================================================
@@ -422,17 +424,6 @@ export function territoryTilesOf(nation, s) {
   return out;
 }
 
-/**
- * 이 구조물만이 제공하는 영토 타일 (다른 수도·중심지가 겹쳐 덮고 있지 않은 칸).
- * 중심지가 서로 겹쳐 있을 때 "겹친 부분"까지 잃는 것으로 잘못 세지 않으려고 쓴다.
- */
-function exclusiveTerritoryOf(nation, s) {
-  const others = nation.structures.filter(o => o.id !== s.id && STRUCTURES[o.key]?.territoryRadius);
-  const covered = new Set();
-  for (const o of others) for (const [x, y] of territoryTilesOf(nation, o)) covered.add(tileKey(x, y));
-  return territoryTilesOf(nation, s).filter(([x, y]) => !covered.has(tileKey(x, y)));
-}
-
 /** 철거할 수 있는지 판정만 한다 (버튼 잠금·안내 문구용) */
 export function canDemolish(nation, structId) {
   const s = nation.structures.find(st => st.id === structId);
@@ -440,18 +431,22 @@ export function canDemolish(nation, structId) {
   if (s.key === 'capital') return { ok: false, error: '수도는 철거할 수 없습니다' };
 
   if (STRUCTURES[s.key]?.territoryRadius) {
-    // 이 구조물이 없어지면 영토 밖으로 밀려날 구조물이 있는지 본다
-    const losing = new Set(exclusiveTerritoryOf(nation, s).map(([x, y]) => tileKey(x, y)));
+    // 이 중심지를 빼고 영토를 다시 그려본다. 다른 수도·중심지의 반경이 이미
+    // 같은 칸을 덮고 있으면 그 칸은 그대로 영토로 남으므로, 그 위의 구조물은
+    // 철거를 막지 않는다 (예전에는 "이 중심지의 영토에 서 있다"는 이유만으로
+    // 겹친 구역의 구조물까지 전부 먼저 부수라고 했다).
+    const after = territoryFromStructures(nation.structures.filter(o => o.id !== s.id));
     const stranded = nation.structures.filter(o => {
       if (o.id === s.id) return false;
       const [w, h] = STRUCTURES[o.key].footprint;
-      return footprintTiles(o.x, o.y, [w, h]).some(([x, y]) => losing.has(tileKey(x, y)));
+      // 건설과 같은 기준 — 발판이 한 칸이라도 영토를 벗어나면 붕 뜬 것으로 본다
+      return footprintTiles(o.x, o.y, [w, h]).some(([x, y]) => !after.has(tileKey(x, y)));
     });
     if (stranded.length) {
       const names = [...new Set(stranded.map(o => STRUCTURES[o.key].name))].slice(0, 3).join(', ');
       return {
         ok: false,
-        error: `이 영토에 구조물이 ${stranded.length}개 남아 있습니다 (${names}${stranded.length > 3 ? ' 등' : ''}) — 먼저 철거해주세요`,
+        error: `철거하면 영토 밖으로 밀려나는 구조물이 ${stranded.length}개 있습니다 (${names}${stranded.length > 3 ? ' 등' : ''}) — 먼저 철거해주세요`,
         stranded: stranded.length,
       };
     }
@@ -564,6 +559,25 @@ export function manualMoveToStructure(nation, structId, res, amount = LOGISTICS.
   s.inputBuffer[res] = (s.inputBuffer[res] || 0) + moved;
   recomputeStock(nation);
   return { ok: true, moved };
+}
+
+/**
+ * 창고·수도의 한 면(0=동 1=남 2=서 3=북)에서 벨트로 내보낼 자원을 지정한다.
+ * res를 비우면 그 면은 다시 "아무거나"가 된다. 수도처럼 여러 자원을 담는
+ * 보관 구조물에서 원하는 자원만 라인으로 뽑아낼 때 쓴다 (simulate.drainStorageToBelt).
+ */
+export function setOutFilter(nation, structId, dir, res) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  if (!STRUCTURES[s.key]?.storageCapacity) return { ok: false, error: '보관 구조물이 아닙니다' };
+  if (!(dir >= 0 && dir < DIR_VECT.length)) return { ok: false, error: '방향이 올바르지 않습니다' };
+  if (res && !RESOURCES[res]) return { ok: false, error: '알 수 없는 자원입니다' };
+
+  s.outFilter = s.outFilter || {};
+  if (res) s.outFilter[dir] = res;
+  else delete s.outFilter[dir];
+  if (!Object.keys(s.outFilter).length) s.outFilter = undefined;
+  return { ok: true, dir, res: res || null };
 }
 
 /** 창고에 든 자원을 다른 창고로 옮긴다 (종류 정리용) */

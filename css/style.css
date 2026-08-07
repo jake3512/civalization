@@ -369,6 +369,22 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .inv-items .dim, .pd.dim { color: var(--text-dim); }
 .pd.ok { color: var(--teal); }
 .pd.err { color: var(--danger); }
+/* 발전소에서 지금 타고 있는 연료 */
+.fuel-on { color: var(--teal); font-weight: 700; }
+
+/* ---- 배출구 (면마다 나가는 자원) ---- */
+.port-list { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
+.port-row {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.port-dir { min-width: 54px; color: var(--text-dim); }
+.port-res { display: inline-flex; align-items: center; gap: 3px; }
+.port-on { color: var(--teal); }
+.port-sel {
+  flex: 1; min-width: 0; padding: 3px 6px; font-family: var(--font-mono); font-size: 12px;
+  color: var(--text); background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 3px;
+}
 .invbar { height: 5px; background: rgba(0,0,0,0.45); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
 .invbar-fill { height: 100%; background: var(--teal); transition: width 0.2s; }
 .invbar-fill.warn { background: var(--accent); }

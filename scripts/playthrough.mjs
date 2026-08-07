@@ -18,7 +18,7 @@ import { createNation } from '../js/game.js';
 import * as L from '../js/logic.js';
 import {
   STRUCTURES, TECH_TREE, RESOURCES, UNITS, CROPS, ANIMALS, EXPEDITIONS,
-  LOGISTICS, VIRTUAL_RESOURCES, getUpgradeCost,
+  LOGISTICS, VIRTUAL_RESOURCES, getUpgradeCost, POWER_FUELS,
 } from '../js/data.js';
 import { getTile } from '../js/world.js';
 import { TERRAIN_NODES } from '../js/data.js';
@@ -161,7 +161,11 @@ function feedAll() {
   for (const s of n.structures) {
     const def = STRUCTURES[s.key];
     let need = null;
-    if (s.key === 'power_plant') need = { wood: 2 };
+    if (s.key === 'power_plant') {
+      // 창고에 있는 연료 중 아무거나 하나 (나무 · 석탄 · 석유)
+      const f = POWER_FUELS.find(f => (n.resources[f.res] || 0) >= f.amount) || POWER_FUELS[0];
+      need = { [f.res]: f.amount };
+    }
     else if (def.recipes && s.recipe) need = def.recipes[s.recipe].in;
     if (!need) continue;
     for (const res of Object.keys(need)) {

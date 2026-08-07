@@ -362,7 +362,7 @@ export const STRUCTURES = {
   },
   power_plant: {
     id: 12, name: '발전소', volume: 4, footprint: [2, 2],
-    desc: '나무나 석유로 전력을 생산해 일정 범위에 공급합니다.',
+    desc: '나무·석탄·석유로 전력을 생산해 일정 범위에 공급합니다.',
     baseCost: { stone: 50, iron_ingot: 20 }, maxLevel: 5, upgradeCostMul: 1.7,
     category: 'utility', baseHp: 190,
     powerRadius: 6, baseProduction: 10,
@@ -771,11 +771,72 @@ export function getOutputCapacity(structKey, level) {
 // 터렛은 범위 안에 있어도 전력(kW)이 실제로 남아있어야 작동한다 (아래 simulate.js에서 소모 처리).
 export const POWER_REQUIRED_CATEGORIES = new Set(['extraction', 'production', 'turret']);
 
+// ---- 발전소 연료 ----
+// 발전소는 아래 연료 중 투입 버퍼에 들어와 있는 것을 **위에서부터** 하나 골라
+// 태운다. 흔한 연료가 먼저 오도록 두었다 — 석유는 정제소·터렛·병력 장비에도
+// 쓰이는 귀한 자원이라 발전소가 멋대로 먼저 태워버리면 곤란하기 때문이다.
+// 석탄은 예전에는 수도 승급과 공성 장비에만 쓰여 석탄광산을 지을 이유가 거의
+// 없었는데, 이제 나무 한 톨당 두 개 필요한 것보다 효율이 좋은 연료가 된다.
+export const POWER_FUELS = [
+  { res: 'wood',      amount: 2 },
+  { res: 'coal',      amount: 1 },
+  { res: 'petroleum', amount: 1 },
+];
+/** 발전소 투입 버퍼에서 지금 태울 수 있는 연료를 고른다 (없으면 null) */
+export function pickPowerFuel(inputBuffer) {
+  return POWER_FUELS.find(f => (inputBuffer?.[f.res] || 0) >= f.amount) || null;
+}
+
 // ---- 컨베이어 벨트 ----
 // 방향: 0=동(E) 1=남(S) 2=서(W) 3=북(N)
 export const DIR_VECT = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 export const DIR_ARROW = ['→', '↓', '←', '↑'];
+export const DIR_NAMES = ['동', '남', '서', '북'];
 export function beltThroughput(level) { return 10 * level; }
+
+// ============================================================
+// 배출구 (out port)
+//
+// 한 번에 두 가지가 나오는 구조물(정제소: 석유+나프타, 목장: 가축+우유/달걀)은
+// 예전에는 산출물이 전부 같은 벨트로 흘러나가 라인이 뒤섞였다. 이제 산출물마다
+// **면(동·남·서·북)이 하나씩 배정**되고, 그 면에 붙은 벨트로는 그 자원만 나간다.
+// 산출물이 한 가지뿐인 구조물은 예전처럼 아무 면으로나 내보낸다.
+//
+// 창고·수도처럼 여러 자원을 담는 보관 구조물은 플레이어가 면마다 자원을 직접
+// 지정할 수 있다 (struct.outFilter = { 방향: 자원 }). 지정하지 않은 면은 아무거나.
+// ============================================================
+
+/** 이 구조물이 지금 한 번에 내놓는 산출물 (순서 고정 — 배출구 배정에 그대로 쓴다) */
+export function structOutputs(struct) {
+  const def = STRUCTURES[struct?.key];
+  if (!def) return [];
+  if (struct.key === 'barn') {
+    const a = ANIMALS[struct.animal];
+    return a ? [a.yields, ...Object.keys(a.products || {})] : [];
+  }
+  if (struct.key === 'farm') {
+    const c = CROPS[struct.crop];
+    return c ? [c.yields] : [];
+  }
+  if (def.recipes && struct.recipe) {
+    const r = def.recipes[struct.recipe];
+    if (!r) return [];
+    return typeof r.out === 'number' ? [struct.recipe] : Object.keys(r.out);
+  }
+  return [];
+}
+
+/**
+ * 산출물 → 배출구 방향(0=동 1=남 2=서 3=북).
+ * 산출물이 두 가지 이상일 때만 의미가 있다 (한 가지면 null → 아무 면으로나).
+ */
+export function outputPorts(struct) {
+  const outs = structOutputs(struct);
+  if (outs.length < 2) return null;
+  const map = {};
+  outs.forEach((res, i) => { map[res] = i % DIR_VECT.length; });
+  return map;
+}
 
 // ---- 연구소 기술 트리 ----
 // requires: 선행 연구(구조물 key) 배열. cost: 연구 자원 소모. time: 필요 틱 수.
