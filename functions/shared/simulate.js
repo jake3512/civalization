@@ -316,7 +316,10 @@ export function tickNation(nation) {
           s.idleReason = '재료 부족';
         }
       } else if (s.key === 'farm') {
-        const crop = CROPS[s.crop || 'rice'];
+        // 고르지 않았으면 기본값으로 아무거나 기르지 않는다 — 예전에는 쌀/소로
+        // 흘러들어가서, 플레이어가 고르지도 않은 작물·가축이 창고를 차지했다
+        // (창고는 한 종류만 받으므로 정작 원하는 것이 안 들어갔다).
+        const crop = CROPS[s.crop];
         if (crop) {
           storeOutput(nation, s, crop.yields, crop.baseYield * s.level);
           // 인력은 오직 농지에서만 나온다 (여행의 유일한 연료).
@@ -324,7 +327,7 @@ export function tickNation(nation) {
           nation.resources.labor = (nation.resources.labor || 0) + (def.laborIncome || 0) * s.level;
         } else { s.idle = true; s.idleReason = '작물 미선택'; }
       } else if (s.key === 'barn') {
-        const animal = ANIMALS[s.animal || 'cattle'];
+        const animal = ANIMALS[s.animal];
         if (animal) {
           storeOutput(nation, s, animal.yields, animal.baseYield * s.level);
           // 우유·달걀 같은 부산물은 가축과 함께 나온다

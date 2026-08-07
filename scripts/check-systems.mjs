@@ -398,6 +398,42 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   assert.ok(barn.outputBuffer.cattle >= held, '끊으면 가축도 나가지 않는다 (생산분만 늘어난다)');
   assert.strictEqual(sink.structure.store.cattle, arrived, '창고에 더 도착하지 않아야 한다');
   console.log('✓ 농지·축사 배출구 (자동 배정 · 면 지정 · 연결 끊기)');
+
+  // --- 고르지 않은 농지·축사는 기본값을 몰래 생산하지 않는다 ---
+  // 예전에는 `ANIMALS[s.animal || 'cattle']`이라 갓 지은 축사가 소를 만들어냈다.
+  // 그 소가 창고를 먼저 차지하면(창고는 한 종류만 받는다) 정작 고른 가축이
+  // 들어가지 못해서, 플레이어에게는 "다른 가축을 넣으면 소가 된다"로 보였다.
+  let fresh = null;
+  for (const t of Array.from(nf.territory)) {
+    const [x, y] = t.split(',').map(Number);
+    if (Math.hypot(x - capf.x, y - capf.y) < 6) continue;
+    const r = L.build(nf, 'barn', x, y);
+    if (r.ok) { fresh = r.structure; break; }
+  }
+  assert.ok(fresh, '축사 하나 더 건설');
+  assert.strictEqual(fresh.animal, undefined, '갓 지은 축사는 가축이 없다');
+  tickNation(nf);
+  assert.deepStrictEqual(fresh.outputBuffer, {}, '가축을 고르기 전에는 아무것도 만들지 않는다');
+  assert.strictEqual(fresh.idle, true);
+  assert.strictEqual(fresh.idleReason, '가축 미선택');
+  assert.strictEqual(L.manualOperate(nf, fresh.id).ok, false, '수동 운용도 거부해야 한다');
+
+  nf.unlockedGoods.add('animal:pig');                       // 여행으로 데려왔다고 치고
+  assert.strictEqual(L.setAnimal(nf, fresh.id, 'pig').ok, true, '돼지 선택');
+  tickNation(nf);
+  assert.deepStrictEqual(Object.keys(fresh.outputBuffer), ['pig'],
+    `고른 가축만 나온다 (소가 섞이면 안 된다) — idle=${fresh.idleReason}`);
+
+  // 다른 종류가 든 창고에 넣으려 하면 이유를 알려준다
+  const { getStorageCapacity } = await import('../js/data.js');
+  const busy = nf.structures.find(s2 => s2.key === 'warehouse');
+  busy.store = { cattle: 5 };
+  capf.store = { wood: getStorageCapacity('capital', capf.level) };   // 수도는 꽉 채워 둔다
+  L.recomputeStock(nf);
+  const blocked = L.manualMoveToStorage(nf, fresh.id, 'pig');
+  assert.strictEqual(blocked.ok, false, '소 전용 창고에는 돼지가 들어가지 않는다');
+  assert.ok(/소 전용/.test(blocked.error), `이유를 알려줘야 한다: ${blocked.error}`);
+  console.log('✓ 고르지 않은 농지·축사는 생산 정지 (기본 작물·가축 몰래 생산 안 함)');
 }
 
 // --- 분할 컨베이어는 두 방향으로만 나눈다 ---

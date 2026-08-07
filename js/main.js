@@ -1301,7 +1301,10 @@ function wireInventoryActions(panel, struct, x, y) {
 
 /** 농지의 작물 / 축사의 가축 고르기 — 해금되지 않은 항목은 잠긴 채로 보여준다 */
 function renderChoiceHtml(struct, table, kind, title, lockHint) {
-  const current = struct[kind] || (kind === 'crop' ? 'rice' : 'cattle');
+  // 고르지 않았으면 아무것도 선택된 것처럼 보이면 안 된다. 예전에는 갓 지은
+  // 축사가 소를 고른 것처럼 표시하고 실제로 소를 생산해서, 플레이어가 고르지도
+  // 않은 소가 창고를 차지해 정작 원하는 가축이 안 들어가는 일이 있었다.
+  const current = struct[kind] || null;
   let html = `<div class="pd">${title}:</div><div class="recipe-list">`;
   for (const [key, def] of Object.entries(table)) {
     const unlocked = hasGood(game.myNation, `${kind}:${key}`);
@@ -1312,12 +1315,14 @@ function renderChoiceHtml(struct, table, kind, title, lockHint) {
     </button>`;
   }
   html += `</div>`;
-  const cur = table[current];
+  const cur = current && table[current];
   if (cur) {
     const extra = Object.keys(cur.products || {}).length
       ? ' · 부산물 ' + Object.entries(cur.products).map(([r, a]) => `${resIcon(r)}${a * struct.level}`).join(' ')
       : '';
     html += `<div class="pd dim">현재: ${cur.name} — 매 틱 ${resIcon(cur.yields)}${cur.baseYield * struct.level}${extra}</div>`;
+  } else {
+    html += `<div class="pd err">아직 고르지 않아 멈춰 있습니다 — 위에서 하나 고르세요</div>`;
   }
   return html;
 }

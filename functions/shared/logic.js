@@ -548,7 +548,21 @@ export function manualMoveToStorage(nation, structId, res, amount = LOGISTICS.ma
   if (have <= 0) return { ok: false, error: '옮길 자원이 없습니다' };
 
   const moved = depositAnywhere(nation, res, Math.min(amount, have));
-  if (moved <= 0) return { ok: false, error: '창고에 빈 공간이 없습니다 (창고를 더 짓거나 종류를 비워주세요)' };
+  if (moved <= 0) {
+    // 못 넣은 이유를 구분해준다 — "꽉 찼다"와 "다른 종류 전용이다"는 대처가 다르다.
+    // (가축을 옮기려다 창고가 이미 다른 가축을 담고 있어 거부되는 일이 잦다)
+    const other = storageStructures(nation).find(st => {
+      if (!STRUCTURES[st.key]?.singleResource) return false;
+      if (getStorageCapacity(st.key, st.level) - storedTotal(st) <= 0) return false;
+      const kinds = Object.keys(st.store || {}).filter(k => st.store[k] > 0);
+      return kinds.length && kinds[0] !== res;
+    });
+    if (other) {
+      const held = RESOURCES[Object.keys(other.store).find(k => other.store[k] > 0)]?.name;
+      return { ok: false, error: `빈 창고가 없습니다 — 남은 창고는 ${held} 전용입니다 (창고 하나에는 한 종류만)` };
+    }
+    return { ok: false, error: '창고에 빈 공간이 없습니다 (창고를 더 짓거나 종류를 비워주세요)' };
+  }
   s.outputBuffer[res] -= moved;
   if (s.outputBuffer[res] <= 0) delete s.outputBuffer[res];
   recomputeStock(nation);
@@ -649,7 +663,8 @@ export function manualOperate(nation, structId) {
 
   // 가공 구조물 — 레시피 재료를 투입 버퍼에서 소모한다
   if (s.key === 'farm' || s.key === 'barn') {
-    const plan = s.key === 'farm' ? CROPS[s.crop || 'rice'] : ANIMALS[s.animal || 'cattle'];
+    // 시뮬레이션과 같은 규칙 — 고르지 않았으면 기본값으로 아무거나 기르지 않는다
+    const plan = s.key === 'farm' ? CROPS[s.crop] : ANIMALS[s.animal];
     if (!plan) return { ok: false, error: s.key === 'farm' ? '작물을 먼저 고르세요' : '가축을 먼저 고르세요' };
     const amt = Math.max(1, Math.floor(plan.baseYield * s.level * rate));
     const add = Math.min(amt, room);
