@@ -504,4 +504,59 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   console.log(`✓ 업적 (${A.ACHIEVEMENTS.length}종 · 정의 검증 · 실제 달성 ${score.done}개 · 저장 유지)`);
 }
 
+// --- 클라우드 저장: Firestore가 거부하는 값이 섞이지 않는가 ---
+{
+  const C = await import('../js/cloudSave.js');
+  const site = L.findNearestCapitalSite(0, 0, 200);
+  const n4 = createNation('cloud-b', '저장국', '#0af', site.x, site.y);
+  // 창고가 아닌 구조물을 섞는다 — store/dir/recruitQueue가 undefined로 남는 자리다
+  L.depositAnywhere(n4, 'wood', 400); L.depositAnywhere(n4, 'stone', 400); L.recomputeStock(n4);
+  for (const k of n4.territory) {
+    const [x, y] = k.split(',').map(Number);
+    if (L.build(n4, 'lumber_mill', x, y).ok) break;
+  }
+  assert.ok(n4.structures.some(s => s.store === undefined), '준비: undefined 필드가 있는 구조물');
+
+  // Firestore와 똑같이 굴게 만든 가짜 SDK — undefined를 만나면 문서 전체를 거부한다
+  const findUndefined = (o, path = '') => {
+    if (o === undefined) return path;
+    if (o && typeof o === 'object') {
+      for (const [k, v] of Object.entries(o)) {
+        const hit = findUndefined(v, `${path}.${k}`);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  };
+  let written = null;
+  const fakeHandles = {
+    db: {},
+    fx: {
+      doc: (db, col, id) => ({ col, id }),
+      setDoc: async (ref, data) => {
+        const bad = findUndefined(data);
+        if (bad) throw Object.assign(new Error(
+          `Function setDoc() called with invalid data. Unsupported field value: undefined (found in field ${bad})`),
+          { code: 'invalid-argument' });
+        written = data;
+      },
+    },
+  };
+
+  const res = await C.saveToCloud(fakeHandles, 'uid-1', n4, {
+    raids: { defense: [{ id: 'r1', replay: { deploys: [], base: { structures: [] } } }], attack: [] },
+  });
+  assert.strictEqual(res.ok, true, `클라우드 저장이 성공해야 한다: ${res.error}`);
+  assert.ok(written, '문서가 실제로 쓰여야 한다');
+  assert.strictEqual(findUndefined(written), null, '보내는 문서에 undefined가 있으면 안 된다');
+  assert.ok(!written.nation.territory, '영토는 빼고 보낸다 (구조물에서 복원)');
+
+  // 되돌리면 영토가 복원되고 나라가 그대로여야 한다
+  const back2 = Nation.fromJSON(C.unpackSave(JSON.parse(JSON.stringify(written))).nation);
+  assert.strictEqual(back2.territory.size, n4.territory.size, '복원한 영토가 원본과 같아야 한다');
+  assert.strictEqual(back2.structures.length, n4.structures.length);
+
+  console.log('✓ 클라우드 저장 (undefined 제거 · 영토 복원 · 거부 없이 전송)');
+}
+
 console.log('\n✅ 회귀 테스트 전부 통과');

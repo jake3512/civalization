@@ -16,11 +16,17 @@
 //   value()가 goal 이상이면 달성. 진행도 막대는 value/goal로 그린다.
 // ============================================================
 import { STRUCTURES, TECH_TREE, EXPEDITIONS, RESOURCES } from './data.js';
-import { getCapitalLevel } from './logic.js';
+import { getCapitalLevel, hasGood } from './logic.js';
 
 const stat = (n, key) => (n.stats && n.stats[key]) || 0;
 const countStructs = (n, fn) => n.structures.filter(fn).length;
-const dishCount = (n) => Array.from(n.unlockedGoods || []).filter(k => k.startsWith('dish:')).length;
+/**
+ * 지금 만들 수 있는 요리 수.
+ * 처음부터 아는 요리(START_DISHES)는 unlockedGoods에 들어가지 않으므로,
+ * 그것만 세면 여행을 다녀오기 전까지 0으로 나온다 — logic.hasGood으로 센다.
+ */
+const dishCount = (n) => Object.keys(STRUCTURES.kitchen.recipes)
+  .filter(k => hasGood(n, 'dish:' + k)).length;
 /** 조리소가 만들 수 있는 요리 전체 수 */
 const ALL_DISHES = Object.keys(STRUCTURES.kitchen.recipes).length;
 

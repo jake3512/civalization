@@ -116,6 +116,12 @@
           <div class="ph">여행</div>
           <div id="travel-panel" class="travel-panel"><div class="pd">건국 후 표시됩니다.</div></div>
         </div>
+
+        <!-- 되돌릴 수 없는 조작이라 맨 아래에 두고, 두 번 눌러야 실행된다 -->
+        <div class="panel-box">
+          <div class="ph">게임</div>
+          <div id="reset-panel" class="reset-panel"></div>
+        </div>
       </aside>
     </main>
 
@@ -141,6 +147,16 @@
         <button id="struct-modal-close" class="struct-modal-close" aria-label="닫기">✕</button>
       </header>
       <div id="struct-modal-body" class="struct-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- 알림 팝업 (여행 완료처럼 놓치면 안 되는 소식) -->
+  <div id="notice-modal" class="notice-modal hidden">
+    <div class="notice-backdrop"></div>
+    <div class="notice-card">
+      <div id="notice-title" class="notice-title"></div>
+      <div id="notice-body" class="notice-body"></div>
+      <button id="notice-close" class="notice-close">확인</button>
     </div>
   </div>
 
