@@ -32,7 +32,15 @@ function neighborRegions(x, y) {
   return keys; // 최대 9개 (Firestore 'in' 쿼리는 최대 10개까지 지원)
 }
 
-export async function initFirebase() {
+// 여러 곳(로그인 화면·상대 목록 미리 받기·전투 연결)에서 부르므로 한 번만
+// 실제로 초기화하고 그 결과를 공유한다. initializeApp을 두 번 부르면 터진다.
+let initPromise = null;
+export function initFirebase() {
+  if (!initPromise) initPromise = _initFirebase();
+  return initPromise;
+}
+
+async function _initFirebase() {
   if (!FIREBASE_ENABLED) {
     console.warn('[multiplayer] Firebase 설정이 비어있어 로컬 모드로 실행됩니다. js/firebase-config.js 를 채워주세요.');
     return { ok: false, reason: 'config', message: 'js/firebase-config.js가 비어 있습니다' };
@@ -49,13 +57,19 @@ export async function initFirebase() {
     functionsInstance = functionsMod.getFunctions(app);
     fx = firestore; authFx = authMod; fnFx = functionsMod;
 
-    await authFx.signInAnonymously(auth);
-    await new Promise((resolve, reject) => {
-      const unsub = authFx.onAuthStateChanged(auth, (user) => {
-        if (user) { uid = user.uid; unsub(); resolve(); }
-      }, reject);
+    // 이미 로그인돼 있으면(브라우저에 세션이 남아 있으면) 그 계정을 그대로 쓴다.
+    // 여기서 무조건 익명 로그인을 부르면, 이메일로 로그인해 둔 세션을 새 익명
+    // 계정으로 갈아엎어 버려서 "이어서 하기"가 매번 깨진다.
+    const existing = await new Promise((resolve, reject) => {
+      const unsub = authFx.onAuthStateChanged(auth, (user) => { unsub(); resolve(user); }, reject);
     });
-    return { ok: true, uid };
+    if (existing) {
+      uid = existing.uid;
+    } else {
+      const anon = await authFx.signInAnonymously(auth);
+      uid = anon.user.uid;
+    }
+    return { ok: true, uid, user: currentUser() };
   } catch (e) {
     // 왜 안 됐는지가 중요하다. 예전에는 전부 "로컬 모드"로 뭉뚱그려서, 콘솔을
     // 열어보기 전에는 무엇을 고쳐야 하는지 알 수 없었다.
@@ -83,6 +97,97 @@ export async function initFirebase() {
 
 export function getUid() { return uid; }
 export function isMultiplayer() { return FIREBASE_ENABLED && !!uid; }
+
+// ============================================================
+// 로그인 (계정)
+//
+// 기본은 익명 로그인이다 — 아무것도 묻지 않고 바로 플레이할 수 있어야 하니까.
+// 다만 익명 계정은 **그 브라우저에만** 남아서, 폰에서 하던 판을 PC에서 이어받을
+// 수 없다. 그래서 이메일/비밀번호 계정을 붙일 수 있게 한다.
+//
+// 핵심은 "연결(link)"이다. 익명으로 하던 판에 계정을 붙이면 **uid가 그대로
+// 유지되므로**, 세워둔 나라도 나에게 온 습격도 그대로 따라온다. 새 계정을
+// 만들어 갈아타면 uid가 바뀌어 남남이 된다.
+// ============================================================
+
+/** 지금 로그인한 사용자 정보 (없으면 null) */
+export function currentUser() {
+  const u = auth && auth.currentUser;
+  if (!u) return null;
+  return { uid: u.uid, email: u.email || null, anonymous: !!u.isAnonymous };
+}
+
+/** 로그인 상태가 바뀔 때마다 호출된다 (탭을 새로 열었을 때 복원 포함) */
+export function onUserChanged(cb) {
+  if (!auth || !authFx.onAuthStateChanged) return () => {};
+  return authFx.onAuthStateChanged(auth, (u) => {
+    uid = u ? u.uid : null;
+    cb(currentUser());
+  });
+}
+
+/** Firebase 오류 코드를 사람이 읽을 수 있는 문장으로 */
+function authError(e) {
+  const code = ((e && e.code) || '').replace('auth/', '');
+  const table = {
+    'invalid-email': '이메일 형식이 올바르지 않습니다',
+    'missing-password': '비밀번호를 입력해주세요',
+    'weak-password': '비밀번호는 6자 이상이어야 합니다',
+    'email-already-in-use': '이미 가입된 이메일입니다 — 로그인해주세요',
+    'invalid-credential': '이메일 또는 비밀번호가 맞지 않습니다',
+    'wrong-password': '비밀번호가 맞지 않습니다',
+    'user-not-found': '가입되지 않은 이메일입니다',
+    'too-many-requests': '시도가 너무 잦습니다 — 잠시 뒤 다시 해주세요',
+    'network-request-failed': '네트워크에 연결하지 못했습니다',
+    'operation-not-allowed': 'Firebase 콘솔에서 이메일/비밀번호 로그인을 켜야 합니다',
+    'configuration-not-found': 'Firebase 콘솔에서 Authentication을 먼저 켜야 합니다',
+    'credential-already-in-use': '그 계정은 이미 다른 나라에 연결돼 있습니다 — 로그인해서 이어가세요',
+    'provider-already-linked': '이미 계정이 연결돼 있습니다',
+  };
+  return { ok: false, code, error: table[code] || (e && e.message) || '로그인에 실패했습니다' };
+}
+
+/** 이메일/비밀번호로 로그인 */
+export async function signIn(email, password) {
+  if (!auth) return { ok: false, error: '온라인에 연결되지 않았습니다' };
+  try {
+    const cred = await authFx.signInWithEmailAndPassword(auth, email, password);
+    uid = cred.user.uid;
+    return { ok: true, user: currentUser() };
+  } catch (e) { return authError(e); }
+}
+
+/**
+ * 계정 만들기.
+ * 지금 익명으로 플레이 중이면 **그 계정에 이메일을 붙인다**(link) — uid가
+ * 유지되므로 하던 나라를 그대로 들고 간다. 익명 상태가 아니면 새로 가입한다.
+ */
+export async function signUp(email, password) {
+  if (!auth) return { ok: false, error: '온라인에 연결되지 않았습니다' };
+  try {
+    const u = auth.currentUser;
+    if (u && u.isAnonymous && authFx.EmailAuthProvider && authFx.linkWithCredential) {
+      const cred = authFx.EmailAuthProvider.credential(email, password);
+      const res = await authFx.linkWithCredential(u, cred);
+      uid = res.user.uid;
+      return { ok: true, linked: true, user: currentUser() };
+    }
+    const res = await authFx.createUserWithEmailAndPassword(auth, email, password);
+    uid = res.user.uid;
+    return { ok: true, linked: false, user: currentUser() };
+  } catch (e) { return authError(e); }
+}
+
+/** 로그아웃하고 다시 익명 상태로 돌아간다 (게스트 플레이는 계속 가능) */
+export async function signOutUser() {
+  if (!auth) return { ok: false, error: '온라인에 연결되지 않았습니다' };
+  try {
+    await authFx.signOut(auth);
+    const anon = await authFx.signInAnonymously(auth);
+    uid = anon.user.uid;
+    return { ok: true, user: currentUser() };
+  } catch (e) { return authError(e); }
+}
 
 /**
  * Firestore 핸들을 그대로 넘겨준다 (mpNet.js의 firestore 백엔드용).

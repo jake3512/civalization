@@ -20,10 +20,12 @@ import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlac
          defenseSnapshot, buildRaidReport, applyRaidToAttacker, applyRaidToDefender, canAttack } from './logic.js';
 import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
-import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS } from './mpNet.js';
+import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS, isPeerOnline } from './mpNet.js';
 import { saveGame, loadGame, listSaves, clearSave, storageAvailable, timeAgo } from './storage.js';
+import { saveToCloud, loadFromCloud, clearCloud } from './cloudSave.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
+  currentUser, onUserChanged, signIn, signUp, signOutUser,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
   callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish, callRotate,
 } from './multiplayer.js';
@@ -212,12 +214,31 @@ function autoSave(force = false) {
   lastSaveAt = now;
   // 전투 기록도 함께 남긴다 — 새로고침했다고 "누가 나를 털었는지"가 사라지면 안 된다.
   // 리플레이 기록(기지 배치)까지 들어 있어 크기가 있으므로 최근 것 몇 개만 남긴다.
-  const res = saveGame(game.myNation, {
-    raids: { defense: defenseReports.slice(0, 5), attack: attackReports.slice(0, 5) },
-  });
+  const extra = { raids: { defense: defenseReports.slice(0, 5), attack: attackReports.slice(0, 5) } };
+  const res = saveGame(game.myNation, extra);
   if (!res.ok && !autoSave._warned) {
     autoSave._warned = true;   // 매 틱 경고를 띄우면 게임을 못 한다 — 한 번만 알린다
     flashMessage(`자동 저장 실패: ${res.error}`, true);
+  }
+  cloudAutoSave(force, extra);
+}
+
+// 클라우드 저장은 네트워크를 타므로 로컬보다 뜸하게 올린다
+let lastCloudSaveAt = 0;
+const CLOUD_SAVE_EVERY_MS = 60_000;
+
+/** 로그인한 계정이면 서버에도 한 벌 올려둔다 (다른 기기에서 이어받기 위해) */
+async function cloudAutoSave(force, extra) {
+  const user = currentUser();
+  const handles = getFirestoreHandles();
+  if (!user || user.anonymous || !handles || !game.myNation) return;
+  const now = Date.now();
+  if (!force && now - lastCloudSaveAt < CLOUD_SAVE_EVERY_MS) return;
+  lastCloudSaveAt = now;
+  const res = await saveToCloud(handles, user.uid, game.myNation, extra);
+  if (!res.ok && !cloudAutoSave._warned) {
+    cloudAutoSave._warned = true;
+    flashMessage(`클라우드 저장 실패: ${res.error}`, true);
   }
 }
 
@@ -237,14 +258,28 @@ function renderResumeBox() {
     return;
   }
   const saves = listSaves();
+  // 로그인한 계정의 클라우드 저장을 맨 위에 얹는다 (다른 기기에서 하던 판)
+  if (cloudSaveData && cloudSaveData.nation) {
+    const n = cloudSaveData.nation;
+    const cap = (n.structures || []).find(s => s.key === 'capital');
+    saves.unshift({
+      id: CLOUD_SAVE_ID, cloud: true,
+      name: n.name, color: n.color,
+      capitalLevel: cap ? cap.level : 1,
+      structures: (n.structures || []).length,
+      unlocked: (n.unlocked || []).length,
+      trophies: n.trophies || 0,
+      savedAt: cloudSaveData.savedAt,
+    });
+  }
   if (!saves.length) { box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
   box.innerHTML = saves.map(s => `
-    <div class="resume-card">
+    <div class="resume-card${s.cloud ? ' cloud' : ''}">
       <div class="resume-head">
         <span class="dot" style="background:${safeColor(s.color)}"></span>
         <span class="nm">${esc(s.name)}</span>
-        <span class="when">${timeAgo(s.savedAt)} 저장</span>
+        <span class="when">${s.cloud ? '계정 · ' : ''}${timeAgo(s.savedAt)} 저장</span>
       </div>
       <div class="resume-meta">수도 Lv.${s.capitalLevel} · 구조물 ${s.structures}동 · 해금 ${s.unlocked}종
         · ${statusIcon('trophy')}${s.trophies}</div>
@@ -259,29 +294,167 @@ function renderResumeBox() {
   box.querySelectorAll('[data-resume]').forEach(b =>
     b.addEventListener('click', () => resumeSavedGame(b.dataset.resume)));
   box.querySelectorAll('[data-discard]').forEach(b =>
-    b.addEventListener('click', () => {
-      clearSave(b.dataset.discard);
+    b.addEventListener('click', async () => {
+      if (b.dataset.discard === CLOUD_SAVE_ID) {
+        const user = currentUser();
+        await clearCloud(getFirestoreHandles(), user && user.uid);
+        cloudSaveData = null;
+      } else {
+        clearSave(b.dataset.discard);
+      }
       renderResumeBox();
       flashMessage('저장된 국가를 지웠습니다', false);
     }));
 }
 
 function resumeSavedGame(id = null) {
-  const data = loadGame(id);
+  const data = id === CLOUD_SAVE_ID ? cloudSaveData : loadGame(id);
   if (!data) { flashMessage('저장을 불러오지 못했습니다', true); renderResumeBox(); return; }
+  startFromSave(data, id === CLOUD_SAVE_ID);
+}
+
+/** 저장 데이터로 게임을 시작한다 (로컬·클라우드 공통) */
+function startFromSave(data, fromCloud) {
   game.myNation = Nation.fromJSON(data.nation);
   defenseReports = (data.raids && data.raids.defense) || [];
   attackReports = (data.raids && data.raids.attack) || [];
+
+  // 로그인한 계정으로 이어받는 나라는 그 계정의 것이어야 한다.
+  // (id가 곧 습격이 배달되는 주소라, uid와 어긋나면 공격을 못 받는다)
+  const user = currentUser();
+  if (user && !user.anonymous) game.myNation.id = user.uid;
 
   startScreen.classList.add('hidden');
   const cap = game.myNation.capital;
   renderer.centerOn(cap.x + 1, cap.y + 1);
   requestAnimationFrame(loop);
+  // 이어하기 안내를 **먼저** 띄운다. 접속하면서 밀린 습격이 반영되면 그쪽 알림이
+  // 덮어써야 한다 — 자리를 비운 사이 털린 사실이 더 급한 소식이다.
+  flashMessage(
+    `${game.myNation.name} 이어하기 — ${fromCloud ? '계정에 저장된' : ''} ${timeAgo(data.savedAt)} 상태입니다`,
+    false);
   enterGame();
-  flashMessage(`${game.myNation.name} 이어하기 — ${timeAgo(data.savedAt)} 저장된 상태입니다`, false);
+}
+
+// ---------- 계정 (로그인) ----------
+// 익명으로도 바로 플레이할 수 있고, 계정을 붙이면 다른 기기에서 이어서 할 수 있다.
+const CLOUD_SAVE_ID = '__cloud__';
+let cloudSaveData = null;     // 로그인 계정의 클라우드 저장 (있으면 이어하기 카드에 뜬다)
+let authReady = false;
+
+/** 시작 화면의 계정 상자를 그린다 */
+function renderAuthBox() {
+  const box = document.getElementById('auth-box');
+  if (!box) return;
+  if (pickMode() === NET_MODE.LOCAL) {
+    box.innerHTML = `<div class="auth-note">이 기기에서만 저장됩니다 (온라인 설정 없음)</div>`;
+    return;
+  }
+  const user = currentUser();
+  if (!authReady) { box.innerHTML = `<div class="auth-note">계정 확인 중...</div>`; return; }
+
+  if (user && !user.anonymous) {
+    box.innerHTML = `
+      <div class="auth-in">
+        <div class="auth-who">${esc(user.email)} 로 로그인됨
+          <span class="auth-sub">어느 기기에서든 이어서 할 수 있습니다</span></div>
+        <button id="signout-btn" class="auth-alt">로그아웃</button>
+      </div>`;
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      const res = await signOutUser();
+      if (!res.ok) { flashMessage(res.error, true); return; }
+      cloudSaveData = null;
+      flashMessage('로그아웃했습니다 — 이 기기의 저장은 그대로 남아 있습니다', false);
+      renderAuthBox(); renderResumeBox();
+    });
+    return;
+  }
+
+  box.innerHTML = `
+    <div class="auth-form">
+      <div class="auth-title">계정으로 이어서 하기</div>
+      <div class="auth-note">로그인하면 폰에서 하던 판을 PC에서 이어받을 수 있습니다.
+        지금 하던 나라가 있으면 그대로 계정에 붙습니다.</div>
+      <input id="auth-email" type="email" placeholder="이메일" autocomplete="username">
+      <input id="auth-pw" type="password" placeholder="비밀번호 (6자 이상)" autocomplete="current-password">
+      <div class="auth-actions">
+        <button id="signin-btn" class="auth-main">로그인</button>
+        <button id="signup-btn" class="auth-alt">계정 만들기</button>
+      </div>
+      <div id="auth-msg" class="auth-msg"></div>
+    </div>`;
+
+  const msg = (text, err = true) => {
+    const el = document.getElementById('auth-msg');
+    if (el) { el.textContent = text; el.className = `auth-msg ${err ? 'err' : 'ok'}`; }
+  };
+  const creds = () => [
+    document.getElementById('auth-email').value.trim(),
+    document.getElementById('auth-pw').value,
+  ];
+
+  document.getElementById('signin-btn').addEventListener('click', async () => {
+    const [email, pw] = creds();
+    msg('로그인 중...', false);
+    const res = await signIn(email, pw);
+    if (!res.ok) { msg(res.error); return; }
+    await afterLogin();
+    msg('', false);
+  });
+  document.getElementById('signup-btn').addEventListener('click', async () => {
+    const [email, pw] = creds();
+    msg('계정 만드는 중...', false);
+    const res = await signUp(email, pw);
+    if (!res.ok) { msg(res.error); return; }
+    await afterLogin();
+    flashMessage(res.linked ? '계정이 연결됐습니다 — 하던 나라를 그대로 이어서 합니다'
+                            : '계정을 만들었습니다', false);
+  });
+}
+
+/** 로그인 직후 — 계정의 클라우드 저장을 가져와 이어하기 목록에 넣는다 */
+async function afterLogin() {
+  const user = currentUser();
+  renderAuthBox();
+  if (!user || user.anonymous) return;
+
+  // 이미 게임 중이었다면(익명으로 하다 계정을 붙인 경우) 그대로 계속하고,
+  // 그 나라를 이 계정 것으로 올려둔다.
+  if (game.myNation) {
+    game.myNation.id = user.uid;
+    await cloudAutoSave(true, {
+      raids: { defense: defenseReports.slice(0, 5), attack: attackReports.slice(0, 5) },
+    });
+    publishMyNation();
+    return;
+  }
+  cloudSaveData = await loadFromCloud(getFirestoreHandles(), user.uid);
+  renderResumeBox();
+}
+
+/** 시작 화면에서 미리 Firebase에 붙어 로그인 상태를 확인한다 */
+async function initAuthUI() {
+  renderAuthBox();
+  if (pickMode() === NET_MODE.LOCAL) return;
+  const conn = await initFirebase();
+  authReady = true;
+  if (!conn.ok) {
+    const box = document.getElementById('auth-box');
+    if (box) box.innerHTML = `<div class="auth-note err">온라인 연결 실패 — ${esc(conn.message)}<br>
+      이 기기에서만 저장됩니다.</div>`;
+    return;
+  }
+  onUserChanged(() => renderAuthBox());
+  renderAuthBox();
+  const user = currentUser();
+  if (user && !user.anonymous) {
+    cloudSaveData = await loadFromCloud(getFirestoreHandles(), user.uid);
+    renderResumeBox();
+  }
 }
 
 renderResumeBox();
+initAuthUI();
 
 async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
@@ -435,10 +608,15 @@ function handleIncomingRaid(report) {
   if (defenseReports.length > 30) defenseReports.length = 30;
 
   if (res.applied) {
+    // 자리를 비운 사이 밀려 있던 습격이 여러 건 한꺼번에 도착할 수 있다.
+    // 그때는 하나씩 덮어쓰지 말고 합쳐서 알린다.
+    handleIncomingRaid._count = (handleIncomingRaid._count || 0) + 1;
     // flashMessage는 textContent라 아이콘 태그를 못 쓴다 (남의 국가 이름이 섞이는 자리라 그대로 둔다)
     flashMessage(
-      `${report.attackerName || '누군가'}의 습격! 파괴율 ${Math.round(res.destructionPercent * 100)}%`
-      + ` · 약탈당함 ${resNames(res.lost) || '없음'}`,
+      handleIncomingRaid._count > 1
+        ? `자리를 비운 사이 ${handleIncomingRaid._count}번 습격당했습니다 — 전투 기록을 확인하세요`
+        : `${report.attackerName || '누군가'}의 습격! 파괴율 ${Math.round(res.destructionPercent * 100)}%`
+          + ` · 약탈당함 ${resNames(res.lost) || '없음'}`,
       true);
     renderResourcePanel();
     publishMyNation();          // 줄어든 재고를 바로 반영해 다시 공개한다
@@ -1307,8 +1485,11 @@ function renderWarPanel(nations) {
     : (netTrouble ? `<div class="net-box err"><div class="net-line">${esc(netTrouble)}</div>
          <button id="retry-online-btn" class="retry-btn">다시 시도</button></div>` : '');
 
+  const onlineCount = nations.filter(n => isPeerOnline(n, now)).length;
   el.innerHTML = `
-    <div class="pd">접속한 상대 ${nations.length}명 · 내 트로피 ${statusIcon('trophy')} ${game.myNation.trophies || 0}</div>
+    <div class="pd">발견된 국가 ${nations.length}개 <span class="dim">(접속 중 ${onlineCount})</span>
+      · 내 트로피 ${statusIcon('trophy')} ${game.myNation.trophies || 0}</div>
+    <div class="pd dim">접속해 있지 않은 상대도 공격할 수 있습니다 — 결과는 그 사람이 다음에 접속할 때 반영됩니다.</div>
     ${shieldTxt}
     ${netBox}
     <button id="find-match-btn" class="find-match-btn">⚔️ 상대 찾기</button>
@@ -1345,13 +1526,14 @@ function renderMatchCard() {
   if (!currentMatch) {
     el.innerHTML = knownNations.length
       ? '<div class="pd">상대 찾기 버튼을 눌러 트로피가 비슷한 상대를 찾아보세요.</div>'
-      : `<div class="pd">아직 접속한 상대가 없습니다.</div>
+      : `<div class="pd">아직 발견된 국가가 없습니다.</div>
          <div class="pd dim">${netMode === NET_MODE.LOCAL
             ? '이 게임을 <b>새 탭에서 하나 더 열어</b> 국가를 세우면 그 국가가 상대로 잡힙니다.'
             : '상대가 접속하면 자동으로 목록에 올라옵니다.'}</div>`;
     return;
   }
   const n = currentMatch;
+  const online = isPeerOnline(n);
   const roster = (game.myNation.units && game.myNation.units.attack) || {};
   const deck = currentDeck();
   const total = Object.values(deck).reduce((a, b) => a + b, 0);
@@ -1364,6 +1546,8 @@ function renderMatchCard() {
         <span class="nm">${esc(n.name)}</span>
         <span class="trophy">${statusIcon('trophy')} ${Number(n.trophies) || 0}</span>
       </div>
+      <div class="pd ${online ? 'online' : 'dim'}">${online ? '● 접속 중'
+        : `○ 오프라인 (마지막 접속 ${timeAgo(n.updatedAt || 0)}) — 그래도 공격할 수 있습니다`}</div>
       <div class="pd">기지 ${(n.structures || []).length}동 · 예상 방어력 ${n.defensePower ?? getDefensePower(n)}
         · 약탈량은 실제 파괴율에 비례합니다</div>
       <div class="deck-edit">
@@ -1973,6 +2157,13 @@ window.__game = game;
 window.__showStruct = showStructPanel;
 window.__renderer = renderer;
 // 전투 멀티플레이 훅 — 두 탭이 실제로 싸우는지 자동 테스트에서 확인한다
+// 계정/저장 훅 — 로그인 계정의 클라우드 저장 흐름을 자동 테스트에서 확인한다
+window.__auth = {
+  get user() { return currentUser(); },
+  get cloudSave() { return cloudSaveData; },
+  setCloudSave(data) { cloudSaveData = data; renderResumeBox(); },
+  refresh: () => { renderAuthBox(); renderResumeBox(); },
+};
 window.__mp = {
   get net() { return net; },
   get mode() { return netMode; },

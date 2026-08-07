@@ -406,4 +406,36 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   console.log('✓ 저장/불러오기 (전체 상태 왕복 · 국가별 슬롯 · 깨진 저장 무시)');
 }
 
+// --- 계정 저장(클라우드) 왕복 · 오프라인 상대 공격 ---
+{
+  const { unpackSave } = await import('../js/cloudSave.js');
+  const { isPeerOnline, ONLINE_WINDOW_MS } = await import('../js/mpNet.js');
+
+  const site = findNearestCapitalSite(0, 0, 200);
+  const n2 = createNation('cloud-a', '클라우드국', '#0af', site.x, site.y);
+  n2.unlocked.add('smelter');
+  n2.trophies = 31;
+
+  // 클라우드로 보낼 때는 영토를 빼고(구조물에서 다시 만든다), 받을 때 복원한다
+  const packed = JSON.parse(JSON.stringify({ v: 1, savedAt: Date.now(), nation: n2.toJSON() }));
+  delete packed.nation.territory;
+  const restored = Nation.fromJSON(unpackSave(packed).nation);
+  assert.strictEqual(restored.territory.size, n2.territory.size,
+    '클라우드 저장에서 되살린 영토가 원본과 같아야 한다');
+  assert.ok(restored.unlocked.has('smelter') && restored.trophies === 31, '나머지 상태도 그대로여야 한다');
+
+  // 오프라인 상대도 매칭돼야 한다 (비동기 습격)
+  const me = createNation('me', '나', '#f00', site.x, site.y);
+  const offlineSnap = { ...L.defenseSnapshot(n2), updatedAt: Date.now() - 3 * 24 * 60 * 60 * 1000 };
+  offlineSnap.shieldUntil = 0;
+  assert.strictEqual(isPeerOnline(offlineSnap), false, '3일 전 접속이면 오프라인으로 표시된다');
+  assert.ok(L.findMatch(me, [offlineSnap]), '오프라인 상대도 매칭돼야 한다 (접속 여부와 무관)');
+
+  const onlineSnap = { ...offlineSnap, updatedAt: Date.now() };
+  assert.strictEqual(isPeerOnline(onlineSnap), true, '방금 갱신됐으면 접속 중');
+  assert.ok(ONLINE_WINDOW_MS > 0);
+
+  console.log('✓ 계정 저장 왕복 (영토 재구성) · 오프라인 상대 공격 가능');
+}
+
 console.log('\n✅ 회귀 테스트 전부 통과');
