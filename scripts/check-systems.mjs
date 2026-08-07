@@ -311,7 +311,57 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   assert.ok(store.store.stone < s2, '지정을 풀면 다시 나간다');
   assert.strictEqual(L.setOutFilter(n8, store.id, 9, 'wood').ok, false, '없는 방향은 거부');
   assert.strictEqual(L.setOutFilter(n8, ref.id, 0, 'wood').ok, false, '보관 구조물이 아니면 거부');
-  console.log(`✓ 배출구 (산출물별 전용 면 ${DIR_NAMES.join('·')} · 창고 → 벨트 · 면별 자원 지정)`);
+
+  // 연결 끊기 — 벨트가 붙어 있어도 그 면으로는 아무것도 내보내지 않는다
+  const { BELT_OFF } = await import('../js/data.js');
+  assert.strictEqual(L.setOutFilter(n8, store.id, 0, BELT_OFF).ok, true, '연결 끊기 설정');
+  const s3 = store.store.stone;
+  tickNation(n8);
+  assert.strictEqual(store.store.stone, s3, '연결을 끊으면 벨트가 붙어 있어도 나가지 않는다');
+  assert.strictEqual(L.setOutFilter(n8, store.id, 0, null).ok, true);
+  const s4 = store.store.stone;
+  tickNation(n8);
+  assert.ok(store.store.stone < s4, '다시 연결하면 나간다');
+  console.log(`✓ 배출구 (산출물별 전용 면 ${DIR_NAMES.join('·')} · 창고 → 벨트 · 면별 자원 지정 · 연결 끊기)`);
+}
+
+// --- 분할 컨베이어는 두 방향으로만 나눈다 ---
+{
+  const { splitterExits, DIR_NAMES } = await import('../js/data.js');
+  const right = splitterExits({ key: 'belt_splitter', dir: 0 });
+  assert.strictEqual(right.length, 2, '두 갈래여야 한다 (예전엔 정면·좌·우 셋)');
+  assert.deepStrictEqual(right, [0, 1], '기본은 정면(동) + 오른쪽(남)');
+  assert.deepStrictEqual(splitterExits({ dir: 0, branch: 1 }), [0, 3], '왼쪽 분기는 정면(동) + 북');
+  for (let d = 0; d < 4; d++) {
+    const [f, side] = splitterExits({ dir: d });
+    assert.strictEqual(f, d, '정면은 항상 벨트 방향');
+    assert.notStrictEqual(side, d, '옆 갈래는 정면과 달라야 한다');
+    assert.notStrictEqual(side, (d + 2) % 4, '뒤쪽(들어온 쪽)으로는 내보내지 않는다');
+  }
+
+  const n7 = createNation('t7', '분기국', '#ff0', site.x, site.y);
+  const cap7 = n7.structures.find(s2 => s2.key === 'capital');
+  cap7.level = 6;
+  for (const [x, y] of L.territoryTilesOf(n7, cap7)) n7.territory.add(L.tileKey(x, y));
+  for (const r of ['wood', 'stone', 'iron_ingot']) L.depositInto(cap7, r, 300);
+  L.recomputeStock(n7);
+  n7.unlocked.add('belt_splitter');
+  let sp = null;
+  for (const t of Array.from(n7.territory)) {
+    const [x, y] = t.split(',').map(Number);
+    if (Math.hypot(x - cap7.x, y - cap7.y) < 5) continue;
+    const r = L.build(n7, 'belt_splitter', x, y, 0);
+    if (r.ok) { sp = r.structure; break; }
+  }
+  assert.ok(sp, '분할 컨베이어 건설');
+  assert.strictEqual(L.setBranchSide(n7, sp.id, 1).ok, true, '분기 방향 변경');
+  assert.strictEqual(sp.branch, 1);
+  assert.deepStrictEqual(splitterExits(sp), [0, 3], '왼쪽 분기가 반영돼야 한다');
+  assert.strictEqual(L.setBranchSide(n7, sp.id, 0).branch, 0, '다시 오른쪽');
+  const plainBelt = n7.structures.find(s2 => s2.key === 'belt');
+  assert.strictEqual(L.setBranchSide(n7, cap7.id, 1).ok, false, '분할 컨베이어가 아니면 거부');
+  assert.ok(!plainBelt || L.setBranchSide(n7, plainBelt.id, 1).ok === false, '일반 벨트도 거부');
+  console.log(`✓ 분할 컨베이어 2갈래 (정면 + ${DIR_NAMES[1]}/${DIR_NAMES[3]} 선택)`);
 }
 
 // --- 발전소 연료 (나무 · 석탄 · 석유) ---

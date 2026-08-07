@@ -1,13 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <path d="M4 40 H60 L53.84 28 H10.16 Z" fill="#5c6b78" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
-    <rect x="4" y="40" width="56" height="10" rx="2" fill="#4a444f" stroke="#161018" stroke-width="3"/><path d="M4 46.2 h56 v3.8 h-56 Z" fill="#161018" opacity="0.16"/>
-    <path d="M6 34 H58" stroke="#161018" stroke-width="2.2"/>
-    <circle cx="32" cy="34" r="7" fill="#e2ebf2" stroke="#161018" stroke-width="2.5"/>
-    <g stroke="#161018" stroke-width="6" stroke-linecap="round">
-      <path d="M32 34 H54 M32 34 L18 20 M32 34 L18 48"/>
-    </g>
-    <g stroke="#ffe066" stroke-width="3" stroke-linecap="round">
-      <path d="M32 34 H54 M32 34 L18 20 M32 34 L18 48"/>
-    </g>
-    <path d="M50 28 L60 34 L50 40 Z" fill="#ffe066" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+  <ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>
+    <path d="M23 28 h18 v27 h-18 Z" fill="#4c5a66" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M32 28 h9 v27 h-9 Z" fill="#161018" opacity="0.2"/>
+    <path d="M23 47 H41 M23 52 H41" stroke="#161018" stroke-width="1.8" opacity="0.45"/>
+    <path d="M25 45 L32 57 L39 45 Z" fill="#9df4ee" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M3 36 H61 L54.620000000000005 26 H9.379999999999999 Z" fill="#5c6b78" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <rect x="3" y="36" width="58" height="9" rx="2" fill="#4a444f" stroke="#161018" stroke-width="3"/><path d="M3 41.58 h58 v3.42 h-58 Z" fill="#161018" opacity="0.16"/>
+    <path d="M12 26 V36 M20 26 V36 M46 26 V36 M54 26 V36" stroke="#161018" stroke-width="1.8" opacity="0.45"/>
+    <path d="M6 31 H50" stroke="#161018" stroke-width="8" stroke-linecap="round"/>
+    <path d="M6 31 H50" stroke="#ffe066" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="31" cy="31" r="7" fill="#e2ebf2" stroke="#161018" stroke-width="2.5"/>
+    <path d="M25 26 L37 26 L31 37 Z" fill="#9df4ee" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M50 25 L61 31 L50 37 Z" fill="#ffe066" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
 </svg>

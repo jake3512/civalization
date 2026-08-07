@@ -286,6 +286,8 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   background: var(--panel); border: 2px solid var(--line); color: var(--text); border-radius: 5px;
 }
 .rot-btn.active { border-color: var(--teal); color: var(--teal); background: rgba(47,224,176,0.12); }
+/* 분할 컨베이어의 분기 방향 버튼 — 글자가 들어가므로 화살표 버튼보다 작게 */
+.rot-btn.wide { font-size: 13px; padding: 9px 4px; }
 .rot-btn:active { transform: translateY(1px); }
 .rot-now { color: var(--teal); font-size: 15px; }
 .build-item {
@@ -381,6 +383,8 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .port-dir { min-width: 54px; color: var(--text-dim); }
 .port-res { display: inline-flex; align-items: center; gap: 3px; }
 .port-on { color: var(--teal); }
+.port-off { color: var(--danger); font-weight: 700; }
+.port-sel.off { color: var(--danger); border-color: var(--danger); }
 .port-sel {
   flex: 1; min-width: 0; padding: 3px 6px; font-family: var(--font-mono); font-size: 12px;
   color: var(--text); background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 3px;

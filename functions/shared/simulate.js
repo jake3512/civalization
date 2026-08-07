@@ -9,7 +9,7 @@
 // 까지 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
 // ============================================================
 import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity, isBeltKey,
-         CROPS, ANIMALS, pickPowerFuel, outputPorts } from './data.js';
+         CROPS, ANIMALS, pickPowerFuel, outputPorts, splitterExits, BELT_OFF } from './data.js';
 import { getTile } from './world.js';
 import { footprintTiles, tileKey, structureAt, getTerritoryRadius,
          depositInto, withdrawFrom, recomputeStock, finishExpedition } from './logic.js';
@@ -92,7 +92,7 @@ export function exitBeltOn(nation, s, side) {
  *
  * 이 벨트 칸에서 자원이 나갈 방향들을 정한다.
  *  · 일반 벨트: 설정된 방향 하나
- *  · 분할 컨베이어: 정면 · 좌 · 우 세 방향을 번갈아 (막힌 쪽은 건너뛴다)
+ *  · 분할 컨베이어: 정면과 옆(좌 또는 우) **두 방향**을 번갈아 (막힌 쪽은 건너뛴다)
  *  · 교차로: 들어온 방향 그대로 직진 (두 라인이 섞이지 않는다)
  */
 function beltExits(s, fromDir) {
@@ -102,10 +102,9 @@ function beltExits(s, fromDir) {
     return [fromDir == null ? (s.dir || 0) : fromDir];
   }
   if (kind === 'splitter') {
-    const d = s.dir || 0;
-    const order = [d, (d + 3) % 4, (d + 1) % 4];   // 정면 → 좌 → 우
+    const order = splitterExits(s);   // [정면, 옆] — 옆이 어느 쪽인지는 s.branch
     // 매번 같은 순서로 보내면 한쪽만 채워지므로, 보낸 횟수로 시작점을 돌린다
-    const turn = (s._splitTurn || 0) % 3;
+    const turn = (s._splitTurn || 0) % order.length;
     return [...order.slice(turn), ...order.slice(0, turn)];
   }
   return [s.dir || 0];
@@ -229,9 +228,10 @@ function drainStorageToBelt(nation, s, def) {
   const filters = s.outFilter || {};
 
   for (let dir = 0; dir < DIR_VECT.length && budget > 0; dir++) {
+    const only = filters[dir];
+    if (only === BELT_OFF) continue;   // 이 면은 벨트 연결을 끊어 둔 상태
     const belt = findAdjacentBelt(nation, s, def, true, dir);
     if (!belt) continue;
-    const only = filters[dir];
     const entries = Object.entries(s.store || {})
       .filter(([res, v]) => v > 0 && (!only || res === only));
     for (const [res, have] of entries) {

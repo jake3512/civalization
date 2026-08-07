@@ -796,31 +796,39 @@ const art = {
     ${ci(13, 34, 5, P.metalL, 2.5)}${ci(51, 34, 5, P.metalL, 2.5)}
     ${sh('M24 28 L38 34 L24 40 Z', P.goldL, 2.5)}`,
 
-  // 분할 컨베이어 — 한 줄로 들어와 세 갈래로 나간다
-  belt_splitter: `${topFace(4, 40, 56, 12, '#5c6b78')}
-    ${frontFace(4, 40, 56, 10, P.darkL, 2)}
-    <path d="M6 34 H58" stroke="${INK}" stroke-width="2.2"/>
-    ${ci(32, 34, 7, P.metalL, 2.5)}
-    <g stroke="${INK}" stroke-width="6" stroke-linecap="round">
-      <path d="M32 34 H54 M32 34 L18 20 M32 34 L18 48"/>
-    </g>
-    <g stroke="${P.goldL}" stroke-width="3" stroke-linecap="round">
-      <path d="M32 34 H54 M32 34 L18 20 M32 34 L18 48"/>
-    </g>
-    ${sh('M50 28 L60 34 L50 40 Z', P.goldL, 2.5)}`,
+  // 분할 컨베이어 — 한 줄로 들어와 **두 갈래**(정면 + 옆)로 나간다.
+  //   왼쪽에서 들어온 흐름(금색)이 가운데 분류기(회전 팔)에서 갈라져,
+  //   하나는 그대로 오른쪽으로, 하나는 앞쪽 옆 갈래(청록)로 빠진다.
+  belt_splitter: `${groundSm}
+    ${sh('M23 28 h18 v27 h-18 Z', '#4c5a66')}
+    ${fd('M32 28 h9 v27 h-9 Z', INK, 0.2)}
+    <path d="M23 47 H41 M23 52 H41" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
+    ${sh('M25 45 L32 57 L39 45 Z', P.cyanL, 2.5)}
+    ${topFace(3, 36, 58, 10, '#5c6b78')}
+    ${frontFace(3, 36, 58, 9, P.darkL, 2)}
+    <path d="M12 26 V36 M20 26 V36 M46 26 V36 M54 26 V36" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
+    <path d="M6 31 H50" stroke="${INK}" stroke-width="8" stroke-linecap="round"/>
+    <path d="M6 31 H50" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
+    ${ci(31, 31, 7, P.metalL, 2.5)}
+    ${sh('M25 26 L37 26 L31 37 Z', P.cyanL, 2)}
+    ${sh('M50 25 L61 31 L50 37 Z', P.goldL, 2.5)}`,
 
-  // 컨베이어 교차로 — 두 라인이 섞이지 않고 지나간다
-  belt_cross: `${topFace(4, 40, 56, 12, '#5c6b78')}
-    ${frontFace(4, 40, 56, 10, P.darkL, 2)}
-    <path d="M6 34 H58" stroke="${INK}" stroke-width="2.2"/>
-    <g stroke="${INK}" stroke-width="8" stroke-linecap="round">
-      <path d="M4 34 H60 M32 6 V56"/>
-    </g>
-    <path d="M4 34 H60" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
-    <path d="M32 6 V56" stroke="${P.cyanL}" stroke-width="4" stroke-linecap="round"/>
-    ${ci(32, 34, 6, P.metalL, 2.5)}
-    ${sh('M52 28 L62 34 L52 40 Z', P.goldL, 2.5)}
-    ${sh('M26 48 L32 58 L38 48 Z', P.cyanL, 2.5)}`,
+  // 컨베이어 교차로 — 세로 라인(청록) 위로 가로 라인(금색)이 **다리처럼 지나간다**.
+  //   서로 닿지 않고 넘어가는 그림이라 "섞이지 않는다"가 한눈에 읽힌다.
+  belt_cross: `${groundSm}
+    ${sh('M25 6 h14 v50 h-14 Z', '#4c5a66')}
+    ${fd('M32 6 h7 v50 h-7 Z', INK, 0.2)}
+    <path d="M25 14 H39 M25 22 H39 M25 42 H39 M25 50 H39" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
+    <path d="M32 6 V22 M32 42 V54" stroke="${P.cyanL}" stroke-width="4" stroke-linecap="round"/>
+    ${sh('M26 46 L32 57 L38 46 Z', P.cyanL, 2.5)}
+    ${fd('M25 24 h14 v14 h-14 Z', '#000', 0.42)}
+    ${sh('M14 40 h6 v14 h-6 Z', P.metalD, 2)}${sh('M44 40 h6 v14 h-6 Z', P.metalD, 2)}
+    ${topFace(2, 36, 60, 10, '#6a7b88')}
+    ${frontFace(2, 36, 60, 9, P.darkL, 2)}
+    <path d="M8 31 H56" stroke="${INK}" stroke-width="1.8" opacity="0.5"/>
+    <path d="M12 26 V36 M20 26 V36 M44 26 V36 M52 26 V36" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
+    <path d="M6 31 H50" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
+    ${sh('M50 25 L61 31 L50 37 Z', P.goldL, 2.5)}`,
 
   // 창고 — 넓은 박공 지붕 + 큰 셔터문
   warehouse: `${ground}

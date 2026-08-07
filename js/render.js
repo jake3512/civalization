@@ -10,7 +10,7 @@
 // ============================================================
 import { getTileRange } from './world.js';
 import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon, isBeltKey,
-         DIR_VECT, outputPorts } from './data.js';
+         DIR_VECT, outputPorts, splitterExits } from './data.js';
 
 // 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
@@ -437,10 +437,30 @@ export class Renderer {
       ctx.strokeStyle = '#120e14'; ctx.lineWidth = 2;
       ctx.strokeRect(b.sx + 2, b.sy + 1, tile - 4, tileY - 2);
       ctx.lineWidth = 1;
-      ctx.fillStyle = '#ffd84d';
-      ctx.font = `bold ${tile * 0.55}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(DIR_ARROW[s.dir ?? 0], b.sx + tile / 2, b.sy + tileY / 2);
+      // 화살표를 그 방향으로 조금 밀어 그린다 (갈래가 둘일 때 겹치지 않게)
+      const arrow = (d, color, scale, push) => {
+        const [ax, ay] = DIR_VECT[d];
+        ctx.fillStyle = color;
+        ctx.font = `bold ${tile * scale}px sans-serif`;
+        ctx.fillText(DIR_ARROW[d], b.sx + tile / 2 + ax * tile * push, b.sy + tileY / 2 + ay * tileY * push);
+      };
+      const kind = STRUCTURES[s.key].beltKind;
+      if (kind === 'splitter') {
+        // 정면(금색)과 옆 갈래(청록) 두 방향으로만 나눈다
+        const [front, side] = splitterExits(s);
+        arrow(front, '#ffd84d', 0.5, 0.12);
+        arrow(side, '#7ff0e2', 0.44, 0.3);
+      } else if (kind === 'cross') {
+        // 두 축이 서로 섞이지 않고 통과한다 — 양끝에 화살표를 찍어 분할과 구분한다
+        const d = s.dir ?? 0;
+        arrow(d, '#ffd84d', 0.4, 0.3);
+        arrow((d + 2) % 4, '#ffd84d', 0.4, 0.3);
+        arrow((d + 1) % 4, '#7ff0e2', 0.4, 0.3);
+        arrow((d + 3) % 4, '#7ff0e2', 0.4, 0.3);
+      } else {
+        arrow(s.dir ?? 0, '#ffd84d', 0.55, 0);
+      }
       // 방금 이 벨트를 지나간 자원을 얹어 무엇이 흐르는지 보여준다
       if (s._carry && tile >= 12) {
         const img = getIconImage(RESOURCES[s._carry]?.icon || '');
