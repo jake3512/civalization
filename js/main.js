@@ -853,6 +853,15 @@ document.getElementById('rotate-btn').addEventListener('click', () => {
 });
 document.getElementById('build-confirm').addEventListener('click', confirmBuild);
 document.getElementById('build-cancel').addEventListener('click', clearSelectedStruct);
+// 지도를 멀리 끌고 나가면 내 나라를 다시 찾기 어렵다 — 한 번에 수도로 돌아온다.
+// (수도 발판이 3×3이라 +1을 더해야 건물 한가운데가 화면 중앙에 온다)
+function goHome() {
+  const cap = game.myNation && game.myNation.capital;
+  if (!cap) { flashMessage('아직 수도가 없습니다', true); return; }
+  renderer.centerOn(cap.x + 1, cap.y + 1);
+  flashMessage('수도로 이동했습니다', false);
+}
+document.getElementById('home-btn').addEventListener('click', goHome);
 document.getElementById('power-btn').addEventListener('click', (e) => {
   renderer.showPower = !renderer.showPower;
   e.currentTarget.classList.toggle('active', renderer.showPower);
@@ -866,6 +875,9 @@ document.getElementById('zoom-out-btn').addEventListener('click', () => {
 
 // ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
 window.addEventListener('keydown', (e) => {
+  // 나라 이름을 치는 중에 단축키가 먹으면 안 된다 (r·p·h가 전부 글자다)
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (e.key.toLowerCase() === 'r' && isRotatable(selectedStruct)) {
     beltDir = (beltDir + 1) % 4;
     renderCostPreview(STRUCTURES[selectedStruct]);
@@ -874,6 +886,7 @@ window.addEventListener('keydown', (e) => {
     renderer.showPower = !renderer.showPower;
     document.getElementById('power-btn').classList.toggle('active', renderer.showPower);
   }
+  if (e.key.toLowerCase() === 'h') goHome();   // 수도로 돌아오기
   // 키보드가 있으면 Enter로 설치, Esc로 취소 (터치에서는 화면 버튼을 쓴다)
   if (selectedStruct) {
     if (e.key === 'Enter') { e.preventDefault(); confirmBuild(); }
