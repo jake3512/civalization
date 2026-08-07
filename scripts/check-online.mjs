@@ -92,6 +92,35 @@ if (signup.status === 200 && signup.body?.idToken) {
   console.log(`  ⚠️ 확인 불가 (${signup.status}) ${JSON.stringify(signup.body).slice(0, 120)}`);
 }
 
+// 2-2) 구글 로그인은 "승인된 도메인"에서만 열린다.
+//      배포 주소가 목록에 없으면 버튼을 눌러도 창이 뜨지 않는다.
+console.log('\n[2-2] 구글 로그인 · 승인된 도메인');
+const cfg = await req(`https://identitytoolkit.googleapis.com/v1/projects?key=${apiKey}`);
+const domains = cfg.body?.authorizedDomains || [];
+if (cfg.status === 200) {
+  console.log('  등록된 도메인:', domains.join(', ') || '(없음)');
+  // 배포 주소를 알아낸다: 인자로 받거나, git remote에서 GitHub Pages 주소를 추정
+  let site = process.argv.find(a => a.startsWith('--site='))?.slice(7) || '';
+  if (!site) {
+    try {
+      const { execSync } = await import('node:child_process');
+      const remote = execSync('git remote get-url origin', { encoding: 'utf8' }).trim();
+      const m = remote.match(/github\.com[:/]([^/]+)\//);
+      if (m) site = `${m[1].toLowerCase()}.github.io`;
+    } catch { /* git이 없으면 건너뛴다 */ }
+  }
+  if (site) {
+    if (domains.includes(site)) {
+      console.log(`  ✓ 배포 주소(${site})가 등록돼 있음`);
+    } else {
+      console.log(`  ❌ 배포 주소(${site})가 등록돼 있지 않음 — 구글 로그인이 그 주소에서 열리지 않습니다`);
+      problems.push(`Firebase 콘솔 → Authentication → Settings → 승인된 도메인에 ${site} 추가`);
+    }
+  }
+} else {
+  console.log(`  ⚠️ 확인 불가 (${cfg.status})`);
+}
+
 // 2) 국가 목록을 읽을 수 있는가 (상대를 찾으려면 읽기가 열려 있어야 한다)
 console.log('\n[3/4] 국가 목록 읽기 (nations)');
 const read = await req(`${REST}/nations`);

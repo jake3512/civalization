@@ -17,6 +17,9 @@
 import { FIREBASE_CONFIG, FIREBASE_ENABLED } from './firebase-config.js';
 
 let app, db, auth, functionsInstance, uid = null;
+// 리디렉트 방식으로 로그인하고 돌아왔을 때의 결과 (initFirebase가 채운다)
+let lastRedirect = null;
+export function takeRedirectResult() { const r = lastRedirect; lastRedirect = null; return r; }
 let fx = {};        // firestore 함수 모음
 let authFx = {};    // auth 함수 모음
 let fnFx = {};       // functions 함수 모음
@@ -56,6 +59,16 @@ async function _initFirebase() {
     auth = authMod.getAuth(app);
     functionsInstance = functionsMod.getFunctions(app);
     fx = firestore; authFx = authMod; fnFx = functionsMod;
+
+    // 구글 로그인을 리디렉트로 했다면 돌아온 지금 그 결과를 받아야 한다.
+    // (팝업이 막히는 모바일에서 이 경로를 탄다)
+    try {
+      const redirect = await authFx.getRedirectResult(auth);
+      if (redirect && redirect.user) lastRedirect = { ok: true, user: redirect.user };
+    } catch (e) {
+      lastRedirect = authError(e);
+      console.warn('[multiplayer] 리디렉트 로그인 실패:', e);
+    }
 
     // 이미 로그인돼 있으면(브라우저에 세션이 남아 있으면) 그 계정을 그대로 쓴다.
     // 여기서 무조건 익명 로그인을 부르면, 이메일로 로그인해 둔 세션을 새 익명
@@ -143,6 +156,12 @@ function authError(e) {
     'configuration-not-found': 'Firebase 콘솔에서 Authentication을 먼저 켜야 합니다',
     'credential-already-in-use': '그 계정은 이미 다른 나라에 연결돼 있습니다 — 로그인해서 이어가세요',
     'provider-already-linked': '이미 계정이 연결돼 있습니다',
+    'popup-blocked': '팝업이 차단됐습니다 — 다시 눌러주세요 (창 대신 페이지 이동으로 진행합니다)',
+    'popup-closed-by-user': '로그인 창이 닫혔습니다',
+    'account-exists-with-different-credential': '같은 이메일로 이미 다른 방식(이메일/비밀번호)의 계정이 있습니다',
+    // 배포 주소가 Firebase에 등록돼 있지 않으면 구글 로그인이 아예 시작되지 않는다
+    'unauthorized-domain': `이 주소(${typeof location !== 'undefined' ? location.hostname : ''})가 Firebase에 등록돼 있지 않습니다`
+      + ' — 콘솔 → Authentication → Settings → 승인된 도메인에 추가하세요',
   };
   return { ok: false, code, error: table[code] || (e && e.message) || '로그인에 실패했습니다' };
 }
@@ -176,6 +195,77 @@ export async function signUp(email, password) {
     uid = res.user.uid;
     return { ok: true, linked: false, user: currentUser() };
   } catch (e) { return authError(e); }
+}
+
+/**
+ * 구글 계정으로 로그인.
+ *
+ * 익명으로 플레이 중이면 **그 계정에 구글을 연결(link)** 한다 — uid가 유지되므로
+ * 하던 나라를 그대로 들고 간다. 이미 그 구글 계정으로 만든 나라가 있으면
+ * (credential-already-in-use) 연결 대신 그 계정으로 갈아탄다.
+ *
+ * 팝업이 기본이지만 모바일 브라우저에서는 자주 막힌다. 막히면 리디렉트로
+ * 넘어가고, 돌아왔을 때 initFirebase가 getRedirectResult로 결과를 받는다.
+ */
+export async function signInWithGoogle({ preferRedirect = false } = {}) {
+  if (!auth || !authFx.GoogleAuthProvider) return { ok: false, error: '온라인에 연결되지 않았습니다' };
+  const provider = new authFx.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const u = auth.currentUser;
+  const linking = !!(u && u.isAnonymous);
+
+  const goRedirect = async () => {
+    // 리디렉트로 나갔다가 돌아오는 동안 게임이 새로 뜨므로, 진행 중이던 저장은
+    // 이미 localStorage에 있다 (돌아오면 이어하기 카드로 뜬다).
+    if (linking) await authFx.linkWithRedirect(u, provider);
+    else await authFx.signInWithRedirect(auth, provider);
+    return { ok: true, redirecting: true };
+  };
+
+  if (preferRedirect) {
+    try { return await goRedirect(); } catch (e) { return authError(e); }
+  }
+
+  try {
+    const res = linking
+      ? await authFx.linkWithPopup(u, provider)
+      : await authFx.signInWithPopup(auth, provider);
+    uid = res.user.uid;
+    return { ok: true, linked: linking, user: currentUser() };
+  } catch (e) {
+    const code = ((e && e.code) || '');
+    // 팝업 자체가 불가능한 환경 → 리디렉트로 다시 시도
+    if (/popup-blocked|operation-not-supported-in-this-environment|web-storage-unsupported/.test(code)) {
+      try { return await goRedirect(); } catch (e2) { return authError(e2); }
+    }
+    // 사용자가 창을 닫은 것은 오류가 아니다
+    if (/popup-closed-by-user|cancelled-popup-request|user-cancelled/.test(code)) {
+      return { ok: false, cancelled: true, error: '로그인 창이 닫혔습니다' };
+    }
+    // 팝업/리디렉트 창을 여는 데 실패하면 SDK가 internal-error로 뭉뚱그린다.
+    // 실제 원인은 대개 "이 주소가 승인된 도메인이 아니다"이거나 네트워크 차단이다.
+    if (code.includes('internal-error')) {
+      const host = typeof location !== 'undefined' ? location.hostname : '';
+      return {
+        ok: false, code: 'internal-error',
+        error: `구글 로그인 창을 열지 못했습니다. 이 주소(${host})가 Firebase 콘솔 →`
+          + ' Authentication → Settings → 승인된 도메인에 등록돼 있는지 확인해주세요',
+      };
+    }
+    // 그 구글 계정에 이미 다른 나라가 붙어 있다 → 연결 말고 그 계정으로 로그인
+    if (code.includes('credential-already-in-use') || code.includes('email-already-in-use')) {
+      const cred = authFx.GoogleAuthProvider.credentialFromError
+        ? authFx.GoogleAuthProvider.credentialFromError(e) : null;
+      if (cred && authFx.signInWithCredential) {
+        try {
+          const res = await authFx.signInWithCredential(auth, cred);
+          uid = res.user.uid;
+          return { ok: true, switched: true, user: currentUser() };
+        } catch (e2) { return authError(e2); }
+      }
+    }
+    return authError(e);
+  }
 }
 
 /** 로그아웃하고 다시 익명 상태로 돌아간다 (게스트 플레이는 계속 가능) */

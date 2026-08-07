@@ -112,6 +112,23 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
   background: var(--panel); border: 1px solid var(--line); color: var(--text);
   padding: 10px 12px; border-radius: 3px; font-size: 14px;
 }
+/* 구글 로그인 버튼 — 구글 브랜드 가이드대로 흰 바탕에 로고 + 텍스트 */
+.google-btn {
+  width: 100%; min-height: 46px; margin-bottom: 10px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: #fff; color: #1f1f1f; border: 1px solid #dadce0; border-radius: 4px;
+  font-family: var(--font-body); font-size: 14px; font-weight: 500;
+}
+.google-btn:active { background: #eee; }
+.gmark { width: 18px; height: 18px; flex: none; }
+.auth-or {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--text-dim); margin: 4px 0 8px;
+}
+.auth-or::before, .auth-or::after {
+  content: ''; flex: 1; height: 1px; background: var(--line);
+}
+
 .auth-actions { display: flex; gap: 8px; }
 .auth-main {
   flex: 1; padding: 10px; background: var(--accent); color: #14100a; border: none;
