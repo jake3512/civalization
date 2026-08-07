@@ -8,7 +8,7 @@
 // nation 파라미터는 아래 형태의 "평범한 객체"면 됩니다:
 //   { resources, structures, territory(Set), unlocked(Set), research, nextStructId }
 // ============================================================
-import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, isBeltKey, isRotatable,
+import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, MIN_CAPITAL_DISTANCE, isBeltKey, isRotatable,
          VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity,
          CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
@@ -184,7 +184,7 @@ function addTerritory(nation, cx, cy, radius) {
  * 건국 화면에서 실시간 미리보기로도 쓰이므로 nation 없이 좌표만으로 판정한다.
  * returns { ok, found:Set, missing:string[], radius, center:[cx,cy] }
  */
-export function capitalSiteReport(x, y) {
+export function capitalSiteReport(x, y, others = []) {
   const def = STRUCTURES.capital;
   const [cx, cy] = footprintCenter(x, y, def.footprint);
   const radius = getTerritoryRadius('capital', 1);
@@ -205,10 +205,28 @@ export function capitalSiteReport(x, y) {
   // 광산이면 수도 4레벨(구리 주괴 필요)에서 되돌릴 수 없이 막힌다.
   // 그래서 아예 그런 자리에는 수도를 못 세우게 막는다.
   const buried = buriedNodes(x, y, def.footprint);
+  // 다른 플레이어의 수도와 너무 가까우면 영토가 겹쳐 서로의 자원을 빼앗는다.
+  const near = nearestCapital(x, y, others);
+  const tooClose = near && near.dist < MIN_CAPITAL_DISTANCE ? near : null;
   return {
-    ok: missing.length === 0 && buried.length === 0,
-    found, missing, buried, radius, center: [cx, cy],
+    ok: missing.length === 0 && buried.length === 0 && !tooClose,
+    found, missing, buried, tooClose, radius, center: [cx, cy],
   };
+}
+
+/**
+ * 후보 자리에서 가장 가까운 남의 수도. others는 다른 플레이어의 공개 스냅샷
+ * (defenseSnapshot)이나 { capital: {x, y}, name } 형태면 된다.
+ */
+export function nearestCapital(x, y, others = []) {
+  let best = null;
+  for (const o of others || []) {
+    const c = o && o.capital;
+    if (!c || typeof c.x !== 'number') continue;
+    const dist = Math.hypot(c.x - x, c.y - y);
+    if (!best || dist < best.dist) best = { name: o.name, x: c.x, y: c.y, dist };
+  }
+  return best;
 }
 
 /** 이 발판이 깔고 앉게 되는 자원 노드 종류 (되돌릴 수 없으므로 미리 알려준다) */
@@ -226,7 +244,7 @@ export function buriedNodes(x, y, footprint) {
  * 칸마다 capitalSiteReport를 돌리면 (칸 수 × 반경 원) 만큼 지형을 다시 계산해 느리므로,
  * 필요한 자원 노드 위치만 한 번 모아두고 각 후보와의 거리만 비교한다.
  */
-export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
+export function findCapitalSites(x0, y0, x1, y1, limit = 600, others = []) {
   const def = STRUCTURES.capital;
   const radius = getTerritoryRadius('capital', 1);
   const pad = Math.ceil(radius) + 2; // 화면 밖 노드도 후보의 영토에 들어올 수 있다
@@ -246,8 +264,12 @@ export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
       const [cx, cy] = footprintCenter(x, y, def.footprint);
       const all = CAPITAL_REQUIRED_NODES.every(k =>
         nodes[k].some(([nx, ny]) => Math.hypot(nx - cx, ny - cy) <= radius));
-      // 노드를 깔고 앉는 자리는 후보에서 뺀다 (capitalSiteReport와 같은 규칙)
-      if (all && buriedNodes(x, y, def.footprint).length === 0) sites.push([x, y]);
+      // 노드를 깔고 앉거나 남의 수도에 붙은 자리는 후보에서 뺀다
+      // (capitalSiteReport와 같은 규칙)
+      if (!all || buriedNodes(x, y, def.footprint).length) continue;
+      const near = nearestCapital(x, y, others);
+      if (near && near.dist < MIN_CAPITAL_DISTANCE) continue;
+      sites.push([x, y]);
     }
   }
   return sites;
@@ -257,13 +279,13 @@ export function findCapitalSites(x0, y0, x1, y1, limit = 600) {
  * 시작 지점에서 바깥으로 나선형으로 훑어 가장 가까운 유효 수도 자리를 찾는다.
  * ("추천 위치" 버튼 — 조건을 만족하는 칸이 7% 정도뿐이라 맨손 탐색은 번거롭다)
  */
-export function findNearestCapitalSite(startX, startY, maxRadius = 60) {
+export function findNearestCapitalSite(startX, startY, maxRadius = 60, others = []) {
   for (let r = 0; r <= maxRadius; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // 링의 테두리만
         const x = startX + dx, y = startY + dy;
-        if (capitalSiteReport(x, y).ok) return { x, y };
+        if (capitalSiteReport(x, y, others).ok) return { x, y };
       }
     }
   }
@@ -428,10 +450,21 @@ export function canDemolish(nation, structId) {
 
 /** 영토를 처음부터 다시 계산한다 (철거로 줄어들 수 있으므로 누적이 아니라 재구성) */
 function recomputeTerritory(nation) {
-  nation.territory = new Set();
-  for (const s of nation.structures) {
-    for (const [x, y] of territoryTilesOf(nation, s)) nation.territory.add(tileKey(x, y));
+  nation.territory = territoryFromStructures(nation.structures);
+}
+
+/**
+ * 구조물 목록만으로 영토를 다시 만든다.
+ * 영토는 수도·중심지의 위치와 레벨에서 나오는 값이라 따로 들고 다닐 필요가 없다.
+ * 멀티플레이에서 기지 스냅샷을 주고받을 때 이걸 쓰면 타일 수천 개를 네트워크로
+ * 보내지 않아도 된다 (공격자 쪽에서 같은 규칙으로 다시 만든다).
+ */
+export function territoryFromStructures(structures) {
+  const set = new Set();
+  for (const s of structures || []) {
+    for (const [x, y] of territoryTilesOf(null, s)) set.add(tileKey(x, y));
   }
+  return set;
 }
 
 /** 구조물을 철거한다. 안에 있던 자원은 전부 사라지고 건설비도 돌려주지 않는다. */
@@ -837,9 +870,9 @@ export function buildRaidReport(attacker, defenderSnapshot, session, now = Date.
       seed: session.seed,
       deploys: (session.deployLog || []).map(d => ({ ...d })),
       base: {
+        // 영토는 담지 않는다 — 구조물에서 다시 만들어진다 (territoryFromStructures)
         id: defenderSnapshot.id, name: defenderSnapshot.name, color: defenderSnapshot.color,
         capital: defenderSnapshot.capital,
-        territory: Array.from(defenderSnapshot.territory || []),
         structures: (defenderSnapshot.structures || []).map(s => ({ ...s })),
         units: { defense: { ...((defenderSnapshot.units && defenderSnapshot.units.defense) || {}) } },
       },
@@ -972,6 +1005,8 @@ export function findMatch(myNation, candidates, now = Date.now()) {
  * 연구 진행이나 레시피 같은 내정 정보는 넘기지 않는다.
  */
 export function defenseSnapshot(nation, now = Date.now()) {
+  // 영토(타일 수천 개)는 담지 않는다 — 구조물에서 다시 만들 수 있다
+  // (territoryFromStructures). 스냅샷은 접속자 수만큼 오가므로 작을수록 좋다.
   return {
     id: nation.id,
     name: nation.name,
@@ -979,7 +1014,6 @@ export function defenseSnapshot(nation, now = Date.now()) {
     capital: nation.capital,
     trophies: nation.trophies || 0,
     shieldUntil: nation.shieldUntil || 0,
-    territory: Array.from(nation.territory || []),
     structures: (nation.structures || []).map(s => ({
       id: s.id, key: s.key, x: s.x, y: s.y, level: s.level, dir: s.dir || 0, idle: !!s.idle,
     })),

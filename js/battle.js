@@ -13,7 +13,7 @@
 // 원래 체력으로 다시 시작). 오직 자원만 영구적으로 약탈된다.
 // ============================================================
 import { STRUCTURES, UNITS, BATTLE, getStructureMaxHp } from './data.js';
-import { tileKey, getTerritoryRadius } from './logic.js';
+import { tileKey, getTerritoryRadius, territoryFromStructures } from './logic.js';
 
 let nextEntityId = 1;
 
@@ -71,7 +71,11 @@ export function createBattleSession(defenderSnapshot, attackerDeck, seed = null)
   nextEntityId = 1;
   const usedSeed = seed == null ? (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0 : seed >>> 0;
   const rng = makeRng(usedSeed);
-  const territorySet = new Set(defenderSnapshot.territory || []);
+  // 소환 금지 구역(방어자 영토). 스냅샷에 영토가 없으면(네트워크로 받은 기지)
+  // 구조물에서 같은 규칙으로 다시 만든다.
+  const territorySet = defenderSnapshot.territory
+    ? new Set(defenderSnapshot.territory)
+    : territoryFromStructures(defenderSnapshot.structures);
 
   const structures = (defenderSnapshot.structures || []).map(s => {
     const maxHp = getStructureMaxHp(s.key, s.level) || 1;

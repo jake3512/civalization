@@ -19,11 +19,11 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 
 import { Nation, createNation } from './shared/game.js';
 import {
-  canAttack, applyRaidResult, sellFromStorage,
+  canAttack, applyRaidResult, sellFromStorage, nearestCapital,
   manualMoveToStorage, manualMoveToStructure, manualMoveBetweenStorages, manualOperate,
 } from './shared/logic.js';
 import { regionKeyOf } from './shared/regionUtil.js';
-import { LOGISTICS } from './shared/data.js';
+import { LOGISTICS, MIN_CAPITAL_DISTANCE } from './shared/data.js';
 
 setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
 
@@ -61,6 +61,18 @@ export const submitInitNation = onCall(async (request) => {
     throw new HttpsError('invalid-argument', '좌표가 필요합니다');
   }
   const safeName = (name || '이름없는 국가').toString().slice(0, 16);
+
+  // 다른 플레이어의 수도와 최소 거리를 서버에서도 확인한다 (영토가 겹치면
+  // 서로의 자원 노드를 빼앗고 건설 자리가 막힌다)
+  const all = await db.collection('nations').get();
+  const others = [];
+  all.forEach(d => { if (d.id !== uid && d.data()?.capital) others.push(d.data()); });
+  const near = nearestCapital(Math.round(x), Math.round(y), others);
+  if (near && near.dist < MIN_CAPITAL_DISTANCE) {
+    return { error: `${near.name || '다른 국가'}의 수도와 너무 가깝습니다 `
+      + `(${Math.round(near.dist)}칸 / 최소 ${MIN_CAPITAL_DISTANCE}칸)` };
+  }
+
   let nation;
   try {
     // 수도 입지 요건(주변 영토에 숲·채석장)을 서버에서도 다시 검증한다

@@ -5,7 +5,7 @@
 //   - 탭(드래그가 아닌 짧은 터치): 건설/선택
 //   - 벨트 회전 · 전력범위 표시: 화면 우측 하단 버튼 (R/P 키보드도 병행 지원)
 // ============================================================
-import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, structureIcon,
+import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, MIN_CAPITAL_DISTANCE, structureIcon,
          LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput,
          CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon, VIRTUAL_RESOURCES } from './data.js';
 import { Game, Nation } from './game.js';
@@ -21,6 +21,7 @@ import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlac
 import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf } from './data.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS } from './mpNet.js';
+import { saveGame, loadGame, listSaves, clearSave, storageAvailable, timeAgo } from './storage.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
@@ -33,10 +34,29 @@ const game = new Game();
 // Cloud Functions에 맡긴다. 두 경로가 같은 코드(functions/shared)를 쓰기 때문에
 // 결과는 동일하고, 여기서는 "어디서 계산할지"만 고른다.
 const onServer = () => game.serverAuthoritative;
-/** 로컬에서 먼저 판정해 UI를 즉시 갱신하고, 서버 모드면 서버 결과로 덮어쓴다. */
+/**
+ * 로컬에서 먼저 판정해 UI를 즉시 갱신하고, 서버 모드면 서버 결과로 덮어쓴다.
+ *
+ * 서버에 닿지 못하면(예: Cloud Functions 미배포) **동작을 잃어버리지 않는다** —
+ * 로컬 판정으로 내려가 그대로 실행하고, 그 사실을 한 번만 알린다.
+ * 예전에는 여기서 서버 오류 문자열("internal")을 그대로 띄우고 끝이라,
+ * 건물이 지어지지 않는데 이유도 알 수 없었다.
+ */
 async function dispatch(localFn, serverFn) {
-  if (onServer()) return await serverFn();
-  return localFn();
+  if (!onServer()) return localFn();
+  const res = await serverFn();
+  if (res && res.serverMissing) {
+    game.serverAuthoritative = false;
+    if (!dispatch._warned) {
+      dispatch._warned = true;
+      flashMessage('서버에 닿지 못해 이 기기에서 직접 판정합니다 — 게임은 계속됩니다', true);
+      // 서버 권위 모드가 끊겼으니 전투 멀티플레이만이라도 살려둔다
+      startCombatNet(pickMode() === NET_MODE.FUNCTIONS ? NET_MODE.FIRESTORE : pickMode(),
+                     document.getElementById('mp-status'), res.error);
+    }
+    return localFn();
+  }
+  return res;
 }
 const canvas = document.getElementById('field');
 const renderer = new Renderer(canvas, game);
@@ -77,7 +97,33 @@ document.getElementById('start-btn').addEventListener('click', () => {
   updatePlacementBar(); // 입지 요건 안내를 처음부터 보여준다
   renderer.centerOn(0, 0);
   requestAnimationFrame(loop); // 국가 생성 전이라도 지도는 바로 보여준다
+  prefetchPeers();            // 남의 수도 위치를 받아와 최소 거리 검사에 쓴다
 });
+
+/**
+ * 건국 화면에서 미리 다른 플레이어 목록을 받아온다.
+ * 수도는 남의 수도에서 MIN_CAPITAL_DISTANCE칸 이상 떨어져야 하는데, 그 판정을
+ * 하려면 자리를 고르기 **전에** 상대 위치를 알고 있어야 한다.
+ */
+async function prefetchPeers() {
+  try {
+    const mode = pickMode();
+    let handles = null;
+    if (mode !== NET_MODE.LOCAL) {
+      const conn = await initFirebase();
+      handles = conn.ok ? getFirestoreHandles() : null;
+    }
+    // 아직 국가가 없으니 임시 id로 붙는다 (목록만 읽고 아무것도 올리지 않는다)
+    const probe = createNet(handles ? NET_MODE.FIRESTORE : NET_MODE.LOCAL, 'probe', handles);
+    probe.watchPeers((list) => {
+      peers = list;
+      if (!game.myNation) updatePlacementBar();   // 거리 안내를 즉시 갱신
+    });
+    net = probe;   // startCombatNet이 국가 생성 뒤 닫고 진짜 연결로 바꾼다
+  } catch (e) {
+    console.warn('[mp] 상대 목록 미리 받기 실패:', e);
+  }
+}
 
 // ---------- 2단계: 지도를 탭해서 수도 위치 선택 ----------
 function updatePlacementBar() {
@@ -88,10 +134,15 @@ function updatePlacementBar() {
     confirmBtn.disabled = true;
     return;
   }
-  const site = capitalSiteReport(selectedCapital.x, selectedCapital.y);
+  const site = capitalSiteReport(selectedCapital.x, selectedCapital.y, peers);
   if (site.ok) {
     bar.innerHTML = `<b style="color:var(--teal)">건설 가능</b> (${selectedCapital.x}, ${selectedCapital.y}) — ${CAPITAL_REQUIRED_NODES.map(k => `${resIcon(TERRAIN_NODES[k].yields)}${TERRAIN_NODES[k].name}`).join(' ')} 확보`;
     confirmBtn.disabled = false;
+  } else if (site.tooClose) {
+    // 멀티플레이에서는 남의 수도와 최소 거리를 둔다 (영토가 겹치면 서로의 자원을 빼앗는다)
+    bar.innerHTML = `<b style="color:var(--danger)">${esc(site.tooClose.name || '다른 국가')}의 수도와 너무 가깝습니다</b>`
+      + ` (${Math.round(site.tooClose.dist)}칸 / 최소 ${MIN_CAPITAL_DISTANCE}칸) — 더 멀리 떨어진 자리를 찾아보세요`;
+    confirmBtn.disabled = true;
   } else {
     const names = site.missing.map(k => TERRAIN_NODES[k].name).join(', ');
     bar.innerHTML = `<b style="color:var(--danger)">${names} 없음</b> — 다른 곳을 탭해 ${names}이(가) 영토에 들어오는 자리를 찾아보세요`;
@@ -102,13 +153,14 @@ function updatePlacementBar() {
 // 조건을 만족하는 칸이 전체의 7% 정도라 직접 찾기 번거로우므로,
 // 현재 화면 중앙에서 가장 가까운 유효 자리로 카메라를 옮겨주고 바로 선택해준다.
 document.getElementById('placement-suggest').addEventListener('click', () => {
-  const cx = Math.round(renderer.originX + canvas.width / renderer.tile / 2);
-  const cy = Math.round(renderer.originY + canvas.height / renderer.tile / 2);
-  const site = findNearestCapitalSite(cx, cy);
+  const cx = Math.round(renderer.originX + renderer.vw / renderer.tile / 2);
+  const cy = Math.round(renderer.originY + renderer.vh / renderer.tile / 2);
+  // 남의 수도에서 MIN_CAPITAL_DISTANCE 밖을 찾아야 하므로 탐색 반경도 그만큼 넓게 잡는다
+  const site = findNearestCapitalSite(cx, cy, peers.length ? 260 : 60, peers);
   if (!site) { flashMessage('주변에서 조건을 만족하는 자리를 찾지 못했습니다', true); return; }
   renderer.centerOn(site.x + 1, site.y + 1);
   selectedCapital = { x: site.x, y: site.y };
-  const report = capitalSiteReport(site.x, site.y);
+  const report = capitalSiteReport(site.x, site.y, peers);
   renderer.placementMarker = { x: site.x, y: site.y, ok: report.ok, radius: report.radius };
   updatePlacementBar();
 });
@@ -120,22 +172,116 @@ document.getElementById('placement-confirm').addEventListener('click', () => {
 
   // 버튼이 비활성화돼 있어 정상 흐름에선 실패하지 않지만, 만에 하나 요건을
   // 만족하지 않으면 수도 없는 국가가 만들어지므로 여기서도 막는다.
-  if (!capitalSiteReport(x, y).ok) { updatePlacementBar(); return; }
+  if (!capitalSiteReport(x, y, peers).ok) { updatePlacementBar(); return; }
 
   game.startNation(name, color, x, y);
   renderer.placementMarker = null;
   document.getElementById('placement-bar').classList.add('hidden');
-  document.getElementById('touch-toolbar').classList.remove('hidden');
-
-  buildBuildMenu();
-  renderTravelPanel();
-  game.onTick = () => renderTravelPanel();
-  game.startLoop();
-  initMultiplayer(name, color, x, y);
+  enterGame();
 
   pendingNation = null;
   selectedCapital = null;
 });
+
+/**
+ * 국가가 준비된 뒤 게임 화면으로 들어가는 공통 경로.
+ * 새로 세운 국가와 저장에서 불러온 국가가 같은 길을 타야 화면 상태가 어긋나지 않는다.
+ */
+function enterGame() {
+  const n = game.myNation;
+  document.getElementById('touch-toolbar').classList.remove('hidden');
+
+  buildBuildMenu();
+  renderTravelPanel();
+  game.onTick = () => { renderTravelPanel(); autoSave(); };
+  game.startLoop();
+  initMultiplayer(n.name, n.color, n.capital.x, n.capital.y);
+  autoSave(true);
+}
+
+// ---------- 저장 / 이어하기 ----------
+// 최종 테크까지 5시간짜리 게임이라, 새로고침 한 번에 나라가 사라지면 안 된다.
+let lastSaveAt = 0;
+const SAVE_EVERY_MS = 10_000;
+
+/** 일정 시간마다 저장한다 (force=true면 즉시) */
+function autoSave(force = false) {
+  if (!game.myNation) return;
+  const now = Date.now();
+  if (!force && now - lastSaveAt < SAVE_EVERY_MS) return;
+  lastSaveAt = now;
+  // 전투 기록도 함께 남긴다 — 새로고침했다고 "누가 나를 털었는지"가 사라지면 안 된다.
+  // 리플레이 기록(기지 배치)까지 들어 있어 크기가 있으므로 최근 것 몇 개만 남긴다.
+  const res = saveGame(game.myNation, {
+    raids: { defense: defenseReports.slice(0, 5), attack: attackReports.slice(0, 5) },
+  });
+  if (!res.ok && !autoSave._warned) {
+    autoSave._warned = true;   // 매 틱 경고를 띄우면 게임을 못 한다 — 한 번만 알린다
+    flashMessage(`자동 저장 실패: ${res.error}`, true);
+  }
+}
+
+// 탭을 닫거나 다른 앱으로 넘어갈 때는 마지막 상태를 반드시 남긴다
+// (모바일에서는 pagehide만 오고 unload는 오지 않는 경우가 있다)
+window.addEventListener('pagehide', () => autoSave(true));
+window.addEventListener('visibilitychange', () => { if (document.hidden) autoSave(true); });
+
+/** 시작 화면에 "이어하기" 카드를 그린다 */
+function renderResumeBox() {
+  const box = document.getElementById('resume-box');
+  if (!box) return;
+  if (!storageAvailable()) {
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="resume-warn">이 브라우저는 저장을 쓸 수 없습니다(사생활 보호 모드 등).
+      새로고침하면 진행이 사라집니다.</div>`;
+    return;
+  }
+  const saves = listSaves();
+  if (!saves.length) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.innerHTML = saves.map(s => `
+    <div class="resume-card">
+      <div class="resume-head">
+        <span class="dot" style="background:${safeColor(s.color)}"></span>
+        <span class="nm">${esc(s.name)}</span>
+        <span class="when">${timeAgo(s.savedAt)} 저장</span>
+      </div>
+      <div class="resume-meta">수도 Lv.${s.capitalLevel} · 구조물 ${s.structures}동 · 해금 ${s.unlocked}종
+        · ${statusIcon('trophy')}${s.trophies}</div>
+      <div class="resume-actions">
+        <button class="resume-btn" data-resume="${esc(s.id)}">이어하기</button>
+        <button class="discard-btn" data-discard="${esc(s.id)}">지우기</button>
+      </div>
+    </div>`).join('')
+    + `<div class="resume-hint">저장된 그 시점 그대로 이어집니다 — 자리를 비운 동안 생산은 진행되지 않습니다.
+        아래에서 새 국가를 세우면 별도로 저장됩니다.</div>`;
+
+  box.querySelectorAll('[data-resume]').forEach(b =>
+    b.addEventListener('click', () => resumeSavedGame(b.dataset.resume)));
+  box.querySelectorAll('[data-discard]').forEach(b =>
+    b.addEventListener('click', () => {
+      clearSave(b.dataset.discard);
+      renderResumeBox();
+      flashMessage('저장된 국가를 지웠습니다', false);
+    }));
+}
+
+function resumeSavedGame(id = null) {
+  const data = loadGame(id);
+  if (!data) { flashMessage('저장을 불러오지 못했습니다', true); renderResumeBox(); return; }
+  game.myNation = Nation.fromJSON(data.nation);
+  defenseReports = (data.raids && data.raids.defense) || [];
+  attackReports = (data.raids && data.raids.attack) || [];
+
+  startScreen.classList.add('hidden');
+  const cap = game.myNation.capital;
+  renderer.centerOn(cap.x + 1, cap.y + 1);
+  requestAnimationFrame(loop);
+  enterGame();
+  flashMessage(`${game.myNation.name} 이어하기 — ${timeAgo(data.savedAt)} 저장된 상태입니다`, false);
+}
+
+renderResumeBox();
 
 async function initMultiplayer(name, color, cx, cy) {
   const statusEl = document.getElementById('mp-status');
@@ -145,11 +291,20 @@ async function initMultiplayer(name, color, cx, cy) {
   // 아니면 mpNet의 local/firestore 백엔드로 전투 멀티플레이만 켠다.
   if (mode !== NET_MODE.FUNCTIONS) return startCombatNet(mode, statusEl);
 
-  const ok = await initFirebase();
-  if (!ok) { statusEl.innerHTML = '<span class="dot off"></span> 로컬 모드 (firebase-config.js 미설정)'; return; }
+  const conn = await initFirebase();
+  if (!conn.ok) {
+    statusEl.innerHTML = `<span class="dot off"></span> 로컬 모드 (${esc(conn.message)})`;
+    return startCombatNet(NET_MODE.LOCAL, statusEl, conn.message);
+  }
 
   const res = await callInitNation(name, color, cx, cy);
-  if (res.error && !res.existed) { flashMessage('서버 연결 실패: ' + res.error, true); return; }
+  if (res.error && !res.existed) {
+    // 서버 권위 모드로 켜 놓았지만 실제로는 함수가 없는 경우가 많다
+    // (FUNCTIONS_DEPLOYED를 true로 두고 배포는 하지 않은 상태). 게임을 멈추지 말고
+    // 클라이언트 직결 모드로 내려가 전투 멀티플레이라도 살린다.
+    flashMessage('서버 연결 실패 — 이 기기에서 직접 판정합니다: ' + res.error, true);
+    return startCombatNet(NET_MODE.FIRESTORE, statusEl, res.error);
+  }
 
   game.serverAuthoritative = true;
   statusEl.innerHTML = '<span class="dot on"></span> 온라인 (서버 권위 모드)';
@@ -184,20 +339,29 @@ let peers = [];                 // 다른 플레이어 국가 스냅샷
 let defenseReports = [];        // 나를 공격한 리포트 (최근 것 먼저)
 let attackReports = [];         // 내가 보낸 습격 (최근 것 먼저)
 let publishTimer = null;
+let netTrouble = null;          // 온라인이 안 될 때 사람이 읽을 수 있는 사유
+let netStatusEl = null;
 
-async function startCombatNet(mode, statusEl) {
+async function startCombatNet(mode, statusEl, trouble = null) {
+  netStatusEl = statusEl || netStatusEl;
+  netTrouble = trouble;
   let handles = null;
+
   if (mode === NET_MODE.FIRESTORE) {
-    const ok = await initFirebase();
-    handles = ok ? getFirestoreHandles() : null;
+    const conn = await initFirebase();
+    handles = conn.ok ? getFirestoreHandles() : null;
     if (handles) {
-      // 습격 리포트는 국가 id로 주고받으므로 로그인 uid를 그대로 쓴다
+      // 습격 리포트는 국가 id로 주고받으므로 로그인 uid를 그대로 쓴다.
+      // (저장에서 이어할 때도 같은 uid로 돌아오므로 나에게 온 습격이 계속 도착한다)
       game.myNation.id = getUid();
     } else {
-      mode = NET_MODE.LOCAL;    // Firebase 연결 실패 → 같은 기기 대전으로 폴백
+      // 온라인이 안 되면 같은 기기 대전으로 내려가되, **왜** 안 되는지는 남긴다
+      netTrouble = conn.message || '온라인 연결에 실패했습니다';
+      mode = NET_MODE.LOCAL;
     }
   }
   netMode = mode;
+  if (net) net.close();
   net = createNet(mode, game.myNation.id, handles);
 
   net.watchPeers((list) => {
@@ -205,31 +369,56 @@ async function startCombatNet(mode, statusEl) {
     game.otherNations.clear();
     for (const p of list) game.otherNations.set(p.id, p);
     renderWarPanel(list);
-    updateNetStatus(statusEl);
+    updateNetStatus();
   });
   net.watchRaids(handleIncomingRaid);
 
-  publishMyNation();
+  await publishMyNation();
   if (publishTimer) clearInterval(publishTimer);
   publishTimer = setInterval(publishMyNation, PUBLISH_INTERVAL_MS);
-  updateNetStatus(statusEl);
+  updateNetStatus();
   renderWarPanel(peers);
   renderBattleLog();
 }
 
-function updateNetStatus(statusEl) {
-  if (!statusEl || !netMode) return;
-  const on = peers.length > 0;
-  statusEl.innerHTML = `<span class="dot ${on ? 'on' : 'off'}"></span> ${MODE_LABEL[netMode]} · 상대 ${peers.length}`;
+/** 온라인으로 다시 붙어본다 (전쟁 패널의 재연결 버튼) */
+async function retryOnline() {
+  const mode = pickMode();
+  if (mode === NET_MODE.LOCAL) {
+    flashMessage('js/firebase-config.js에 Firebase 설정이 없어 온라인으로 붙을 수 없습니다', true);
+    return;
+  }
+  flashMessage('온라인으로 다시 연결하는 중...', false);
+  await startCombatNet(mode, netStatusEl);
+  flashMessage(netTrouble ? `온라인 연결 실패: ${netTrouble}` : '온라인으로 연결됐습니다', !!netTrouble);
 }
 
-/** 내 기지를 다른 플레이어가 공격할 수 있도록 공개한다 */
-function publishMyNation() {
+function updateNetStatus() {
+  if (!netStatusEl || !netMode) return;
+  const online = netMode !== NET_MODE.LOCAL;
+  netStatusEl.innerHTML = `<span class="dot ${online ? 'on' : 'off'}"></span> ${MODE_LABEL[netMode]} · 상대 ${peers.length}`;
+}
+
+/**
+ * 내 기지를 다른 플레이어가 공격할 수 있도록 공개한다.
+ * 온라인 모드에서 쓰기가 막히면(보안 규칙 미배포 등) 그 사유를 화면에 남긴다 —
+ * 조용히 실패하면 "상대가 아무도 없네"로만 보여서 원인을 찾을 수 없다.
+ */
+async function publishMyNation() {
   if (!net || !game.myNation) return;
   const snap = defenseSnapshot(game.myNation);
   // 지역 버킷 — 서버 권위 모드의 주변 국가 쿼리와 같은 형식을 맞춰둔다
   snap.region = regionKey(game.myNation.capital.x, game.myNation.capital.y);
-  net.publish(snap);
+  try {
+    await net.publish(snap);
+    if (netTrouble && netMode !== NET_MODE.LOCAL) { netTrouble = null; renderWarPanel(peers); }
+  } catch (e) {
+    const denied = /permission|insufficient/i.test(e?.message || '') || e?.code === 'permission-denied';
+    const next = denied
+      ? '서버가 쓰기를 거부했습니다 — firestore.rules를 배포해야 합니다 (firebase deploy --only firestore:rules)'
+      : `기지 공개 실패: ${e?.message || '알 수 없는 오류'}`;
+    if (next !== netTrouble) { netTrouble = next; renderWarPanel(peers); }
+  }
 }
 
 /**
@@ -309,8 +498,10 @@ function buildBuildMenu() {
         const rotateBtn = document.getElementById('rotate-btn');
         if (rotateBtn) rotateBtn.disabled = !isRotatable(key);
         renderCostPreview(def);
+        // 좁은 화면에서는 카탈로그 서랍이 지도를 덮고 있으므로 닫아준다
+        closeDrawerOnNarrow();
         // 고를 때 곧바로 화면 한가운데에 고스트를 띄워, 어디를 눌러야 할지 알려준다
-        buildTarget = renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
+        buildTarget = renderer.screenToWorld(renderer.vw / 2, renderer.vh / 2);
       });
       // 메뉴를 다시 그려도 지금 고른 구조물의 강조 표시가 풀리지 않게 한다
       // (연속 설치 중에 건설할 때마다 선택이 사라져 보이던 문제)
@@ -354,10 +545,10 @@ document.getElementById('power-btn').addEventListener('click', (e) => {
   e.currentTarget.classList.toggle('active', renderer.showPower);
 });
 document.getElementById('zoom-in-btn').addEventListener('click', () => {
-  renderer.zoomAt(canvas.width / 2, canvas.height / 2, 4);
+  renderer.zoomAt(renderer.vw / 2, renderer.vh / 2, 4);
 });
 document.getElementById('zoom-out-btn').addEventListener('click', () => {
-  renderer.zoomAt(canvas.width / 2, canvas.height / 2, -4);
+  renderer.zoomAt(renderer.vw / 2, renderer.vh / 2, -4);
 });
 
 // ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
@@ -418,16 +609,16 @@ async function confirmBuild() {
   const { x, y } = buildTarget;
   const repeat = document.getElementById('build-repeat')?.checked;
 
-  if (isMultiplayer()) {
-    const res = await callBuild(structKey, x, y, beltDir);
-    if (res.error) { flashMessage(res.error, true); return; }
-    flashMessage(`${STRUCTURES[structKey].name} 건설 요청 완료`, false);
-  } else {
-    const err = game.myNation.build(structKey, x, y, beltDir);
-    if (err) { flashMessage(err, true); return; }
-    flashMessage(`${STRUCTURES[structKey].name} 건설 완료`, false);
-    buildBuildMenu();
-  }
+  // 판정을 어디서 할지는 dispatch가 정한다. 예전에는 여기서 isMultiplayer()로
+  // 갈랐는데, 그건 "로그인했는가"일 뿐 "서버가 판정하는가"가 아니다 — 온라인
+  // 대전(Firestore 직결)만 켜도 건설이 Cloud Functions로 새어 나가 함수가 없다며
+  // "internal"만 뜨고 아무것도 지어지지 않았다.
+  const res = await dispatch(
+    () => ({ error: game.myNation.build(structKey, x, y, beltDir) }),
+    () => callBuild(structKey, x, y, beltDir));
+  if (res.error) { flashMessage(res.error, true); return; }
+  flashMessage(`${STRUCTURES[structKey].name} 건설 완료`, false);
+  buildBuildMenu();
   // 기본은 한 번 설치하면 선택 해제. "연속"을 켜두면 벨트처럼 여러 개를
   // 이어 지을 때 매번 카탈로그로 돌아가지 않아도 된다.
   if (repeat) {
@@ -901,13 +1092,11 @@ function showStructPanel(struct, x, y) {
   // 레시피 핸들러는 반드시 data-recipe가 있는 버튼에만 걸어야 한다.
   body.querySelectorAll('[data-recipe]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (isMultiplayer()) {
-        const res = await callSetRecipe(struct.id, btn.dataset.recipe);
-        if (res.error) flashMessage(res.error, true); else flashMessage('레시피 설정 완료', false);
-      } else {
-        const err = game.myNation.setRecipe(struct.id, btn.dataset.recipe);
-        if (err) flashMessage(err, true); else showStructPanel(struct, x, y);
-      }
+      const res = await dispatch(
+        () => ({ error: game.myNation.setRecipe(struct.id, btn.dataset.recipe) }),
+        () => callSetRecipe(struct.id, btn.dataset.recipe));
+      if (res.error) flashMessage(res.error, true);
+      else { flashMessage('레시피 설정 완료', false); showStructPanel(struct, x, y); }
     });
   });
   body.querySelectorAll('[data-rot]').forEach(btn => {
@@ -944,13 +1133,11 @@ function showStructPanel(struct, x, y) {
 
   const ub = document.getElementById('upgrade-btn');
   if (ub) ub.addEventListener('click', async () => {
-    if (isMultiplayer()) {
-      const res = await callUpgrade(struct.id);
-      if (res.error) flashMessage(res.error, true); else flashMessage('레벨업 요청 완료', false);
-    } else {
-      const err = game.myNation.upgrade(struct.id);
-      if (err) flashMessage(err, true); else { flashMessage('레벨업 완료', false); showStructPanel(struct, x, y); }
-    }
+    const res = await dispatch(
+      () => ({ error: game.myNation.upgrade(struct.id) }),
+      () => callUpgrade(struct.id));
+    if (res.error) flashMessage(res.error, true);
+    else { flashMessage('레벨업 완료', false); showStructPanel(struct, x, y); }
   });
   body.querySelectorAll('.choice-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -977,26 +1164,22 @@ function showStructPanel(struct, x, y) {
   body.querySelectorAll('.research-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.tech;
-      if (isMultiplayer()) {
-        const res = await callStartResearch(key);
-        if (res.error) flashMessage(res.error, true); else flashMessage('연구 시작', false);
-      } else {
-        const err = game.myNation.startResearch(key);
-        if (err) flashMessage(err, true); else { flashMessage('연구 시작', false); showStructPanel(struct, x, y); }
-      }
+      const res = await dispatch(
+        () => ({ error: game.myNation.startResearch(key) }),
+        () => callStartResearch(key));
+      if (res.error) flashMessage(res.error, true);
+      else { flashMessage('연구 시작', false); showStructPanel(struct, x, y); }
     });
   });
   body.querySelectorAll('.recruit-card').forEach(btn => {
     btn.addEventListener('click', async () => {
       const unitKey = btn.dataset.unit;
       const isDefense = btn.dataset.defense === '1';
-      if (isMultiplayer()) {
-        const res = await callRecruitUnit(struct.id, unitKey, isDefense);
-        if (res.error) flashMessage(res.error, true); else flashMessage('모집 신청 완료 — 벨트로 장비를 투입하세요', false);
-      } else {
-        const err = game.myNation.recruitUnit(struct.id, unitKey, isDefense);
-        if (err) flashMessage(err, true); else { flashMessage('모집 신청 완료 — 벨트로 장비를 투입하세요', false); showStructPanel(struct, x, y); }
-      }
+      const res = await dispatch(
+        () => ({ error: game.myNation.recruitUnit(struct.id, unitKey, isDefense) }),
+        () => callRecruitUnit(struct.id, unitKey, isDefense));
+      if (res.error) flashMessage(res.error, true);
+      else { flashMessage('모집 신청 완료 — 벨트로 장비를 투입하세요', false); showStructPanel(struct, x, y); }
     });
   });
 }
@@ -1114,12 +1297,25 @@ function renderWarPanel(nations) {
     ? `<div class="pd shield-on">내 보호막 ${Math.ceil(shieldLeft / 60000)}분 남음 — 공격하면 즉시 풀립니다</div>`
     : `<div class="pd">내 보호막 없음 — 다른 플레이어가 나를 공격할 수 있습니다</div>`;
 
+  // 온라인이 아닐 때는 왜 아닌지와 어떻게 하면 되는지를 같이 보여준다
+  const offline = netMode === NET_MODE.LOCAL;
+  const netBox = offline
+    ? `<div class="net-box">
+         <div class="net-line">${netTrouble ? `온라인 연결 실패 — ${esc(netTrouble)}` : '같은 기기(다른 탭)끼리만 대전 중입니다'}</div>
+         <button id="retry-online-btn" class="retry-btn">온라인으로 연결</button>
+       </div>`
+    : (netTrouble ? `<div class="net-box err"><div class="net-line">${esc(netTrouble)}</div>
+         <button id="retry-online-btn" class="retry-btn">다시 시도</button></div>` : '');
+
   el.innerHTML = `
     <div class="pd">접속한 상대 ${nations.length}명 · 내 트로피 ${statusIcon('trophy')} ${game.myNation.trophies || 0}</div>
     ${shieldTxt}
+    ${netBox}
     <button id="find-match-btn" class="find-match-btn">⚔️ 상대 찾기</button>
     <div id="match-card"></div>
   `;
+  const retryBtn = document.getElementById('retry-online-btn');
+  if (retryBtn) retryBtn.addEventListener('click', retryOnline);
   document.getElementById('find-match-btn').addEventListener('click', () => {
     currentMatch = findMatch(game.myNation, knownNations, Date.now());
     attackDeck = null;
@@ -1446,10 +1642,10 @@ battleCanvas.addEventListener('touchend', (e) => {
 });
 
 document.getElementById('battle-zoom-in-btn').addEventListener('click', () => {
-  battleRenderer.zoomAt(battleCanvas.width / 2, battleCanvas.height / 2, 4);
+  battleRenderer.zoomAt(battleRenderer.vw / 2, battleRenderer.vh / 2, 4);
 });
 document.getElementById('battle-zoom-out-btn').addEventListener('click', () => {
-  battleRenderer.zoomAt(battleCanvas.width / 2, battleCanvas.height / 2, -4);
+  battleRenderer.zoomAt(battleRenderer.vw / 2, battleRenderer.vh / 2, -4);
 });
 document.getElementById('battle-retreat-btn').addEventListener('click', () => {
   if (!battleSession || battleSession.ended) return;
@@ -1629,8 +1825,8 @@ function updateCapitalSites() {
     return;
   }
   const x0 = Math.floor(renderer.originX), y0 = Math.floor(renderer.originY);
-  const x1 = x0 + Math.ceil(canvas.width / renderer.tile);
-  const y1 = y0 + Math.ceil(canvas.height / renderer.tile);
+  const x1 = x0 + Math.ceil(renderer.vw / renderer.tile);
+  const y1 = y0 + Math.ceil(renderer.vh / renderer.tile);
   const key = `${x0},${y0},${x1},${y1}`;
   if (key === lastCapitalViewKey) return;
   lastCapitalViewKey = key;
@@ -1702,6 +1898,74 @@ function loop() {
   requestAnimationFrame(loop);
 }
 window.addEventListener('resize', () => renderer.resize());
+// 주소창이 접히거나 기기를 돌리면 화면 크기가 바뀐다 — 캔버스를 다시 맞춘다
+window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => renderer.resize());
+
+// ============================================================
+// 모바일 조작
+//
+// 브라우저 기본 제스처가 게임 조작과 겹친다. CSS(touch-action/user-select)로
+// 대부분 막고, 여기서는 CSS로 막을 수 없는 것들을 마저 막는다:
+//   · 더블클릭/더블탭 (확대 + 글자 선택)
+//   · 길게 눌러 나오는 컨텍스트 메뉴
+//   · iOS 사파리의 페이지 핀치줌(gesture 이벤트)
+//   · 스크롤 영역 밖에서의 터치 이동(페이지가 통째로 밀리는 것)
+// ============================================================
+const SCROLLABLE = '#left-panel, #right-panel, .struct-modal-body, .battle-log, .build-menu, .build-sublist, .resource-bar, .battle-deck-tray, .start-card';
+
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('contextmenu', (e) => {
+  // 입력창에서는 붙여넣기 메뉴가 필요하므로 살려둔다
+  if (!e.target.closest('input, textarea')) e.preventDefault();
+});
+// iOS 사파리 전용 — 페이지 자체를 핀치로 확대하는 제스처
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+// 스크롤되는 영역이 아니면 터치 이동을 삼킨다 (페이지가 밀려 올라가지 않게)
+document.addEventListener('touchmove', (e) => {
+  if (!e.target.closest || !e.target.closest(SCROLLABLE)) e.preventDefault();
+}, { passive: false });
+// 더블탭 확대는 touch-action으로 막히지만, 오래된 사파리를 위해 한 번 더 막는다
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+
+// ---------- 하단 탭 (좁은 화면에서 좌우 패널을 서랍으로 연다) ----------
+const mobileTabs = document.getElementById('mobile-tabs');
+
+function isNarrow() { return window.matchMedia('(max-width: 820px)').matches; }
+
+/** 서랍을 연다. key가 null이면 전부 닫는다. */
+function openDrawer(key) {
+  for (const id of ['left-panel', 'right-panel']) {
+    document.getElementById(id).classList.toggle('open', id === key);
+  }
+  mobileTabs.querySelectorAll('.mtab').forEach(b =>
+    b.classList.toggle('active', b.dataset.panel === key));
+  renderer.resize();
+}
+
+mobileTabs.querySelectorAll('.mtab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.panel;
+    const already = document.getElementById(key).classList.contains('open');
+    openDrawer(already ? null : key);   // 같은 탭을 다시 누르면 닫힌다
+  });
+});
+
+// 구조물을 고르면 서랍을 닫는다 — 지도를 봐야 어디에 놓을지 정할 수 있다
+function closeDrawerOnNarrow() { if (isNarrow()) openDrawer(null); }
+
+// 넓은 화면으로 돌아가면 서랍 상태를 초기화한다 (패널은 CSS로 다시 붙박이가 된다)
+window.matchMedia('(max-width: 820px)').addEventListener('change', (e) => {
+  if (!e.matches) openDrawer(null);
+  renderer.resize();
+});
 
 // 브라우저 콘솔에서 상태를 들여다보기 위한 디버그 훅 (빌드 도구 없는 프로토타입이라
 // 자동화 테스트도 이 훅으로 게임 상태를 확인한다)

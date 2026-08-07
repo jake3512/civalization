@@ -137,11 +137,31 @@ export class Renderer {
     this.originY = wy - screenY / this.tileY;
   }
 
+  /**
+   * 캔버스를 부모 크기에 맞춘다.
+   *
+   * 고해상도 화면(휴대폰은 보통 2~3배)에서는 CSS 픽셀 그대로 그리면 흐릿하다.
+   * 그래서 실제 픽셀 수만큼 백버퍼를 잡고 컨텍스트를 그 배율로 확대해 둔다.
+   * 바깥에서 쓰는 좌표는 전부 **CSS 픽셀**(vw/vh)이라 나머지 계산은 그대로다.
+   * (크기가 바뀔 때만 캔버스를 다시 잡는다 — width를 대입하면 화면이 지워진다)
+   */
   resize() {
     const parent = this.canvas.parentElement;
-    this.canvas.width = parent.clientWidth;
-    this.canvas.height = parent.clientHeight;
+    const w = parent.clientWidth, h = parent.clientHeight;
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    if (this._w !== w || this._h !== h || this._dpr !== dpr) {
+      this._w = w; this._h = h; this._dpr = dpr;
+      this.canvas.width = Math.max(1, Math.round(w * dpr));
+      this.canvas.height = Math.max(1, Math.round(h * dpr));
+      this.canvas.style.width = w + 'px';
+      this.canvas.style.height = h + 'px';
+    }
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+
+  /** 화면 크기 (CSS 픽셀). 캔버스 백버퍼는 이보다 크다 */
+  get vw() { return this._w || this.canvas.width; }
+  get vh() { return this._h || this.canvas.height; }
 
   screenToWorld(px, py) {
     return { x: Math.floor(this.originX + px / this.tile), y: Math.floor(this.originY + py / this.tileY) };
@@ -153,8 +173,8 @@ export class Renderer {
   }
 
   centerOn(x, y) {
-    this.originX = x - this.canvas.width / this.tile / 2;
-    this.originY = y - this.canvas.height / this.tileY / 2;
+    this.originX = x - this.vw / this.tile / 2;
+    this.originY = y - this.vh / this.tileY / 2;
   }
 
   /**
@@ -200,17 +220,17 @@ export class Renderer {
   draw() {
     const { ctx, canvas, tile, tileY } = this;
     // 지평선 쪽이 밝은 하늘색으로 빠지게 해서 바닥이 누워 있는 느낌을 준다
-    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    const sky = ctx.createLinearGradient(0, 0, 0, this.vh);
     sky.addColorStop(0, '#16242c');
     sky.addColorStop(0.35, '#101512');
     sky.addColorStop(1, '#0b0f0c');
     ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, this.vw, this.vh);
 
     // 세워 그린 나무·건물이 화면 밖에서 걸쳐 들어오므로 위아래로 여유를 둔다
     const x0 = Math.floor(this.originX) - 1, y0 = Math.floor(this.originY) - 3;
-    const x1 = x0 + Math.ceil(canvas.width / tile) + 2;
-    const y1 = y0 + Math.ceil(canvas.height / tileY) + 6;
+    const x1 = x0 + Math.ceil(this.vw / tile) + 2;
+    const y1 = y0 + Math.ceil(this.vh / tileY) + 6;
     const tiles = getTileRange(x0, y0, x1, y1);
 
     const nation = this.game.myNation;
@@ -377,7 +397,7 @@ export class Renderer {
   _drawStructure(s, color) {
     const { ctx, tile, tileY, canvas } = this;
     const b = this.structBounds(s);
-    if (b.right < 0 || b.left > canvas.width || b.bottom < 0 || b.top > canvas.height) return;
+    if (b.right < 0 || b.left > this.vw || b.bottom < 0 || b.top > this.vh) return;
 
     if (isBeltKey(s.key)) {
       // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다
@@ -462,7 +482,7 @@ export class Renderer {
     const def = STRUCTURES[s.key];
     const b = this.structBounds(s);
     // 화면 밖 구조물은 건너뛴다 (나라가 커져도 프레임마다 헛일하지 않도록)
-    if (b.right < 0 || b.left > canvas.width || b.bottom < -40 || b.top > canvas.height) return;
+    if (b.right < 0 || b.left > this.vw || b.bottom < -40 || b.top > this.vh) return;
     const cx = b.sx + b.bw / 2;
     // 그림 상자의 위쪽이 아니라 "실제로 그려진 부분"의 꼭대기에 붙인다
     const src = structureIcon(s.key);
