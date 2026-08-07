@@ -680,6 +680,23 @@ function applyRaidResultLocal(defenderJson, result) {
   }
 }
 
+// (1-2) 업적 — 한 판을 끝까지 갔을 때 실제로 몇 개나 달성되는지.
+// 달성 불가능한 목표(오타나 지나치게 높은 수치)를 여기서 잡는다.
+{
+  const A = await import('../js/achievements.js');
+  A.checkAchievements(n);
+  const score = A.achievementScore(n);
+  console.log(`  업적            : ${score.done} / ${score.total}`);
+  const missing = A.ACHIEVEMENTS.filter(a => !n.achievements.includes(a.key));
+  if (missing.length) {
+    console.log('    미달성:');
+    for (const a of missing) {
+      const p2 = A.achievementProgress(n, a);
+      console.log(`      · ${a.name} (${p2.value}/${p2.goal}) — ${a.desc}`);
+    }
+  }
+}
+
 // ---------------- 결과 ----------------
 console.log('\n' + '='.repeat(56));
 if (!problems.length && finished) {

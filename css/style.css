@@ -510,6 +510,31 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .deck-plus:active, .deck-minus:active { background: var(--accent); color: #14100a; }
 .shield-on { color: var(--accent); }
 
+/* ---- 업적 ---- */
+.ph-sub { font-family: var(--font-mono); font-size: 11px; color: var(--accent); margin-left: 6px; }
+.ach-panel { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; touch-action: pan-y; }
+.ach-head {
+  width: 100%; display: flex; align-items: center; gap: 6px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 4px; padding: 8px 10px; font-size: 12px; min-height: 38px;
+}
+.ach-head .nm { flex: 1; text-align: left; font-family: var(--font-display); font-size: 13px; }
+.ach-head .cnt { font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+.ach-head .arrow { color: var(--text-dim); font-size: 10px; }
+.ach-list { padding: 6px 2px 2px; display: flex; flex-direction: column; gap: 6px; }
+.ach-item { padding: 6px 8px; border-left: 2px solid var(--line); }
+.ach-item.done { border-left-color: var(--accent); }
+.ach-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.ach-row .mark { color: var(--text-dim); }
+.ach-item.done .mark { color: var(--accent); }
+.ach-row .nm { flex: 1; color: var(--text-dim); }
+.ach-item.done .nm { color: var(--text); }
+.ach-row .num { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.ach-desc { font-size: 11px; color: var(--text-dim); margin: 2px 0 4px; line-height: 1.4; }
+.ach-bar { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.ach-bar i { display: block; height: 100%; background: var(--accent-dim); }
+.ach-item.done .ach-bar i { background: var(--accent); }
+
 /* 온라인 연결 상태 — 안 될 때 사유와 재시도 버튼을 같이 보여준다 */
 .net-box {
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;

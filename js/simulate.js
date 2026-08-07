@@ -153,8 +153,15 @@ function pushIntoBeltChain(nation, startBelt, res, amt, fromDir = null, visited 
  * 넣지 못한 양이 있으면 그만큼 가동이 막힌 것으로 본다.
  * 실제로 적재한 양을 반환한다.
  */
-function storeOutput(s, res, amt) {
+function storeOutput(nation, s, res, amt) {
   if (amt <= 0) return 0;
+  // 업적용 기록 — "한 번이라도 만들어 본 자원"은 여기 한 곳만 지나간다
+  if (nation) {
+    nation.stats = nation.stats || {};
+    const seen = nation.stats.produced = nation.stats.produced || [];
+    if (!seen.includes(res)) seen.push(res);
+    if (s.key === 'kitchen') nation.stats.cooked = (nation.stats.cooked || 0) + 1;
+  }
   s.outputBuffer = s.outputBuffer || {};
   const cap = getOutputCapacity(s.key, s.level);
   const used = Object.values(s.outputBuffer).reduce((a, b) => a + b, 0);
@@ -258,7 +265,7 @@ export function tickNation(nation) {
       // 산출 인벤토리가 가득 차면 캐낼 곳이 없어 가동을 멈춘다
       if (!hasOutputRoom(s)) { s.idle = true; s.idleReason = '산출 가득 참'; continue; }
       const t = getTile(s.x, s.y);
-      if (t.node) storeOutput(s, t.node.yields, def.baseProduction * s.level);
+      if (t.node) storeOutput(nation, s, t.node.yields, def.baseProduction * s.level);
     } else if (def.category === 'production') {
       if (!hasOutputRoom(s)) { s.idle = true; s.idleReason = '산출 가득 참'; continue; }
 
@@ -273,7 +280,7 @@ export function tickNation(nation) {
         if (ok) {
           for (const [res, amt] of Object.entries(need)) buf[res] -= amt;
           const outs = typeof r.out === 'number' ? { [s.recipe]: r.out } : r.out;
-          for (const [res, amt] of Object.entries(outs)) storeOutput(s, res, amt * s.level);
+          for (const [res, amt] of Object.entries(outs)) storeOutput(nation, s, res, amt * s.level);
         } else {
           s.idle = true;
           s.idleReason = '재료 부족';
@@ -281,7 +288,7 @@ export function tickNation(nation) {
       } else if (s.key === 'farm') {
         const crop = CROPS[s.crop || 'rice'];
         if (crop) {
-          storeOutput(s, crop.yields, crop.baseYield * s.level);
+          storeOutput(nation, s, crop.yields, crop.baseYield * s.level);
           // 인력은 오직 농지에서만 나온다 (여행의 유일한 연료).
           // 작물과 달리 창고를 거치지 않는 수치 자원이라 바로 국고에 더한다.
           nation.resources.labor = (nation.resources.labor || 0) + (def.laborIncome || 0) * s.level;
@@ -289,9 +296,9 @@ export function tickNation(nation) {
       } else if (s.key === 'barn') {
         const animal = ANIMALS[s.animal || 'cattle'];
         if (animal) {
-          storeOutput(s, animal.yields, animal.baseYield * s.level);
+          storeOutput(nation, s, animal.yields, animal.baseYield * s.level);
           // 우유·달걀 같은 부산물은 가축과 함께 나온다
-          for (const [res, amt] of Object.entries(animal.products || {})) storeOutput(s, res, amt * s.level);
+          for (const [res, amt] of Object.entries(animal.products || {})) storeOutput(nation, s, res, amt * s.level);
         } else { s.idle = true; s.idleReason = '가축 미선택'; }
       } else {
         s.idle = true;

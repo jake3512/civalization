@@ -23,6 +23,8 @@ import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS, isPeerOnline } from './mpNet.js';
 import { saveGame, loadGame, listSaves, clearSave, storageAvailable, timeAgo } from './storage.js';
 import { saveToCloud, loadFromCloud, clearCloud } from './cloudSave.js';
+import { ACHIEVEMENTS, ACH_GROUPS, achievementProgress, achievementScore,
+         checkAchievements } from './achievements.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
   currentUser, onUserChanged, signOutUser, signInWithGoogle, takeRedirectResult,
@@ -195,10 +197,71 @@ function enterGame() {
 
   buildBuildMenu();
   renderTravelPanel();
-  game.onTick = () => { renderTravelPanel(); autoSave(); };
+  game.onTick = () => { renderTravelPanel(); checkNewAchievements(); autoSave(); };
   game.startLoop();
   initMultiplayer(n.name, n.color, n.capital.x, n.capital.y);
+  checkNewAchievements(true);   // 이어하기로 들어온 판도 즉시 목록을 맞춘다
   autoSave(true);
+}
+
+// ---------- 업적 ----------
+// 달성 조건은 achievements.js에 있고, 여기서는 "새로 달성했는지"만 매 틱 확인해
+// 알림을 띄우고 패널을 다시 그린다.
+let achOpenGroup = null;
+
+function checkNewAchievements(silent = false) {
+  if (!game.myNation) return;
+  const earned = checkAchievements(game.myNation);
+  if (earned.length && !silent) {
+    // 여러 개가 한꺼번에 달성되면 첫 개만 이름을 부르고 나머지는 수로 알린다
+    const first = earned[0];
+    flashMessage(
+      earned.length > 1
+        ? `업적 달성: ${first.name} 외 ${earned.length - 1}개`
+        : `업적 달성: ${first.name} — ${first.desc}`,
+      false);
+    autoSave(true);             // 달성 기록은 바로 저장한다
+  }
+  if (earned.length || silent) renderAchievements();
+}
+
+function renderAchievements() {
+  const el = document.getElementById('ach-panel');
+  const scoreEl = document.getElementById('ach-score');
+  if (!el || !game.myNation) return;
+  const n = game.myNation;
+  const score = achievementScore(n);
+  if (scoreEl) scoreEl.textContent = `${score.done}/${score.total}`;
+
+  el.innerHTML = ACH_GROUPS.map(g => {
+    const items = ACHIEVEMENTS.filter(a => a.group === g.key)
+      .map(a => ({ a, p: achievementProgress(n, a) }));
+    const doneCount = items.filter(i => i.p.done).length;
+    const open = achOpenGroup === g.key;
+    return `
+      <div class="ach-group${open ? ' open' : ''}" data-group="${g.key}">
+        <button class="ach-head" data-toggle="${g.key}">
+          <span class="nm">${g.name}</span>
+          <span class="cnt">${doneCount}/${items.length}</span>
+          <span class="arrow">${open ? '▾' : '▸'}</span>
+        </button>
+        ${open ? `<div class="ach-list">${items.map(({ a, p }) => `
+          <div class="ach-item${p.done ? ' done' : ''}">
+            <div class="ach-row">
+              <span class="mark">${p.done ? '★' : '☆'}</span>
+              <span class="nm">${a.name}</span>
+              <span class="num">${p.value}/${p.goal}</span>
+            </div>
+            <div class="ach-desc">${a.desc}</div>
+            <div class="ach-bar"><i style="width:${Math.round(p.ratio * 100)}%"></i></div>
+          </div>`).join('')}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-toggle]').forEach(btn => btn.addEventListener('click', () => {
+    achOpenGroup = achOpenGroup === btn.dataset.toggle ? null : btn.dataset.toggle;
+    renderAchievements();
+  }));
 }
 
 // ---------- 저장 / 이어하기 ----------

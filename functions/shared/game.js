@@ -48,6 +48,8 @@ export class Nation {
     this.units = { attack: {}, defense: {} }; // 무장 완료된 병력 로스터 (unitKey -> 보유 수)
     this.seenRaids = [];  // 이미 반영한 습격 리포트 id (같은 리포트를 두 번 받아도 한 번만 적용)
     this.raidsSent = 0;   // 내가 보낸 습격 횟수
+    this.stats = {};      // 업적 판정을 위한 누적 기록 (logic.bumpStat)
+    this.achievements = [];  // 달성한 업적 key
   }
 
   isOwned(x, y) { return this.territory.has(logic.tileKey(x, y)); }
@@ -108,6 +110,8 @@ export class Nation {
       trophies: this.trophies, shieldUntil: this.shieldUntil, units: this.units,
       // 멀티플레이 습격: 이미 반영한 리포트 id(중복 반영 방지)와 보낸 습격 수
       seenRaids: this.seenRaids || [], raidsSent: this.raidsSent || 0,
+      // 업적과 그 판정에 쓰는 누적 기록
+      stats: this.stats || {}, achievements: this.achievements || [],
     };
   }
 
@@ -126,6 +130,8 @@ export class Nation {
     n.units = data.units || { attack: {}, defense: {} };
     n.seenRaids = data.seenRaids || [];
     n.raidsSent = data.raidsSent || 0;
+    n.stats = data.stats || {};
+    n.achievements = data.achievements || [];
     n.nextStructId = (n.structures.reduce((m, s) => Math.max(m, s.id), 0)) + 1;
     return n;
   }
