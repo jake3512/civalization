@@ -1484,7 +1484,9 @@ function showStructPanel(struct, x, y) {
   if (STRUCTURES[struct.key].storageCapacity) html += renderSellHtml(struct);
 
   if (isRotatable(struct.key)) {
-    html += `<div class="pd">흐르는 방향: <b class="rot-now">${DIR_ARROW[struct.dir || 0]}</b></div>
+    // 교차로는 "지나가는 방향"이 아니라 구조물에서 바로 받았을 때 내보낼 기준 방향이다
+    const rotLabel = def.beltKind === 'cross' ? '기준 방향 (구조물에서 바로 받았을 때)' : '흐르는 방향';
+    html += `<div class="pd">${rotLabel}: <b class="rot-now">${DIR_ARROW[struct.dir || 0]}</b></div>
       <div class="rot-row">
         ${[0, 1, 2, 3].map(d => `<button class="rot-btn${(struct.dir || 0) === d ? ' active' : ''}" data-rot="${d}">${DIR_ARROW[d]}</button>`).join('')}
       </div>`;

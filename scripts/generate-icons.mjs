@@ -97,6 +97,66 @@ const roof3 = (x, y, w, d, light, dark) => {
 const foot = (cx, cy, rx, fill) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${rx * 0.34}" fill="${fill}" stroke="${INK}" stroke-width="${OUT_W}"/>`;
 
 // ============================================================
+// 컨베이어 공통 부품
+//
+// 벨트류(일반·분할·교차)는 같은 설비의 변형이므로 그림도 한 벌의 부품에서
+// 조립한다 — 강철 프레임 + 어두운 벨트 면 + 쐐기 트레드 + 끝단 드럼 + 받침 다리.
+// 단순한 막대 하나였던 예전 그림보다 층이 많아 작게 줄여도 "기계"로 읽힌다.
+// ============================================================
+const CONV = {
+  frameTop: '#93a5b3',   // 프레임 윗면 (빛을 받는 면)
+  frame: '#5d6b78',      // 프레임 앞면
+  frameD: '#3c4855',     // 다리·그늘
+  tread: '#2b313b',      // 벨트 면
+  treadL: '#5b6675',     // 트레드 무늬
+};
+
+/**
+ * 가로로 놓인 컨베이어 데크 (앞에서 살짝 내려다본 면).
+ * 프레임은 벨트 면을 두르는 얇은 테두리로만 남기고, 눈에 들어오는 넓은 면은
+ * 어두운 벨트로 채운다 — 그래야 작게 줄여도 "회색 덩어리"가 아니라 벨트로 읽힌다.
+ */
+const convDeck = (x, y, w, d, h) => {
+  const i = (w * (1 - BACK)) / 2;
+  const ty = y - 2, by = y - d + 2.5;          // 벨트 면의 앞/뒤 모서리
+  const drum = (cx) => `
+    ${sh(`M${cx - 2.5} ${by - 0.5} h5 v${ty - by + 1} h-5 Z`, P.metal, 2)}
+    ${fd(`M${cx - 2.5} ${by - 0.5} h2 v${ty - by + 1} h-2 Z`, P.metalL, 0.85)}`;
+  let tread = '';
+  for (let cx = x + 13; cx < x + w - 12; cx += 8) {
+    tread += `<path d="M${cx} ${ty - 1} L${cx + 3.5} ${by + 1}" stroke="${CONV.treadL}" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>`;
+  }
+  let rivets = '';
+  for (let rx = x + 6; rx < x + w - 3; rx += 10) {
+    rivets += `<circle cx="${rx}" cy="${y + h * 0.3}" r="1.4" fill="${CONV.frameTop}" opacity="0.7"/>`;
+  }
+  return `
+    ${sh(`M${x + 8} ${y + h - 2} h6 v8 h-6 Z`, CONV.frameD, 2)}
+    ${sh(`M${x + w - 14} ${y + h - 2} h6 v8 h-6 Z`, CONV.frameD, 2)}
+    ${topFace(x, y, w, d, CONV.frameTop)}
+    ${sh(`M${x + 3} ${ty} H${x + w - 3} L${x + w - i - 1} ${by} H${x + i + 1} Z`, CONV.tread, 2)}
+    ${tread}
+    ${drum(x + 6)}${drum(x + w - 6)}
+    ${fd(`M${x + i + 1} ${by} H${x + w - i - 1} L${x + w - i - 3} ${by + 1.6} H${x + i + 3} Z`, '#fff', 0.16)}
+    ${frontFace(x, y, w, h, CONV.frame, 2)}
+    <path d="M${x + 2} ${y + h * 0.34} H${x + w - 2}" stroke="${INK}" stroke-width="1.4" opacity="0.35"/>
+    ${rivets}`;
+};
+
+/** 세로로(화면 위아래로) 뻗는 컨베이어 라인 — 교차로의 아래 라인, 분할의 옆 갈래 */
+const convLane = (x, y, w, h) => {
+  let rungs = '';
+  for (let ry = y + 6; ry < y + h - 3; ry += 7) {
+    rungs += `<path d="M${x + 3} ${ry} H${x + w - 3}" stroke="${CONV.treadL}" stroke-width="2" stroke-linecap="round"/>`;
+  }
+  return `
+    ${sh(`M${x} ${y} h${w} v${h} h${-w} Z`, CONV.frame, 2.5)}
+    ${sh(`M${x + 3.5} ${y} h${w - 7} v${h} h${-(w - 7)} Z`, CONV.tread, 0)}
+    ${rungs}
+    ${fd(`M${x + 0.5} ${y} h3 v${h} h-3 Z`, '#fff', 0.16)}`;
+};
+
+// ============================================================
 // 자원 그림 (assets/icons/*.svg)
 // 배지 없이 사물 자체를 그린다 — 굵은 외곽선 덕에 지도 위에서도 잘 보인다.
 // ============================================================
@@ -789,46 +849,37 @@ const art = {
     <circle cx="27" cy="31" r="2.6" fill="${P.purpleL}"/><circle cx="36" cy="33" r="2" fill="${P.purpleL}"/>
     ${rc(26, 3, 12, 5, P.gold, 2)}`,
 
-  // 컨베이어 벨트 — 바닥에 눕는 물건이라 낮게, 진행 방향만 또렷하게
-  belt: `${topFace(4, 40, 56, 12, '#5c6b78')}
-    ${frontFace(4, 40, 56, 10, P.darkL, 2)}
-    <path d="M6 34 H58" stroke="${INK}" stroke-width="2.2"/>
-    ${ci(13, 34, 5, P.metalL, 2.5)}${ci(51, 34, 5, P.metalL, 2.5)}
-    ${sh('M24 28 L38 34 L24 40 Z', P.goldL, 2.5)}`,
+  // 컨베이어 벨트 — 강철 프레임에 얹힌 벨트 면, 끝단에 구동 드럼
+  belt: `${groundSm}
+    ${convDeck(3, 38, 58, 12, 10)}
+    ${sh('M25 27 L41 33 L25 39 Z', P.goldL, 2.5)}
+    ${fd('M27 29.5 L36 33 L27 36.5 Z', '#fff', 0.35)}`,
 
   // 분할 컨베이어 — 한 줄로 들어와 **두 갈래**(정면 + 옆)로 나간다.
   //   왼쪽에서 들어온 흐름(금색)이 가운데 분류기(회전 팔)에서 갈라져,
   //   하나는 그대로 오른쪽으로, 하나는 앞쪽 옆 갈래(청록)로 빠진다.
   belt_splitter: `${groundSm}
-    ${sh('M23 28 h18 v27 h-18 Z', '#4c5a66')}
-    ${fd('M32 28 h9 v27 h-9 Z', INK, 0.2)}
-    <path d="M23 47 H41 M23 52 H41" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
+    ${convLane(23, 26, 18, 29)}
     ${sh('M25 45 L32 57 L39 45 Z', P.cyanL, 2.5)}
-    ${topFace(3, 36, 58, 10, '#5c6b78')}
-    ${frontFace(3, 36, 58, 9, P.darkL, 2)}
-    <path d="M12 26 V36 M20 26 V36 M46 26 V36 M54 26 V36" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
-    <path d="M6 31 H50" stroke="${INK}" stroke-width="8" stroke-linecap="round"/>
-    <path d="M6 31 H50" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
+    ${convDeck(3, 36, 58, 11, 9)}
+    <path d="M7 31 H49" stroke="${INK}" stroke-width="7.5" stroke-linecap="round"/>
+    <path d="M7 31 H49" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
     ${ci(31, 31, 7, P.metalL, 2.5)}
+    <circle cx="31" cy="31" r="2.6" fill="${CONV.frame}"/>
     ${sh('M25 26 L37 26 L31 37 Z', P.cyanL, 2)}
-    ${sh('M50 25 L61 31 L50 37 Z', P.goldL, 2.5)}`,
+    ${sh('M49 25 L60 31 L49 37 Z', P.goldL, 2.5)}`,
 
   // 컨베이어 교차로 — 세로 라인(청록) 위로 가로 라인(금색)이 **다리처럼 지나간다**.
   //   서로 닿지 않고 넘어가는 그림이라 "섞이지 않는다"가 한눈에 읽힌다.
   belt_cross: `${groundSm}
-    ${sh('M25 6 h14 v50 h-14 Z', '#4c5a66')}
-    ${fd('M32 6 h7 v50 h-7 Z', INK, 0.2)}
-    <path d="M25 14 H39 M25 22 H39 M25 42 H39 M25 50 H39" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
-    <path d="M32 6 V22 M32 42 V54" stroke="${P.cyanL}" stroke-width="4" stroke-linecap="round"/>
+    ${convLane(24, 4, 16, 52)}
+    <path d="M32 8 V22" stroke="${P.cyanL}" stroke-width="4" stroke-linecap="round"/>
+    <path d="M32 40 V50" stroke="${P.cyanL}" stroke-width="4" stroke-linecap="round"/>
     ${sh('M26 46 L32 57 L38 46 Z', P.cyanL, 2.5)}
-    ${fd('M25 24 h14 v14 h-14 Z', '#000', 0.42)}
-    ${sh('M14 40 h6 v14 h-6 Z', P.metalD, 2)}${sh('M44 40 h6 v14 h-6 Z', P.metalD, 2)}
-    ${topFace(2, 36, 60, 10, '#6a7b88')}
-    ${frontFace(2, 36, 60, 9, P.darkL, 2)}
-    <path d="M8 31 H56" stroke="${INK}" stroke-width="1.8" opacity="0.5"/>
-    <path d="M12 26 V36 M20 26 V36 M44 26 V36 M52 26 V36" stroke="${INK}" stroke-width="1.8" opacity="0.45"/>
-    <path d="M6 31 H50" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
-    ${sh('M50 25 L61 31 L50 37 Z', P.goldL, 2.5)}`,
+    ${fd('M24 23 h16 v15 h-16 Z', '#000', 0.45)}
+    ${convDeck(2, 36, 60, 11, 9)}
+    <path d="M7 31 H49" stroke="${P.goldL}" stroke-width="4" stroke-linecap="round"/>
+    ${sh('M49 25 L60 31 L49 37 Z', P.goldL, 2.5)}`,
 
   // 창고 — 넓은 박공 지붕 + 큰 셔터문
   warehouse: `${ground}

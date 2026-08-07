@@ -361,7 +361,24 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   const plainBelt = n7.structures.find(s2 => s2.key === 'belt');
   assert.strictEqual(L.setBranchSide(n7, cap7.id, 1).ok, false, '분할 컨베이어가 아니면 거부');
   assert.ok(!plainBelt || L.setBranchSide(n7, plainBelt.id, 1).ok === false, '일반 벨트도 거부');
-  console.log(`✓ 분할 컨베이어 2갈래 (정면 + ${DIR_NAMES[1]}/${DIR_NAMES[3]} 선택)`);
+  // 교차로도 방향을 바꿀 수 있다 — 구조물에서 바로 받았을 때 내보낼 기준 방향
+  const { isRotatable } = await import('../js/data.js');
+  assert.ok(isRotatable('belt_cross'), '교차로는 회전할 수 있어야 한다');
+  assert.ok(isRotatable('belt_splitter') && isRotatable('belt'), '벨트·분할도 회전 가능');
+  n7.unlocked.add('belt_cross');
+  let cr = null;
+  for (const t of Array.from(n7.territory)) {
+    const [x, y] = t.split(',').map(Number);
+    if (Math.hypot(x - cap7.x, y - cap7.y) < 5) continue;
+    const r = L.build(n7, 'belt_cross', x, y, 0);
+    if (r.ok) { cr = r.structure; break; }
+  }
+  assert.ok(cr, '교차로 건설');
+  assert.strictEqual(cr.dir, 0);
+  assert.strictEqual(L.rotateStructure(n7, cr.id, 2).ok, true, '교차로 회전');
+  assert.strictEqual(cr.dir, 2, '바꾼 방향이 남아야 한다');
+  assert.strictEqual(L.rotateStructure(n7, cr.id).dir, 3, '인자 없이 부르면 한 칸씩 돈다');
+  console.log(`✓ 분할 컨베이어 2갈래 (정면 + ${DIR_NAMES[1]}/${DIR_NAMES[3]} 선택) · 교차로 회전`);
 }
 
 // --- 발전소 연료 (나무 · 석탄 · 석유) ---

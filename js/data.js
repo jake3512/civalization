@@ -486,9 +486,9 @@ export const STRUCTURES = {
   },
   belt_cross: {
     id: 22, name: '컨베이어 교차로', volume: 1, footprint: [1, 1],
-    desc: '두 벨트 라인이 서로 섞이지 않고 교차합니다. 들어온 방향 그대로 반대편으로 내보냅니다.',
+    desc: '두 벨트 라인이 서로 섞이지 않고 교차합니다. 들어온 방향 그대로 반대편으로 내보내고, 구조물에서 바로 받았을 때는 설정한 방향으로 내보냅니다.',
     baseCost: { wood: 10, stone: 8, iron_ingot: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
-    category: 'utility', baseHp: 30, beltKind: 'cross',
+    category: 'utility', baseHp: 30, rotatable: true, beltKind: 'cross',
   },
   warehouse: {
     id: 19, name: '창고', volume: 4, footprint: [2, 2],

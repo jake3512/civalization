@@ -431,11 +431,24 @@ export class Renderer {
     if (b.right < 0 || b.left > this.vw || b.bottom < 0 || b.top > this.vh) return;
 
     if (isBeltKey(s.key)) {
-      // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다
-      ctx.fillStyle = '#4b5a67';
-      ctx.fillRect(b.sx + 2, b.sy + 1, tile - 4, tileY - 2);
+      // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다.
+      // 그림(assets/icons/struct/belt*.svg)과 같은 구성 — 강철 프레임 테두리 안에
+      // 어두운 벨트 면을 깔고, 여유가 있으면 트레드 무늬까지 얹는다.
+      const fx = b.sx + 2, fy = b.sy + 1, fw = tile - 4, fh = tileY - 2;
+      ctx.fillStyle = '#78868f';                       // 프레임
+      ctx.fillRect(fx, fy, fw, fh);
+      const inset = Math.max(1.5, tile * 0.14);
+      ctx.fillStyle = '#2b313b';                       // 벨트 면
+      ctx.fillRect(fx + inset, fy + inset * 0.6, fw - inset * 2, fh - inset * 1.2);
+      if (tile >= 18) {
+        ctx.strokeStyle = '#5b6675'; ctx.lineWidth = Math.max(1, tile * 0.045);
+        const top = fy + inset * 0.6, bot = fy + fh - inset * 0.6;
+        for (let tx = fx + inset + tile * 0.12; tx < fx + fw - inset; tx += tile * 0.22) {
+          ctx.beginPath(); ctx.moveTo(tx, bot); ctx.lineTo(tx + tile * 0.09, top); ctx.stroke();
+        }
+      }
       ctx.strokeStyle = '#120e14'; ctx.lineWidth = 2;
-      ctx.strokeRect(b.sx + 2, b.sy + 1, tile - 4, tileY - 2);
+      ctx.strokeRect(fx, fy, fw, fh);
       ctx.lineWidth = 1;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       // 화살표를 그 방향으로 조금 밀어 그린다 (갈래가 둘일 때 겹치지 않게)
