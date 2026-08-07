@@ -25,7 +25,7 @@ import { saveGame, loadGame, listSaves, clearSave, storageAvailable, timeAgo } f
 import { saveToCloud, loadFromCloud, clearCloud } from './cloudSave.js';
 import {
   initFirebase, isMultiplayer, watchNations, watchBattles, watchMyNation, getFirestoreHandles, getUid, regionKey,
-  currentUser, onUserChanged, signIn, signUp, signOutUser, signInWithGoogle, takeRedirectResult,
+  currentUser, onUserChanged, signOutUser, signInWithGoogle, takeRedirectResult,
   callInitNation, callBuild, callUpgrade, callSetRecipe, callStartResearch, callRecruitUnit, callRaidResult,
   callSetCrop, callSetAnimal, callStartExpedition, callSell, callManualMove, callManualOperate, callDemolish, callRotate,
 } from './multiplayer.js';
@@ -384,13 +384,8 @@ function renderAuthBox() {
         </svg>
         <span>Google로 계속하기</span>
       </button>
-      <div class="auth-or">또는 이메일로</div>
-      <input id="auth-email" type="email" placeholder="이메일" autocomplete="username">
-      <input id="auth-pw" type="password" placeholder="비밀번호 (6자 이상)" autocomplete="current-password">
-      <div class="auth-actions">
-        <button id="signin-btn" class="auth-main">로그인</button>
-        <button id="signup-btn" class="auth-alt">계정 만들기</button>
-      </div>
+      <div class="auth-guest">로그인하지 않아도 바로 플레이할 수 있습니다 —
+        다만 그때는 <b>이 기기에만</b> 저장됩니다.</div>
       <div id="auth-msg" class="auth-msg"></div>
     </div>`;
 
@@ -398,10 +393,6 @@ function renderAuthBox() {
     const el = document.getElementById('auth-msg');
     if (el) { el.textContent = text; el.className = `auth-msg ${err ? 'err' : 'ok'}`; }
   };
-  const creds = () => [
-    document.getElementById('auth-email').value.trim(),
-    document.getElementById('auth-pw').value,
-  ];
 
   document.getElementById('google-btn').addEventListener('click', async () => {
     msg('구글 계정으로 로그인 중...', false);
@@ -414,23 +405,6 @@ function renderAuthBox() {
         : res.linked ? '구글 계정이 연결됐습니다 — 하던 나라를 그대로 이어서 합니다'
         : '구글 계정으로 로그인했습니다', false);
     msg('', false);
-  });
-  document.getElementById('signin-btn').addEventListener('click', async () => {
-    const [email, pw] = creds();
-    msg('로그인 중...', false);
-    const res = await signIn(email, pw);
-    if (!res.ok) { msg(res.error); return; }
-    await afterLogin();
-    msg('', false);
-  });
-  document.getElementById('signup-btn').addEventListener('click', async () => {
-    const [email, pw] = creds();
-    msg('계정 만드는 중...', false);
-    const res = await signUp(email, pw);
-    if (!res.ok) { msg(res.error); return; }
-    await afterLogin();
-    flashMessage(res.linked ? '계정이 연결됐습니다 — 하던 나라를 그대로 이어서 합니다'
-                            : '계정을 만들었습니다', false);
   });
 }
 

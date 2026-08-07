@@ -3,7 +3,7 @@
 //
 // Firebase 쪽 설정이 갖춰져야 돌아간다:
 //   1) Authentication → 익명 로그인(Anonymous)   — 게스트로 바로 플레이
-//   2) Authentication → 이메일/비밀번호           — 계정으로 다른 기기에서 이어하기
+//   2) Authentication → Google + 승인된 도메인    — 계정으로 다른 기기에서 이어하기
 //   3) firestore.rules 배포                        — 기지 공개 · 습격 리포트 · 계정 저장
 //
 // 브라우저에서는 "상대가 아무도 없다"로만 보여서 둘 중 무엇이 빠졌는지
@@ -68,33 +68,31 @@ if (auth.status === 200 && auth.body?.idToken) {
   problems.push(`익명 로그인 응답을 확인하세요 (HTTP ${auth.status})`);
 }
 
-// 1-2) 이메일/비밀번호 로그인 — 계정으로 "이어서 하기"에 필요하다
-console.log('\n[2/4] 이메일/비밀번호 로그인 (계정 이어하기용)');
-const probeEmail = `check_${Date.now()}@example.com`;
-const signup = await req(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
+// 2) 구글 로그인이 켜져 있는가 — 계정으로 "이어서 하기"에 필요하다.
+//    가짜 토큰으로 한 번 찔러본다: provider가 꺼져 있으면 OPERATION_NOT_ALLOWED,
+//    켜져 있으면 "토큰이 잘못됐다"는 다른 오류가 온다.
+console.log('\n[2/4] 구글 로그인 (계정 이어하기용)');
+const idp = await req(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${apiKey}`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: probeEmail, password: 'check1234', returnSecureToken: true }),
+  body: JSON.stringify({
+    postBody: 'id_token=invalid&providerId=google.com',
+    requestUri: 'http://localhost', returnSecureToken: true,
+  }),
 });
-let emailToken = null;
-if (signup.status === 200 && signup.body?.idToken) {
-  emailToken = signup.body.idToken;
-  console.log('  ✓ 켜져 있음');
-  // 시험 계정은 바로 지운다
-  await req(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${apiKey}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken: emailToken }),
-  });
-} else if (/OPERATION_NOT_ALLOWED/.test(JSON.stringify(signup.body))) {
+const idpMsg = JSON.stringify(idp.body || {});
+if (/OPERATION_NOT_ALLOWED/.test(idpMsg)) {
   console.log('  ❌ 꺼져 있음 — 계정 없이 게스트로만 플레이됩니다');
-  problems.push('Firebase 콘솔 → Authentication → Sign-in method → 이메일/비밀번호 사용 설정');
+  problems.push('Firebase 콘솔 → Authentication → Sign-in method → Google 사용 설정');
+} else if (/INVALID_IDP_RESPONSE|INVALID_CREDENTIAL|Unable to parse/.test(idpMsg)) {
+  console.log('  ✓ 켜져 있음');
 } else {
-  console.log(`  ⚠️ 확인 불가 (${signup.status}) ${JSON.stringify(signup.body).slice(0, 120)}`);
+  console.log(`  ⚠️ 확인 불가 (${idp.status}) ${idpMsg.slice(0, 140)}`);
 }
 
 // 2-2) 구글 로그인은 "승인된 도메인"에서만 열린다.
 //      배포 주소가 목록에 없으면 버튼을 눌러도 창이 뜨지 않는다.
-console.log('\n[2-2] 구글 로그인 · 승인된 도메인');
+console.log('  — 승인된 도메인 (구글 로그인 창이 열릴 주소)');
 const cfg = await req(`https://identitytoolkit.googleapis.com/v1/projects?key=${apiKey}`);
 const domains = cfg.body?.authorizedDomains || [];
 if (cfg.status === 200) {

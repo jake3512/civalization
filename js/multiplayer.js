@@ -116,7 +116,7 @@ export function isMultiplayer() { return FIREBASE_ENABLED && !!uid; }
 //
 // 기본은 익명 로그인이다 — 아무것도 묻지 않고 바로 플레이할 수 있어야 하니까.
 // 다만 익명 계정은 **그 브라우저에만** 남아서, 폰에서 하던 판을 PC에서 이어받을
-// 수 없다. 그래서 이메일/비밀번호 계정을 붙일 수 있게 한다.
+// 수 없다. 그래서 구글 계정을 붙일 수 있게 한다.
 //
 // 핵심은 "연결(link)"이다. 익명으로 하던 판에 계정을 붙이면 **uid가 그대로
 // 유지되므로**, 세워둔 나라도 나에게 온 습격도 그대로 따라온다. 새 계정을
@@ -144,57 +144,20 @@ function authError(e) {
   const code = ((e && e.code) || '').replace('auth/', '');
   const table = {
     'invalid-email': '이메일 형식이 올바르지 않습니다',
-    'missing-password': '비밀번호를 입력해주세요',
-    'weak-password': '비밀번호는 6자 이상이어야 합니다',
-    'email-already-in-use': '이미 가입된 이메일입니다 — 로그인해주세요',
-    'invalid-credential': '이메일 또는 비밀번호가 맞지 않습니다',
-    'wrong-password': '비밀번호가 맞지 않습니다',
-    'user-not-found': '가입되지 않은 이메일입니다',
     'too-many-requests': '시도가 너무 잦습니다 — 잠시 뒤 다시 해주세요',
     'network-request-failed': '네트워크에 연결하지 못했습니다',
-    'operation-not-allowed': 'Firebase 콘솔에서 이메일/비밀번호 로그인을 켜야 합니다',
+    'operation-not-allowed': 'Firebase 콘솔에서 구글 로그인을 켜야 합니다',
     'configuration-not-found': 'Firebase 콘솔에서 Authentication을 먼저 켜야 합니다',
     'credential-already-in-use': '그 계정은 이미 다른 나라에 연결돼 있습니다 — 로그인해서 이어가세요',
     'provider-already-linked': '이미 계정이 연결돼 있습니다',
     'popup-blocked': '팝업이 차단됐습니다 — 다시 눌러주세요 (창 대신 페이지 이동으로 진행합니다)',
     'popup-closed-by-user': '로그인 창이 닫혔습니다',
-    'account-exists-with-different-credential': '같은 이메일로 이미 다른 방식(이메일/비밀번호)의 계정이 있습니다',
+    'account-exists-with-different-credential': '같은 이메일로 이미 다른 방식의 계정이 있습니다',
     // 배포 주소가 Firebase에 등록돼 있지 않으면 구글 로그인이 아예 시작되지 않는다
     'unauthorized-domain': `이 주소(${typeof location !== 'undefined' ? location.hostname : ''})가 Firebase에 등록돼 있지 않습니다`
       + ' — 콘솔 → Authentication → Settings → 승인된 도메인에 추가하세요',
   };
   return { ok: false, code, error: table[code] || (e && e.message) || '로그인에 실패했습니다' };
-}
-
-/** 이메일/비밀번호로 로그인 */
-export async function signIn(email, password) {
-  if (!auth) return { ok: false, error: '온라인에 연결되지 않았습니다' };
-  try {
-    const cred = await authFx.signInWithEmailAndPassword(auth, email, password);
-    uid = cred.user.uid;
-    return { ok: true, user: currentUser() };
-  } catch (e) { return authError(e); }
-}
-
-/**
- * 계정 만들기.
- * 지금 익명으로 플레이 중이면 **그 계정에 이메일을 붙인다**(link) — uid가
- * 유지되므로 하던 나라를 그대로 들고 간다. 익명 상태가 아니면 새로 가입한다.
- */
-export async function signUp(email, password) {
-  if (!auth) return { ok: false, error: '온라인에 연결되지 않았습니다' };
-  try {
-    const u = auth.currentUser;
-    if (u && u.isAnonymous && authFx.EmailAuthProvider && authFx.linkWithCredential) {
-      const cred = authFx.EmailAuthProvider.credential(email, password);
-      const res = await authFx.linkWithCredential(u, cred);
-      uid = res.user.uid;
-      return { ok: true, linked: true, user: currentUser() };
-    }
-    const res = await authFx.createUserWithEmailAndPassword(auth, email, password);
-    uid = res.user.uid;
-    return { ok: true, linked: false, user: currentUser() };
-  } catch (e) { return authError(e); }
 }
 
 /**
