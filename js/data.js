@@ -480,15 +480,15 @@ export const STRUCTURES = {
   },
   belt_splitter: {
     id: 21, name: '분할 컨베이어', volume: 1, footprint: [1, 1],
-    desc: '들어온 자원을 정면·좌·우 세 방향으로 번갈아 나눠 보냅니다. 한 생산 라인을 여러 창고로 갈라줄 때 씁니다.',
+    desc: '들어온 자원을 정면과 옆, 두 방향으로 번갈아 나눠 보냅니다. 옆이 왼쪽인지 오른쪽인지는 설치 후 팝업에서 고를 수 있습니다.',
     baseCost: { wood: 8, stone: 6, iron_ingot: 1 }, maxLevel: 3, upgradeCostMul: 1.3,
     category: 'utility', baseHp: 30, rotatable: true, beltKind: 'splitter',
   },
   belt_cross: {
     id: 22, name: '컨베이어 교차로', volume: 1, footprint: [1, 1],
-    desc: '두 벨트 라인이 서로 섞이지 않고 교차합니다. 들어온 방향 그대로 반대편으로 내보냅니다.',
+    desc: '두 벨트 라인이 서로 섞이지 않고 교차합니다. 들어온 방향 그대로 반대편으로 내보내고, 구조물에서 바로 받았을 때는 설정한 방향으로 내보냅니다.',
     baseCost: { wood: 10, stone: 8, iron_ingot: 2 }, maxLevel: 3, upgradeCostMul: 1.3,
-    category: 'utility', baseHp: 30, beltKind: 'cross',
+    category: 'utility', baseHp: 30, rotatable: true, beltKind: 'cross',
   },
   warehouse: {
     id: 19, name: '창고', volume: 4, footprint: [2, 2],
@@ -794,6 +794,19 @@ export const DIR_ARROW = ['→', '↓', '←', '↑'];
 export const DIR_NAMES = ['동', '남', '서', '북'];
 export function beltThroughput(level) { return 10 * level; }
 
+/**
+ * 분할 컨베이어가 자원을 내보내는 두 방향 [정면, 옆].
+ * 세 갈래(정면·좌·우)로 나누던 것을 **두 갈래**로 바꿨다 — 세 갈래는 라인 하나가
+ * 어디로 갈지 눈으로 좇기 어렵고, 옆으로 새는 양이 많아 본선이 자주 말랐다.
+ * 옆이 어느 쪽인지는 구조물마다 고를 수 있다 (branch: 0=오른쪽, 1=왼쪽).
+ * 방향 화살표는 카메라 기준 고정이므로 "오른쪽"은 진행 방향에서 시계 방향이다.
+ */
+export function splitterExits(s) {
+  const d = s.dir || 0;
+  const side = s.branch === 1 ? (d + 3) % 4 : (d + 1) % 4;
+  return [d, side];
+}
+
 // ============================================================
 // 배출구 (out port)
 //
@@ -804,7 +817,12 @@ export function beltThroughput(level) { return 10 * level; }
 //
 // 창고·수도처럼 여러 자원을 담는 보관 구조물은 플레이어가 면마다 자원을 직접
 // 지정할 수 있다 (struct.outFilter = { 방향: 자원 }). 지정하지 않은 면은 아무거나.
+// 자원 대신 BELT_OFF를 넣으면 그 면은 **벨트로 아무것도 내보내지 않는다** —
+// 지나가는 벨트를 창고 옆에 깔았다가 재고가 통째로 빨려 나가는 일을 막는다.
 // ============================================================
+
+/** outFilter에 넣으면 그 면의 벨트 연결을 끊는다 (자원 이름과 겹치지 않는 값) */
+export const BELT_OFF = '__off';
 
 /** 이 구조물이 지금 한 번에 내놓는 산출물 (순서 고정 — 배출구 배정에 그대로 쓴다) */
 export function structOutputs(struct) {

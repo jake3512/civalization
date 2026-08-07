@@ -9,8 +9,8 @@
 // 뒤쪽(y가 작은) 것부터 그리면 앞 건물이 뒤 건물을 자연스럽게 가린다.
 // ============================================================
 import { getTileRange } from './world.js';
-import { STRUCTURES, TERRAIN_NODES, DIR_ARROW, RESOURCES, structureIcon, alertIcon, isBeltKey,
-         DIR_VECT, outputPorts } from './data.js';
+import { STRUCTURES, TERRAIN_NODES, RESOURCES, structureIcon, alertIcon, isBeltKey,
+         DIR_VECT, outputPorts, splitterExits } from './data.js';
 
 // 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
@@ -395,12 +395,9 @@ export class Renderer {
     ctx.setLineDash([]);
     ctx.lineWidth = 1;
 
-    // 벨트는 흐를 방향을 화살표로 함께 보여준다
+    // 벨트는 흐를 방향을 화살표로 함께 보여준다 (설치된 벨트와 같은 굵은 도형)
     if (isBeltKey(p.key)) {
-      ctx.fillStyle = '#f0e8de';
-      ctx.font = `${tile * 0.55}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(DIR_ARROW[p.dir ?? 0], sx + tile / 2, sy + tileY / 2);
+      this._drawFlowArrow(sx + tile / 2, sy + tileY / 2, p.dir ?? 0, '#f0e8de', 0.8, 0);
     }
 
     // 영토를 넓히는 구조물(수도/중심지)은 편입될 범위를 바닥에 눕혀 미리 보여준다
@@ -431,16 +428,43 @@ export class Renderer {
     if (b.right < 0 || b.left > this.vw || b.bottom < 0 || b.top > this.vh) return;
 
     if (isBeltKey(s.key)) {
-      // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다
-      ctx.fillStyle = '#4b5a67';
-      ctx.fillRect(b.sx + 2, b.sy + 1, tile - 4, tileY - 2);
+      // 벨트는 바닥에 깔린 물건이라 세우지 않고 눕혀 그린다.
+      // 그림(assets/icons/struct/belt*.svg)과 같은 구성 — 강철 프레임 테두리 안에
+      // 어두운 벨트 면을 깔고, 여유가 있으면 트레드 무늬까지 얹는다.
+      const fx = b.sx + 2, fy = b.sy + 1, fw = tile - 4, fh = tileY - 2;
+      ctx.fillStyle = '#78868f';                       // 프레임
+      ctx.fillRect(fx, fy, fw, fh);
+      const inset = Math.max(1.5, tile * 0.14);
+      ctx.fillStyle = '#2b313b';                       // 벨트 면
+      ctx.fillRect(fx + inset, fy + inset * 0.6, fw - inset * 2, fh - inset * 1.2);
+      if (tile >= 18) {
+        ctx.strokeStyle = '#5b6675'; ctx.lineWidth = Math.max(1, tile * 0.045);
+        const top = fy + inset * 0.6, bot = fy + fh - inset * 0.6;
+        for (let tx = fx + inset + tile * 0.12; tx < fx + fw - inset; tx += tile * 0.22) {
+          ctx.beginPath(); ctx.moveTo(tx, bot); ctx.lineTo(tx + tile * 0.09, top); ctx.stroke();
+        }
+      }
       ctx.strokeStyle = '#120e14'; ctx.lineWidth = 2;
-      ctx.strokeRect(b.sx + 2, b.sy + 1, tile - 4, tileY - 2);
+      ctx.strokeRect(fx, fy, fw, fh);
       ctx.lineWidth = 1;
-      ctx.fillStyle = '#ffd84d';
-      ctx.font = `bold ${tile * 0.55}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(DIR_ARROW[s.dir ?? 0], b.sx + tile / 2, b.sy + tileY / 2);
+      const arrow = (d, color, scale, push) =>
+        this._drawFlowArrow(b.sx + tile / 2, b.sy + tileY / 2, d, color, scale, push);
+      const kind = STRUCTURES[s.key].beltKind;
+      if (kind === 'splitter') {
+        // 정면(금색)과 옆 갈래(청록) 두 방향으로만 나눈다
+        const [front, side] = splitterExits(s);
+        arrow(front, '#ffd84d', 0.5, 0.2);
+        arrow(side, '#7ff0e2', 0.44, 0.22);
+      } else if (kind === 'cross') {
+        // 두 축이 서로 섞이지 않고 통과한다 — 양끝에 화살표를 찍어 분할과 구분한다
+        const d = s.dir ?? 0;
+        for (const [dd, col] of [[d, '#ffd84d'], [(d + 2) % 4, '#ffd84d'],
+                                 [(d + 1) % 4, '#7ff0e2'], [(d + 3) % 4, '#7ff0e2']]) {
+          arrow(dd, col, 0.38, 0.24);
+        }
+      } else {
+        arrow(s.dir ?? 0, '#ffd84d', 0.8, 0);
+      }
       // 방금 이 벨트를 지나간 자원을 얹어 무엇이 흐르는지 보여준다
       if (s._carry && tile >= 12) {
         const img = getIconImage(RESOURCES[s._carry]?.icon || '');
@@ -625,6 +649,49 @@ export class Renderer {
       }
       ctx.restore();
     }
+  }
+
+  /**
+   * 벨트의 흐름 화살표.
+   * 글꼴 글리프(→)는 획이 가늘어 작은 타일에서 잘 보이지 않았다. 도형으로 직접
+   * 그려 몸통·촉 두께를 타일 크기에 맞춰 굵게 잡고, 어두운 테두리를 둘러 어떤
+   * 바닥색 위에서도 또렷하게 남게 한다.
+   * @param cx,cy  타일 중앙 (화면 좌표)
+   * @param d      방향 0=동 1=남 2=서 3=북
+   * @param scale  타일 크기에 대한 전체 길이 비율
+   * @param push   그 방향으로 중앙에서 밀어낼 거리 (갈래가 여럿일 때 겹치지 않게)
+   */
+  _drawFlowArrow(cx0, cy0, d, color, scale, push) {
+    const { ctx, tile, tileY } = this;
+    const [ax, ay] = DIR_VECT[d];
+    const cx = cx0 + ax * tile * push;
+    const cy = cy0 + ay * tileY * push;
+    const half = scale / 2;
+    const headLen = scale * 0.44;    // 촉 길이
+    const headHalf = scale * 0.33;   // 촉 반폭
+    const bodyHalf = scale * 0.16;   // 몸통 반두께
+    // 화살표는 바닥에 눕힌 물체가 아니라 기호다. 타일의 기울기(tileY)를 그대로
+    // 따르면 위아래 화살표가 납작하게 눌려 안 보이므로 살짝만 눌러 그린다.
+    const VSQUASH = 0.8;
+    const px = (fa, fp) => cx + (ax * fa - ay * fp) * tile;
+    const py = (fa, fp) => cy + (ay * fa + ax * fp) * tile * VSQUASH;
+    const pts = [
+      [half, 0],
+      [half - headLen, headHalf], [half - headLen, bodyHalf],
+      [-half, bodyHalf], [-half, -bodyHalf],
+      [half - headLen, -bodyHalf], [half - headLen, -headHalf],
+    ];
+    ctx.beginPath();
+    ctx.moveTo(px(...pts[0]), py(...pts[0]));
+    for (const p of pts.slice(1)) ctx.lineTo(px(...p), py(...p));
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#120e14';
+    ctx.lineWidth = Math.max(1, tile * 0.05);
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.lineWidth = 1;
   }
 
   _drawPowerOverlay(nation) {

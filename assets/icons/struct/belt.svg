@@ -1,7 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <path d="M4 40 H60 L53.84 28 H10.16 Z" fill="#5c6b78" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
-    <rect x="4" y="40" width="56" height="10" rx="2" fill="#4a444f" stroke="#161018" stroke-width="3"/><path d="M4 46.2 h56 v3.8 h-56 Z" fill="#161018" opacity="0.16"/>
-    <path d="M6 34 H58" stroke="#161018" stroke-width="2.2"/>
-    <circle cx="13" cy="34" r="5" fill="#e2ebf2" stroke="#161018" stroke-width="2.5"/><circle cx="51" cy="34" r="5" fill="#e2ebf2" stroke="#161018" stroke-width="2.5"/>
-    <path d="M24 28 L38 34 L24 40 Z" fill="#ffe066" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+  <ellipse cx="32" cy="54" rx="18" ry="4" fill="#000" opacity="0.25"/>
+    
+    <path d="M11 46 h6 v8 h-6 Z" fill="#3c4855" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M47 46 h6 v8 h-6 Z" fill="#3c4855" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M3 38 H61 L54.620000000000005 26 H9.379999999999999 Z" fill="#93a5b3" stroke="#161018" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M6 36 H58 L53.620000000000005 28.5 H10.379999999999999 Z" fill="#2b313b" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M16 35 L19.5 29.5" stroke="#5b6675" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/><path d="M24 35 L27.5 29.5" stroke="#5b6675" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/><path d="M32 35 L35.5 29.5" stroke="#5b6675" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/><path d="M40 35 L43.5 29.5" stroke="#5b6675" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/><path d="M48 35 L51.5 29.5" stroke="#5b6675" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>
+    
+    <path d="M6.5 28 h5 v8.5 h-5 Z" fill="#9fb0c0" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M6.5 28 h2 v8.5 h-2 Z" fill="#e2ebf2" opacity="0.85"/>
+    <path d="M52.5 28 h5 v8.5 h-5 Z" fill="#9fb0c0" stroke="#161018" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M52.5 28 h2 v8.5 h-2 Z" fill="#e2ebf2" opacity="0.85"/>
+    <path d="M10.379999999999999 28.5 H53.620000000000005 L51.620000000000005 30.1 H12.379999999999999 Z" fill="#fff" opacity="0.16"/>
+    <rect x="3" y="38" width="58" height="10" rx="2" fill="#5d6b78" stroke="#161018" stroke-width="3"/><path d="M3 44.2 h58 v3.8 h-58 Z" fill="#161018" opacity="0.16"/>
+    <path d="M5 41.4 H59" stroke="#161018" stroke-width="1.4" opacity="0.35"/>
+    <circle cx="9" cy="41" r="1.4" fill="#93a5b3" opacity="0.7"/><circle cx="19" cy="41" r="1.4" fill="#93a5b3" opacity="0.7"/><circle cx="29" cy="41" r="1.4" fill="#93a5b3" opacity="0.7"/><circle cx="39" cy="41" r="1.4" fill="#93a5b3" opacity="0.7"/><circle cx="49" cy="41" r="1.4" fill="#93a5b3" opacity="0.7"/>
+    <path d="M25 27 L41 33 L25 39 Z" fill="#ffe066" stroke="#161018" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M27 29.5 L36 33 L27 36.5 Z" fill="#fff" opacity="0.35"/>
 </svg>

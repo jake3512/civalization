@@ -11,7 +11,7 @@
 import { STRUCTURES, getUpgradeCost, TECH_TREE, BASE_UNLOCKED, WAR, UNITS, BATTLE, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, MIN_CAPITAL_DISTANCE, isBeltKey, isRotatable,
          VIRTUAL_RESOURCES, LOGISTICS, getStorageCapacity, getOutputCapacity,
          CROPS, ANIMALS, EXPEDITIONS, START_DISHES, getSellPrice,
-         RESOURCES, DIR_VECT } from './data.js';
+         RESOURCES, DIR_VECT, BELT_OFF } from './data.js';
 import { getTile, isAdjacentToWater } from './world.js';
 
 export function tileKey(x, y) { return `${x},${y}`; }
@@ -507,6 +507,18 @@ export function rotateStructure(nation, structId, dir = null) {
   return { ok: true, structure: s, dir: s.dir };
 }
 
+/**
+ * 분할 컨베이어가 옆으로 나눠 보낼 쪽을 정한다 (0=오른쪽, 1=왼쪽).
+ * 정면은 항상 벨트 방향이라, 이 값만으로 두 갈래가 완전히 정해진다.
+ */
+export function setBranchSide(nation, structId, side) {
+  const s = nation.structures.find(st => st.id === structId);
+  if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
+  if (STRUCTURES[s.key]?.beltKind !== 'splitter') return { ok: false, error: '분할 컨베이어가 아닙니다' };
+  s.branch = side === 1 ? 1 : 0;
+  return { ok: true, structure: s, branch: s.branch };
+}
+
 export function setRecipe(nation, structId, recipeKey) {
   const s = nation.structures.find(s => s.id === structId);
   if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
@@ -563,7 +575,8 @@ export function manualMoveToStructure(nation, structId, res, amount = LOGISTICS.
 
 /**
  * 창고·수도의 한 면(0=동 1=남 2=서 3=북)에서 벨트로 내보낼 자원을 지정한다.
- * res를 비우면 그 면은 다시 "아무거나"가 된다. 수도처럼 여러 자원을 담는
+ * res를 비우면 그 면은 다시 "아무거나"가 되고, BELT_OFF를 넣으면 그 면의
+ * **벨트 연결을 끊는다**(아무것도 내보내지 않는다). 수도처럼 여러 자원을 담는
  * 보관 구조물에서 원하는 자원만 라인으로 뽑아낼 때 쓴다 (simulate.drainStorageToBelt).
  */
 export function setOutFilter(nation, structId, dir, res) {
@@ -571,7 +584,7 @@ export function setOutFilter(nation, structId, dir, res) {
   if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
   if (!STRUCTURES[s.key]?.storageCapacity) return { ok: false, error: '보관 구조물이 아닙니다' };
   if (!(dir >= 0 && dir < DIR_VECT.length)) return { ok: false, error: '방향이 올바르지 않습니다' };
-  if (res && !RESOURCES[res]) return { ok: false, error: '알 수 없는 자원입니다' };
+  if (res && res !== BELT_OFF && !RESOURCES[res]) return { ok: false, error: '알 수 없는 자원입니다' };
 
   s.outFilter = s.outFilter || {};
   if (res) s.outFilter[dir] = res;

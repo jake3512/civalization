@@ -16,10 +16,10 @@ import { createBattleSession, createReplaySession, deployUnit, stepBattle, stepR
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
          storedTotal, totalStock, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage, buriedNodes, canDemolish, setOutFilter,
+         hasGood, sellFromStorage, buriedNodes, canDemolish, setOutFilter, setBranchSide,
          defenseSnapshot, buildRaidReport, applyRaidToAttacker, applyRaidToDefender, canAttack } from './logic.js';
 import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf, POWER_FUELS, pickPowerFuel,
-         DIR_NAMES, outputPorts } from './data.js';
+         DIR_NAMES, outputPorts, splitterExits, BELT_OFF } from './data.js';
 import { exitBeltOn } from './simulate.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS, isPeerOnline } from './mpNet.js';
@@ -853,6 +853,15 @@ document.getElementById('rotate-btn').addEventListener('click', () => {
 });
 document.getElementById('build-confirm').addEventListener('click', confirmBuild);
 document.getElementById('build-cancel').addEventListener('click', clearSelectedStruct);
+// 지도를 멀리 끌고 나가면 내 나라를 다시 찾기 어렵다 — 한 번에 수도로 돌아온다.
+// (수도 발판이 3×3이라 +1을 더해야 건물 한가운데가 화면 중앙에 온다)
+function goHome() {
+  const cap = game.myNation && game.myNation.capital;
+  if (!cap) { flashMessage('아직 수도가 없습니다', true); return; }
+  renderer.centerOn(cap.x + 1, cap.y + 1);
+  flashMessage('수도로 이동했습니다', false);
+}
+document.getElementById('home-btn').addEventListener('click', goHome);
 document.getElementById('power-btn').addEventListener('click', (e) => {
   renderer.showPower = !renderer.showPower;
   e.currentTarget.classList.toggle('active', renderer.showPower);
@@ -866,6 +875,9 @@ document.getElementById('zoom-out-btn').addEventListener('click', () => {
 
 // ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
 window.addEventListener('keydown', (e) => {
+  // 나라 이름을 치는 중에 단축키가 먹으면 안 된다 (r·p·h가 전부 글자다)
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (e.key.toLowerCase() === 'r' && isRotatable(selectedStruct)) {
     beltDir = (beltDir + 1) % 4;
     renderCostPreview(STRUCTURES[selectedStruct]);
@@ -874,6 +886,7 @@ window.addEventListener('keydown', (e) => {
     renderer.showPower = !renderer.showPower;
     document.getElementById('power-btn').classList.toggle('active', renderer.showPower);
   }
+  if (e.key.toLowerCase() === 'h') goHome();   // 수도로 돌아오기
   // 키보드가 있으면 Enter로 설치, Esc로 취소 (터치에서는 화면 버튼을 쓴다)
   if (selectedStruct) {
     if (e.key === 'Enter') { e.preventDefault(); confirmBuild(); }
@@ -1157,26 +1170,35 @@ function renderOutFilterHtml(struct, def) {
   const rate = LOGISTICS.warehouseBeltRate * struct.level;
   const kinds = Object.keys(struct.store || {}).filter(k => struct.store[k] > 0);
   const filters = struct.outFilter || {};
-  const pickable = !def.singleResource;   // 한 종류만 담는 창고는 고를 게 없다
+  // 한 종류만 담는 창고도 "연결 끊기"는 필요하므로 선택 상자는 항상 보여준다.
+  // 일괄 버튼은 네 면이 **모두** 끊긴 상태에서만 "다시 연결"로 바뀐다 — 한 면만
+  // 끊어둔 상태에서 "모두 끊기"를 누르려는데 버튼이 반대로 뒤집혀 있으면 곤란하다.
+  const allOff = [0, 1, 2, 3].every(d => filters[d] === BELT_OFF);
 
   let html = `<div class="inv-block"><div class="inv-title">벨트 배출구 (매 틱 최대 ${rate})</div>
-    <div class="pd dim">밖으로 나가는 방향의 벨트를 붙이면 재고가 그 벨트로 빠져나갑니다.</div>
+    <div class="pd dim">밖으로 나가는 방향의 벨트를 붙이면 재고가 그 벨트로 빠져나갑니다.
+      내보내고 싶지 않은 면은 <b>연결 끊기</b>로 막아둘 수 있습니다.</div>
     <div class="port-list">`;
   for (let dir = 0; dir < DIR_NAMES.length; dir++) {
     const on = !!exitBeltOn(game.myNation, struct, dir);
     const only = filters[dir];
-    let sel = '';
-    if (pickable) {
-      const choices = [...kinds];
-      if (only && !choices.includes(only)) choices.push(only);   // 지금 비어 있어도 지정은 유지
-      sel = `<select class="port-sel" data-out-dir="${dir}">
-        <option value="">전체</option>` + choices.map(r =>
-        `<option value="${r}"${only === r ? ' selected' : ''}>${RESOURCES[r]?.name || r}</option>`).join('') + `</select>`;
-    }
+    const off = only === BELT_OFF;
+    const choices = [...kinds];
+    if (only && only !== BELT_OFF && !choices.includes(only)) choices.push(only);  // 비어 있어도 지정은 유지
+    const sel = `<select class="port-sel${off ? ' off' : ''}" data-out-dir="${dir}">
+      <option value=""${!only ? ' selected' : ''}>전체</option>
+      <option value="${BELT_OFF}"${off ? ' selected' : ''}>⛔ 연결 끊기</option>` + choices.map(r =>
+      `<option value="${r}"${only === r ? ' selected' : ''}>${RESOURCES[r]?.name || r}</option>`).join('') + `</select>`;
+
+    const state = off ? '<span class="port-off">끊김</span>'
+      : `<span class="${on ? 'port-on' : 'dim'}">${on ? '벨트 연결됨' : '벨트 없음'}</span>`;
     html += `<div class="port-row"><span class="port-dir">${DIR_NAMES[dir]}쪽 ${DIR_ARROW[dir]}</span>
-      ${sel}<span class="${on ? 'port-on' : 'dim'}">${on ? '벨트 연결됨' : '벨트 없음'}</span></div>`;
+      ${sel}${state}</div>`;
   }
-  return html + `</div></div>`;
+  html += `</div><div class="inv-actions">
+    <button class="inv-btn" data-belt-all="${allOff ? 'on' : 'off'}">${
+      allOff ? '🔌 네 면 모두 다시 연결' : '⛔ 네 면 모두 연결 끊기'}</button></div>`;
+  return html + `</div>`;
 }
 
 /** 수동 조작 버튼들의 이벤트 배선 (패널을 다시 그릴 때마다 호출) */
@@ -1206,16 +1228,29 @@ function wireInventoryActions(panel, struct, x, y) {
     });
   });
 
-  // 벨트 배출구: 이 면으로 내보낼 자원을 고른다 (빈 값이면 아무거나)
+  // 벨트 배출구: 이 면으로 내보낼 자원을 고른다 (빈 값이면 아무거나, BELT_OFF면 끊기)
+  const filterLabel = (res) => res === BELT_OFF ? '연결 끊김' : (res ? (RESOURCES[res]?.name || res) : '전체');
   panel.querySelectorAll('[data-out-dir]').forEach(sel => {
     sel.addEventListener('change', () => {
       const dir = Number(sel.dataset.outDir);
       const r = setOutFilter(game.myNation, struct.id, dir, sel.value || null);
       if (!r.ok) { flashMessage(r.error, true); return; }
-      flashMessage(`${DIR_NAMES[dir]}쪽 배출구 → ${r.res ? (RESOURCES[r.res]?.name || r.res) : '전체'}`, false);
+      flashMessage(`${DIR_NAMES[dir]}쪽 배출구 → ${filterLabel(r.res)}`, false);
       refresh();
     });
   });
+  // 네 면을 한 번에 끊거나 되돌린다
+  const allBtn = panel.querySelector('[data-belt-all]');
+  if (allBtn) {
+    allBtn.addEventListener('click', () => {
+      const off = allBtn.dataset.beltAll === 'off';   // off면 지금부터 끊는다
+      for (let dir = 0; dir < DIR_NAMES.length; dir++) {
+        setOutFilter(game.myNation, struct.id, dir, off ? BELT_OFF : null);
+      }
+      flashMessage(off ? '벨트 배출을 모두 끊었습니다' : '벨트 배출을 모두 다시 열었습니다', false);
+      refresh();
+    });
+  }
 
   // 수동 운용: 누르고 있는 동안 일정 간격으로 1사이클씩 돌린다
   const opBtn = panel.querySelector('#manual-op-btn');
@@ -1462,9 +1497,22 @@ function showStructPanel(struct, x, y) {
   if (STRUCTURES[struct.key].storageCapacity) html += renderSellHtml(struct);
 
   if (isRotatable(struct.key)) {
-    html += `<div class="pd">흐르는 방향: <b class="rot-now">${DIR_ARROW[struct.dir || 0]}</b></div>
+    // 교차로는 "지나가는 방향"이 아니라 구조물에서 바로 받았을 때 내보낼 기준 방향이다
+    const rotLabel = def.beltKind === 'cross' ? '기준 방향 (구조물에서 바로 받았을 때)' : '흐르는 방향';
+    html += `<div class="pd">${rotLabel}: <b class="rot-now">${DIR_ARROW[struct.dir || 0]}</b></div>
       <div class="rot-row">
         ${[0, 1, 2, 3].map(d => `<button class="rot-btn${(struct.dir || 0) === d ? ' active' : ''}" data-rot="${d}">${DIR_ARROW[d]}</button>`).join('')}
+      </div>`;
+  }
+  // 분할 컨베이어는 정면과 "옆" 두 방향으로 나눈다 — 옆이 어느 쪽인지 고른다
+  if (def.beltKind === 'splitter') {
+    const [front, side] = splitterExits(struct);
+    html += `<div class="pd">나뉘는 두 방향:
+      <b class="rot-now">${DIR_ARROW[front]} ${DIR_NAMES[front]}</b> +
+      <b class="rot-now">${DIR_ARROW[side]} ${DIR_NAMES[side]}</b></div>
+      <div class="rot-row">
+        <button class="rot-btn wide${struct.branch === 1 ? '' : ' active'}" data-branch="0">↱ 오른쪽으로 분기</button>
+        <button class="rot-btn wide${struct.branch === 1 ? ' active' : ''}" data-branch="1">↰ 왼쪽으로 분기</button>
       </div>`;
   }
   if (def.recipes) html += renderRecipeHtml(struct, def);
@@ -1487,6 +1535,15 @@ function showStructPanel(struct, x, y) {
         () => callSetRecipe(struct.id, btn.dataset.recipe));
       if (res.error) flashMessage(res.error, true);
       else { flashMessage('레시피 설정 완료', false); showStructPanel(struct, x, y); }
+    });
+  });
+  body.querySelectorAll('[data-branch]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const r = setBranchSide(game.myNation, struct.id, Number(btn.dataset.branch));
+      if (!r.ok) { flashMessage(r.error, true); return; }
+      const [, side] = splitterExits(r.structure);
+      flashMessage(`옆 갈래 → ${DIR_NAMES[side]}쪽`, false);
+      showStructPanel(game.myNation.structures.find(s2 => s2.id === struct.id) || null, x, y);
     });
   });
   body.querySelectorAll('[data-rot]').forEach(btn => {
