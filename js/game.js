@@ -10,7 +10,7 @@ import { STRUCTURES, BASE_UNLOCKED, WAR } from './data.js';
 import * as logic from './logic.js';
 import { tickNation } from './simulate.js';
 
-const TICK_MS = 2000; // 자원 생산 주기
+export const TICK_MS = 2000; // 자원 생산 주기 (UI에서 남은 시간 계산에도 쓴다)
 
 /** 새 국가를 생성하고 수도를 자동 배치한다. (클라이언트 오프라인 모드 / Cloud Functions 양쪽에서 재사용) */
 export function createNation(id, name, color, capitalX, capitalY) {

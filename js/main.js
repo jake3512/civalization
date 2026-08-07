@@ -8,7 +8,7 @@
 import { STRUCTURES, RESOURCES, STATUS_ICONS, TECH_TREE, DIR_ARROW, DIR_VECT, WAR, UNITS, TERRAIN_NODES, CAPITAL_REQUIRED_NODES, MIN_CAPITAL_DISTANCE, structureIcon,
          LOGISTICS, getStorageCapacity, getOutputCapacity, getUpgradeCost, getStructureMaxHp, beltThroughput,
          CROPS, ANIMALS, EXPEDITIONS, getSellPrice, unitIcon, VIRTUAL_RESOURCES } from './data.js';
-import { Game, Nation } from './game.js';
+import { Game, Nation, TICK_MS } from './game.js';
 import { Renderer } from './render.js';
 import { BattleRenderer } from './battleRender.js';
 import { createBattleSession, createReplaySession, deployUnit, stepBattle, stepReplay,
@@ -2033,6 +2033,19 @@ async function finishBattle() {
               : '<br><span class="dim">상대에게 습격 기록을 남겼습니다</span>'}`;
 }
 
+/**
+ * 틱 수를 사람이 읽는 시간으로. 여행이 1000틱을 넘어가면서 "1000틱"은
+ * 아무 의미도 주지 못하게 됐다 (1틱 = 2초).
+ */
+function ticksToTime(ticks) {
+  const sec = Math.max(0, Math.round(ticks)) * (TICK_MS / 1000);
+  if (sec < 60) return `${sec}초`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}분`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h}시간 ${m}분` : `${h}시간`;
+}
+
 // ---------- 여행(원정) 패널 ----------
 // 인력을 들여 원정을 보내면 일정 시간 뒤 자원과 새 작물/가축/요리법을 얻는다.
 function renderTravelPanel() {
@@ -2047,7 +2060,7 @@ function renderTravelPanel() {
     const done = Math.max(0, total - n.expedition.ticksLeft);
     const pct = Math.round((done / total) * 100);
     el.innerHTML = `<div class="pd">${resIcon('labor')} 인력 ${labor}</div>
-      <div class="pd"><b>${exp?.name || n.expedition.key}</b> 진행 중 — 남은 ${n.expedition.ticksLeft}틱</div>
+      <div class="pd"><b>${exp?.name || n.expedition.key}</b> 진행 중 — ${pct}% · 남은 시간 ${ticksToTime(n.expedition.ticksLeft)}</div>
       <div class="invbar"><div class="invbar-fill" style="width:${pct}%"></div></div>`;
     return;
   }
@@ -2065,7 +2078,7 @@ function renderTravelPanel() {
     html += `<div class="travel-item${disabled ? ' locked' : ''}">
       <div class="travel-name">${lvOk ? '' : '🔒 '}${exp.name}</div>
       <div class="travel-desc">${exp.desc}</div>
-      <div class="travel-meta">${resIcon('labor')}${exp.labor} · ${exp.ticks}틱 · 보상 ${
+      <div class="travel-meta">${resIcon('labor')}${exp.labor} · ${ticksToTime(exp.ticks)} · 보상 ${
         Object.entries(exp.rewards).map(([r, a]) => `${resIcon(r)}${a}`).join(' ')}</div>
       <button class="travel-btn" data-exp="${key}" ${disabled ? `disabled title="${why}"` : ''}>출발</button>
     </div>`;
@@ -2090,15 +2103,45 @@ function checkExpeditionDone() {
   const done = game.myNation && game.myNation.lastExpedition;
   if (!done || done === lastExpeditionSeen) return;
   lastExpeditionSeen = done;
-  const gained = Object.entries(done.gained || {}).map(([r, a]) => `${RESOURCES[r]?.name || r} +${a}`).join(', ');
+
+  // 여행은 몇십 분씩 걸리는 장기 투자라, 잠깐 스쳐 지나가는 알림으로는 놓친다.
+  // 무엇을 받아왔는지 팝업으로 붙잡아 보여준다.
+  const gained = Object.entries(done.gained || {})
+    .map(([r, a]) => `<span class="notice-item">${resIcon(r)}${esc(RESOURCES[r]?.name || r)} +${a}</span>`).join('');
   const unlocked = (done.unlocks || []).map(u => {
     const [kind, name] = u.split(':');
-    if (kind === 'crop') return CROPS[name]?.name;
-    if (kind === 'animal') return ANIMALS[name]?.name;
-    return RESOURCES[name]?.name || name;
-  }).filter(Boolean).join(', ');
-  flashMessage(`여행 완료: ${done.name}${gained ? ' — ' + gained : ''}${unlocked ? ' | 새로 획득: ' + unlocked : ''}`, false);
+    const label = kind === 'crop' ? CROPS[name]?.name
+      : kind === 'animal' ? ANIMALS[name]?.name
+      : (RESOURCES[name]?.name || name);
+    if (!label) return '';
+    const what = kind === 'crop' ? '작물' : kind === 'animal' ? '가축' : '요리법';
+    return `<span class="notice-item new">${kind === 'dish' ? resIcon(name) : ''}${esc(label)} <b>${what}</b></span>`;
+  }).filter(Boolean).join('');
+
+  showNotice(`여행 완료 — ${esc(done.name)}`, `
+    ${gained ? `<div class="notice-sec"><div class="notice-label">가져온 자원</div>
+      <div class="notice-items">${gained}</div></div>` : ''}
+    ${unlocked ? `<div class="notice-sec"><div class="notice-label">새로 배운 것</div>
+      <div class="notice-items">${unlocked}</div></div>`
+      : '<div class="notice-sec"><div class="pd">새로 배운 것은 없습니다</div></div>'}
+    <div class="pd dim">여행 패널에서 다음 목적지를 고를 수 있습니다.</div>`);
 }
+
+// ---------- 알림 팝업 ----------
+// 놓치면 안 되는 소식(여행 완료 등)을 확인 버튼이 있는 창으로 띄운다.
+function showNotice(title, bodyHtml) {
+  const modal = document.getElementById('notice-modal');
+  if (!modal) return;
+  document.getElementById('notice-title').innerHTML = title;
+  document.getElementById('notice-body').innerHTML = bodyHtml;
+  modal.classList.remove('hidden');
+}
+
+function closeNotice() {
+  document.getElementById('notice-modal')?.classList.add('hidden');
+}
+document.getElementById('notice-close')?.addEventListener('click', closeNotice);
+document.querySelector('#notice-modal .notice-backdrop')?.addEventListener('click', closeNotice);
 
 // ---------- 자원 패널 ----------
 /**

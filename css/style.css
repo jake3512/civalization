@@ -510,6 +510,37 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .deck-plus:active, .deck-minus:active { background: var(--accent); color: #14100a; }
 .shield-on { color: var(--accent); }
 
+/* ---- 알림 팝업 (여행 완료 등) ---- */
+.notice-modal { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; }
+.notice-backdrop { position: absolute; inset: 0; background: rgba(5,7,11,0.72); }
+.notice-card {
+  position: relative; width: min(420px, calc(100% - 24px));
+  background: var(--panel); border: 3px solid var(--ink);
+  box-shadow: 0 0 0 2px var(--accent), 0 20px 50px rgba(0,0,0,0.6);
+  border-radius: 10px; padding: 20px; text-align: center;
+  max-height: 86dvh; overflow-y: auto; touch-action: pan-y;
+}
+.notice-title {
+  font-family: var(--font-display); font-size: 20px; color: var(--accent);
+  letter-spacing: 0.5px; margin-bottom: 14px;
+}
+.notice-body { font-size: 13px; color: var(--text-dim); text-align: left; margin-bottom: 18px; }
+.notice-sec { margin-bottom: 12px; }
+.notice-label { font-family: var(--font-display); font-size: 12px; color: var(--text); margin-bottom: 6px; }
+.notice-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.notice-item {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  padding: 5px 8px; font-size: 12px; color: var(--text); font-family: var(--font-mono);
+}
+.notice-item.new { border-color: var(--teal); color: var(--teal); }
+.notice-item b { color: var(--text-dim); font-weight: 500; font-size: 11px; }
+.notice-close {
+  width: 100%; min-height: 44px; padding: 11px;
+  background: var(--accent); color: #14100a; border: none; border-radius: 4px;
+  font-family: var(--font-display); font-size: 15px; letter-spacing: 1px;
+}
+
 /* ---- 게임 리셋 ---- */
 .reset-panel { font-size: 11px; color: var(--text-dim); }
 .reset-info { font-size: 12px; color: var(--text); margin-bottom: 4px; }

@@ -24,6 +24,10 @@ export const TILT = 0.58;
  * 낮게 둬야 건물이 땅에 붙어 보인다 (높으면 공중에 뜬 것처럼 보인다).
  */
 const PLINTH = 0.09;
+// 세워 그린 그림으로 구조물을 고를 때 쓰는 가로 폭 비율.
+// 그림 전체 폭으로 판정하면 지붕이 옆으로 퍼진 큰 건물이 이웃 칸의 클릭까지
+// 가져가 버린다 (작은 구조물이 큰 건물 위칸에 있으면 고르기 어려웠다).
+const HIT_ART_WIDTH = 0.55;
 /**
  * 건물이 자기 발판 위로 솟을 수 있는 최대 높이 (타일 가로 크기 대비).
  * 한 줄 높이(tile * TILT)보다 살짝 크게 잡아, 뒤쪽 타일이 통째로 가려지지 않게 한다.
@@ -178,16 +182,33 @@ export class Renderer {
   }
 
   /**
-   * 화면 좌표에서 구조물을 집어낸다. 구조물은 바닥보다 위로 솟아 있어서
-   * "보이는 건물"과 "그 건물이 서 있는 타일"이 다르다 — 눈에 보이는 대로
-   * 골라지도록 앞쪽(y가 큰) 것부터 실제 그려진 영역으로 검사한다.
+   * 화면 좌표에서 구조물을 고른다.
+   *
+   * 구조물은 세워서 그리기 때문에 큰 건물의 그림이 **뒤쪽(위) 칸까지 덮는다**.
+   * 그림 사각형만으로 판정하면 그 칸에 있는 작은 구조물을 영영 못 고른다.
+   * 그래서 두 단계로 나눈다:
+   *   1) 바닥(발판) — 실제로 그 구조물이 서 있는 칸. 작은 구조물이 큰 건물
+   *      뒤에 있어도 자기 칸을 누르면 정확히 잡힌다.
+   *   2) 세워 그린 그림 — 발판을 못 맞췄을 때만, 그것도 **가운데 좁은 폭**으로만.
+   *      건물 몸통을 눌렀을 때는 잡히고, 옆으로 퍼진 지붕 끝이 이웃 칸의
+   *      클릭을 가로채지는 않는다.
    */
   pickStructure(nation, px, py) {
     if (!nation) return null;
     const list = [...nation.structures].sort((a, b) => this._depth(b) - this._depth(a));
+
+    // 1단계: 발판(땅에 닿는 칸)
     for (const s of list) {
       const b = this.structBounds(s);
-      if (px >= b.left && px <= b.right && py >= b.top && py <= b.bottom) return s;
+      if (px >= b.sx && px <= b.sx + b.bw && py >= b.sy && py <= b.sy + b.bh) return s;
+    }
+    // 2단계: 세워 그린 그림 (좌우를 좁혀 이웃을 가로채지 않게)
+    for (const s of list) {
+      if (isBeltKey(s.key)) continue;             // 벨트는 발판이 곧 그림이다
+      const b = this.structBounds(s);
+      const cx = (b.left + b.right) / 2;
+      const half = (b.art * HIT_ART_WIDTH) / 2;
+      if (px >= cx - half && px <= cx + half && py >= b.top && py <= b.bottom) return s;
     }
     return null;
   }
