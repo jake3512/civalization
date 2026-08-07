@@ -18,15 +18,48 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+
+/*
+ * 모바일 기본기 — 게임 화면에서 브라우저의 기본 제스처를 전부 끈다.
+ *   · 글자 선택 / 길게 눌러 나오는 복사 메뉴 (지도를 드래그하다 자꾸 잡혔다)
+ *   · 더블탭 확대, 핀치로 페이지 확대 (지도는 게임이 직접 핀치줌을 다룬다)
+ *   · 페이지 스크롤과 고무줄(바운스) — 화면이 통째로 밀려 올라가면 안 된다
+ * 입력창만 예외로 선택을 허용한다.
+ */
+html, body {
+  height: 100%; margin: 0;
+  overscroll-behavior: none;
+  overflow: hidden;
+  touch-action: none;         /* 더블탭 확대·핀치줌·스크롤 전부 끔 */
+  -webkit-text-size-adjust: 100%;
+}
+/* iOS 고무줄(바운스) 차단 — body만 고정한다.
+   html까지 고정하면 모바일 화면에서 좌표 계산이 어긋나 버튼이 안 눌린다. */
+body { position: fixed; inset: 0; width: 100%; }
 .hidden { display: none !important; }
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;                 /* 길게 눌렀을 때 뜨는 메뉴 */
+  -webkit-tap-highlight-color: transparent;    /* 탭할 때 파란 사각형 */
 }
-button { font-family: var(--font-body); cursor: pointer; }
+/* 입력창에서는 글자 선택이 되어야 한다 */
+input, textarea, [contenteditable] {
+  user-select: text; -webkit-user-select: text; -webkit-touch-callout: default;
+}
+/* 세로로 스크롤되는 영역만 세로 스크롤을 허용한다 */
+#left-panel, #right-panel, .struct-modal-body, .battle-log, .build-menu,
+.battle-deck-tray, .resource-bar, .build-sublist {
+  touch-action: pan-y;
+  overscroll-behavior: contain;   /* 끝까지 스크롤해도 페이지로 번지지 않게 */
+}
+.battle-deck-tray, .resource-bar { touch-action: pan-x; }
+
+button { font-family: var(--font-body); cursor: pointer; touch-action: manipulation; }
 h1, h2, .brand, .ph { font-family: var(--font-display); }
 
 /* ---------------- 시작 화면 ---------------- */
@@ -475,9 +508,6 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-@media (max-width: 900px) {
-  #left-panel, #right-panel { width: 200px; }
-}
 
 /* ---- 철거 블록 ----
    되돌릴 수 없는 조작이라 레벨업 블록과 시각적으로 확실히 구분한다. */
@@ -718,3 +748,115 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .travel-btn:active:not(:disabled) { transform: translateY(2px); border-bottom-width: 1px; }
 .choice-btn { display: inline-flex; align-items: center; gap: 3px; }
 .sell-btn { border-color: var(--accent-dim); }
+
+/* ================================================================
+   화면 크기별 대응
+   ── 넓은 화면: 좌 카탈로그 / 가운데 지도 / 우 정보 3단
+   ── 좁은 화면: 지도가 전체를 쓰고, 두 패널은 아래에서 올라오는 서랍
+   ================================================================ */
+
+/* 노트북·작은 태블릿 — 패널만 좁힌다 */
+@media (max-width: 1100px) {
+  #left-panel, #right-panel { width: 220px; padding: 12px; }
+  #topbar { gap: 14px; padding: 0 12px; }
+  .brand { font-size: 14px; }
+}
+
+/* 하단 탭 — 좁은 화면에서만 보인다 */
+.mobile-tabs { display: none; }
+
+@media (max-width: 820px) {
+  /* 주소창이 접혔다 펴지는 모바일에서도 화면이 정확히 차도록 dvh를 쓴다 */
+  #app { height: 100dvh; }
+
+  #topbar {
+    height: auto; min-height: 46px; gap: 8px; padding: 4px 10px;
+    padding-top: calc(4px + env(safe-area-inset-top));
+    flex-wrap: wrap;
+  }
+  .brand { font-size: 12px; order: 1; }
+  .mp-status { font-size: 10px; order: 2; margin-left: auto; }
+  .resource-bar { order: 3; flex-basis: 100%; gap: 12px; font-size: 12px; padding-bottom: 2px; }
+  .ic { width: 16px; height: 16px; }
+
+  /* 지도가 화면 전체를 쓴다 */
+  #layout { position: relative; }
+  #field-wrap { width: 100%; }
+
+  /* 좌우 패널 → 아래에서 올라오는 서랍 */
+  #left-panel, #right-panel {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    width: auto; height: 62vh; max-height: 62dvh;
+    padding: 12px 14px calc(70px + env(safe-area-inset-bottom));
+    border: none; border-top: 3px solid var(--ink);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+    transform: translateY(100%);
+    transition: transform 0.22s ease;
+    z-index: 45;
+  }
+  #left-panel.open, #right-panel.open { transform: translateY(0); }
+
+  /* 하단 탭 바 */
+  .mobile-tabs {
+    display: flex; gap: 8px; flex: none;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 3px solid var(--ink);
+    z-index: 46;
+  }
+  .mtab {
+    flex: 1; min-height: 46px; border-radius: 8px;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); font-family: var(--font-display);
+    font-size: 14px; letter-spacing: 0.5px;
+  }
+  .mtab.active { background: var(--accent); color: #14100a; border-color: var(--accent); }
+
+  /* 화면 아래는 설치 바·건국 바가 쓰므로, 보조 버튼(회전·전력범위·줌)은
+     오른쪽 위로 올린다. 아래에 두면 설치 바와 겹쳐 서로를 가린다. */
+  .touch-toolbar {
+    top: 8px; bottom: auto; right: 8px;
+    flex-direction: column; gap: 6px;
+  }
+  .toolbar-btn { min-height: 42px; font-size: 12px; padding: 0 10px; }
+  /* 넓은 화면에서는 가운데 정렬(left:50% + translateX)이라, 좌우로 펼칠 때는
+     그 이동을 반드시 되돌려야 한다 — 안 그러면 폭의 절반만큼 왼쪽으로 밀려 나간다 */
+  .build-bar { left: 8px; right: 8px; bottom: 8px; transform: none; max-width: none; flex-wrap: wrap; }
+  .build-bar-info { min-width: 0; flex: 1; }
+  .placement-bar {
+    left: 8px; right: 8px; bottom: 8px; transform: none;
+    max-width: none; width: auto;
+    flex-wrap: wrap; font-size: 12px; padding: 10px;
+  }
+  .placement-bar #placement-text { flex-basis: 100%; }
+  .placement-bar #placement-confirm, .placement-bar #placement-suggest { flex: 1; min-height: 44px; }
+
+  /* 팝업·시작화면도 좁은 폭에 맞춘다 */
+  .struct-modal-card { width: calc(100% - 20px); max-height: 88dvh; }
+  .start-card { width: calc(100% - 24px); padding: 22px 18px; max-height: 92dvh; overflow-y: auto; touch-action: pan-y; }
+  .start-card h1 { font-size: 24px; }
+
+  /* 전투 화면 */
+  .battle-topbar {
+    height: auto; min-height: 46px; gap: 10px; padding: 6px 10px;
+    padding-top: calc(6px + env(safe-area-inset-top)); flex-wrap: wrap;
+  }
+  .battle-title { font-size: 12px; }
+  .battle-stats { font-size: 12px; gap: 10px; }
+  .battle-deck-tray { padding: 6px calc(6px + env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)); }
+  .battle-result-card { width: calc(100% - 24px); }
+}
+
+/* 아주 좁은 기기(구형 폰) */
+@media (max-width: 380px) {
+  .brand span { display: none; }
+  .mtab { font-size: 13px; }
+  .resource-bar { font-size: 11px; gap: 9px; }
+}
+
+/* 가로로 눕힌 폰 — 세로 공간이 적으므로 서랍을 더 낮게 */
+@media (max-width: 900px) and (orientation: landscape) {
+  #left-panel, #right-panel { height: 78vh; max-height: 78dvh; }
+  #topbar { flex-wrap: nowrap; }
+  .resource-bar { flex-basis: auto; }
+}

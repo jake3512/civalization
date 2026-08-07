@@ -40,11 +40,31 @@ export class BattleRenderer {
     this.originY = wy - screenY / this.tileY;
   }
 
+  /**
+   * 캔버스를 부모 크기에 맞춘다.
+   *
+   * 고해상도 화면(휴대폰은 보통 2~3배)에서는 CSS 픽셀 그대로 그리면 흐릿하다.
+   * 그래서 실제 픽셀 수만큼 백버퍼를 잡고 컨텍스트를 그 배율로 확대해 둔다.
+   * 바깥에서 쓰는 좌표는 전부 **CSS 픽셀**(vw/vh)이라 나머지 계산은 그대로다.
+   * (크기가 바뀔 때만 캔버스를 다시 잡는다 — width를 대입하면 화면이 지워진다)
+   */
   resize() {
     const parent = this.canvas.parentElement;
-    this.canvas.width = parent.clientWidth;
-    this.canvas.height = parent.clientHeight;
+    const w = parent.clientWidth, h = parent.clientHeight;
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    if (this._w !== w || this._h !== h || this._dpr !== dpr) {
+      this._w = w; this._h = h; this._dpr = dpr;
+      this.canvas.width = Math.max(1, Math.round(w * dpr));
+      this.canvas.height = Math.max(1, Math.round(h * dpr));
+      this.canvas.style.width = w + 'px';
+      this.canvas.style.height = h + 'px';
+    }
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+
+  /** 화면 크기 (CSS 픽셀). 캔버스 백버퍼는 이보다 크다 */
+  get vw() { return this._w || this.canvas.width; }
+  get vh() { return this._h || this.canvas.height; }
 
   screenToWorld(px, py) {
     return { x: this.originX + px / this.tile, y: this.originY + py / this.tileY };
@@ -56,19 +76,19 @@ export class BattleRenderer {
   }
 
   centerOn(x, y) {
-    this.originX = x - this.canvas.width / this.tile / 2;
-    this.originY = y - this.canvas.height / this.tileY / 2;
+    this.originX = x - this.vw / this.tile / 2;
+    this.originY = y - this.vh / this.tileY / 2;
   }
 
   draw(session) {
     const { ctx, canvas, tile, tileY } = this;
     ctx.fillStyle = '#0c0f0d';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, this.vw, this.vh);
     if (!session) return;
 
     const x0 = Math.floor(this.originX) - 1, y0 = Math.floor(this.originY) - 3;
-    const x1 = x0 + Math.ceil(canvas.width / tile) + 2;
-    const y1 = y0 + Math.ceil(canvas.height / tileY) + 6;
+    const x1 = x0 + Math.ceil(this.vw / tile) + 2;
+    const y1 = y0 + Math.ceil(this.vh / tileY) + 6;
     const tiles = getTileRange(x0, y0, x1, y1);
 
     for (const t of tiles) {

@@ -153,8 +153,8 @@ function updatePlacementBar() {
 // 조건을 만족하는 칸이 전체의 7% 정도라 직접 찾기 번거로우므로,
 // 현재 화면 중앙에서 가장 가까운 유효 자리로 카메라를 옮겨주고 바로 선택해준다.
 document.getElementById('placement-suggest').addEventListener('click', () => {
-  const cx = Math.round(renderer.originX + canvas.width / renderer.tile / 2);
-  const cy = Math.round(renderer.originY + canvas.height / renderer.tile / 2);
+  const cx = Math.round(renderer.originX + renderer.vw / renderer.tile / 2);
+  const cy = Math.round(renderer.originY + renderer.vh / renderer.tile / 2);
   // 남의 수도에서 MIN_CAPITAL_DISTANCE 밖을 찾아야 하므로 탐색 반경도 그만큼 넓게 잡는다
   const site = findNearestCapitalSite(cx, cy, peers.length ? 260 : 60, peers);
   if (!site) { flashMessage('주변에서 조건을 만족하는 자리를 찾지 못했습니다', true); return; }
@@ -498,8 +498,10 @@ function buildBuildMenu() {
         const rotateBtn = document.getElementById('rotate-btn');
         if (rotateBtn) rotateBtn.disabled = !isRotatable(key);
         renderCostPreview(def);
+        // 좁은 화면에서는 카탈로그 서랍이 지도를 덮고 있으므로 닫아준다
+        closeDrawerOnNarrow();
         // 고를 때 곧바로 화면 한가운데에 고스트를 띄워, 어디를 눌러야 할지 알려준다
-        buildTarget = renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
+        buildTarget = renderer.screenToWorld(renderer.vw / 2, renderer.vh / 2);
       });
       // 메뉴를 다시 그려도 지금 고른 구조물의 강조 표시가 풀리지 않게 한다
       // (연속 설치 중에 건설할 때마다 선택이 사라져 보이던 문제)
@@ -543,10 +545,10 @@ document.getElementById('power-btn').addEventListener('click', (e) => {
   e.currentTarget.classList.toggle('active', renderer.showPower);
 });
 document.getElementById('zoom-in-btn').addEventListener('click', () => {
-  renderer.zoomAt(canvas.width / 2, canvas.height / 2, 4);
+  renderer.zoomAt(renderer.vw / 2, renderer.vh / 2, 4);
 });
 document.getElementById('zoom-out-btn').addEventListener('click', () => {
-  renderer.zoomAt(canvas.width / 2, canvas.height / 2, -4);
+  renderer.zoomAt(renderer.vw / 2, renderer.vh / 2, -4);
 });
 
 // ---------- 키보드 (물리 키보드가 연결된 경우 병행 지원) ----------
@@ -1640,10 +1642,10 @@ battleCanvas.addEventListener('touchend', (e) => {
 });
 
 document.getElementById('battle-zoom-in-btn').addEventListener('click', () => {
-  battleRenderer.zoomAt(battleCanvas.width / 2, battleCanvas.height / 2, 4);
+  battleRenderer.zoomAt(battleRenderer.vw / 2, battleRenderer.vh / 2, 4);
 });
 document.getElementById('battle-zoom-out-btn').addEventListener('click', () => {
-  battleRenderer.zoomAt(battleCanvas.width / 2, battleCanvas.height / 2, -4);
+  battleRenderer.zoomAt(battleRenderer.vw / 2, battleRenderer.vh / 2, -4);
 });
 document.getElementById('battle-retreat-btn').addEventListener('click', () => {
   if (!battleSession || battleSession.ended) return;
@@ -1823,8 +1825,8 @@ function updateCapitalSites() {
     return;
   }
   const x0 = Math.floor(renderer.originX), y0 = Math.floor(renderer.originY);
-  const x1 = x0 + Math.ceil(canvas.width / renderer.tile);
-  const y1 = y0 + Math.ceil(canvas.height / renderer.tile);
+  const x1 = x0 + Math.ceil(renderer.vw / renderer.tile);
+  const y1 = y0 + Math.ceil(renderer.vh / renderer.tile);
   const key = `${x0},${y0},${x1},${y1}`;
   if (key === lastCapitalViewKey) return;
   lastCapitalViewKey = key;
@@ -1896,6 +1898,74 @@ function loop() {
   requestAnimationFrame(loop);
 }
 window.addEventListener('resize', () => renderer.resize());
+// 주소창이 접히거나 기기를 돌리면 화면 크기가 바뀐다 — 캔버스를 다시 맞춘다
+window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => renderer.resize());
+
+// ============================================================
+// 모바일 조작
+//
+// 브라우저 기본 제스처가 게임 조작과 겹친다. CSS(touch-action/user-select)로
+// 대부분 막고, 여기서는 CSS로 막을 수 없는 것들을 마저 막는다:
+//   · 더블클릭/더블탭 (확대 + 글자 선택)
+//   · 길게 눌러 나오는 컨텍스트 메뉴
+//   · iOS 사파리의 페이지 핀치줌(gesture 이벤트)
+//   · 스크롤 영역 밖에서의 터치 이동(페이지가 통째로 밀리는 것)
+// ============================================================
+const SCROLLABLE = '#left-panel, #right-panel, .struct-modal-body, .battle-log, .build-menu, .build-sublist, .resource-bar, .battle-deck-tray, .start-card';
+
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('contextmenu', (e) => {
+  // 입력창에서는 붙여넣기 메뉴가 필요하므로 살려둔다
+  if (!e.target.closest('input, textarea')) e.preventDefault();
+});
+// iOS 사파리 전용 — 페이지 자체를 핀치로 확대하는 제스처
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+// 스크롤되는 영역이 아니면 터치 이동을 삼킨다 (페이지가 밀려 올라가지 않게)
+document.addEventListener('touchmove', (e) => {
+  if (!e.target.closest || !e.target.closest(SCROLLABLE)) e.preventDefault();
+}, { passive: false });
+// 더블탭 확대는 touch-action으로 막히지만, 오래된 사파리를 위해 한 번 더 막는다
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+
+// ---------- 하단 탭 (좁은 화면에서 좌우 패널을 서랍으로 연다) ----------
+const mobileTabs = document.getElementById('mobile-tabs');
+
+function isNarrow() { return window.matchMedia('(max-width: 820px)').matches; }
+
+/** 서랍을 연다. key가 null이면 전부 닫는다. */
+function openDrawer(key) {
+  for (const id of ['left-panel', 'right-panel']) {
+    document.getElementById(id).classList.toggle('open', id === key);
+  }
+  mobileTabs.querySelectorAll('.mtab').forEach(b =>
+    b.classList.toggle('active', b.dataset.panel === key));
+  renderer.resize();
+}
+
+mobileTabs.querySelectorAll('.mtab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.panel;
+    const already = document.getElementById(key).classList.contains('open');
+    openDrawer(already ? null : key);   // 같은 탭을 다시 누르면 닫힌다
+  });
+});
+
+// 구조물을 고르면 서랍을 닫는다 — 지도를 봐야 어디에 놓을지 정할 수 있다
+function closeDrawerOnNarrow() { if (isNarrow()) openDrawer(null); }
+
+// 넓은 화면으로 돌아가면 서랍 상태를 초기화한다 (패널은 CSS로 다시 붙박이가 된다)
+window.matchMedia('(max-width: 820px)').addEventListener('change', (e) => {
+  if (!e.matches) openDrawer(null);
+  renderer.resize();
+});
 
 // 브라우저 콘솔에서 상태를 들여다보기 위한 디버그 훅 (빌드 도구 없는 프로토타입이라
 // 자동화 테스트도 이 훅으로 게임 상태를 확인한다)
