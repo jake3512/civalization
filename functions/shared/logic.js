@@ -573,16 +573,24 @@ export function manualMoveToStructure(nation, structId, res, amount = LOGISTICS.
   return { ok: true, moved };
 }
 
+/** 이 구조물이 벨트로 무언가를 내보내는가 (배출구 설정을 붙일 수 있는가) */
+export function hasBeltOutput(structKey) {
+  const def = STRUCTURES[structKey];
+  if (!def || isBeltKey(structKey)) return false;
+  return !!def.storageCapacity || getOutputCapacity(structKey, 1) > 0;
+}
+
 /**
- * 창고·수도의 한 면(0=동 1=남 2=서 3=북)에서 벨트로 내보낼 자원을 지정한다.
- * res를 비우면 그 면은 다시 "아무거나"가 되고, BELT_OFF를 넣으면 그 면의
- * **벨트 연결을 끊는다**(아무것도 내보내지 않는다). 수도처럼 여러 자원을 담는
- * 보관 구조물에서 원하는 자원만 라인으로 뽑아낼 때 쓴다 (simulate.drainStorageToBelt).
+ * 한 면(0=동 1=남 2=서 3=북)에서 벨트로 내보낼 자원을 지정한다.
+ * res를 비우면 **자동**(자동 배정된 자원이 있으면 그것, 없으면 아무거나)으로
+ * 돌아가고, BELT_OFF를 넣으면 그 면의 **벨트 연결을 끊는다**.
+ * 창고·수도뿐 아니라 농지·축사·광산·공장처럼 산출 인벤토리를 가진 구조물에도
+ * 쓴다 (simulate.drainOutputToBelt / drainStorageToBelt).
  */
 export function setOutFilter(nation, structId, dir, res) {
   const s = nation.structures.find(st => st.id === structId);
   if (!s) return { ok: false, error: '구조물을 찾을 수 없습니다' };
-  if (!STRUCTURES[s.key]?.storageCapacity) return { ok: false, error: '보관 구조물이 아닙니다' };
+  if (!hasBeltOutput(s.key)) return { ok: false, error: '벨트로 내보내는 구조물이 아닙니다' };
   if (!(dir >= 0 && dir < DIR_VECT.length)) return { ok: false, error: '방향이 올바르지 않습니다' };
   if (res && res !== BELT_OFF && !RESOURCES[res]) return { ok: false, error: '알 수 없는 자원입니다' };
 

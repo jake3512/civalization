@@ -815,10 +815,14 @@ export function splitterExits(s) {
 // **면(동·남·서·북)이 하나씩 배정**되고, 그 면에 붙은 벨트로는 그 자원만 나간다.
 // 산출물이 한 가지뿐인 구조물은 예전처럼 아무 면으로나 내보낸다.
 //
-// 창고·수도처럼 여러 자원을 담는 보관 구조물은 플레이어가 면마다 자원을 직접
-// 지정할 수 있다 (struct.outFilter = { 방향: 자원 }). 지정하지 않은 면은 아무거나.
-// 자원 대신 BELT_OFF를 넣으면 그 면은 **벨트로 아무것도 내보내지 않는다** —
-// 지나가는 벨트를 창고 옆에 깔았다가 재고가 통째로 빨려 나가는 일을 막는다.
+// 그 위에 플레이어가 면마다 설정을 얹을 수 있다 (struct.outFilter = { 방향: 값 }):
+//   · 지정 없음 = **자동** — 자동 배정이 있으면 그 자원, 없으면 아무거나
+//   · 자원 이름  = 그 면으로는 **그 자원만** 나간다 (자동 배정을 덮어쓴다)
+//   · BELT_OFF   = 그 면은 **아무것도 내보내지 않는다** — 지나가는 벨트를 옆에
+//                  깔았다가 재고가 통째로 빨려 나가는 일을 막는다
+// 창고·수도뿐 아니라 농지·축사·광산·공장처럼 산출 인벤토리를 가진 구조물도
+// 같은 설정을 쓴다 (농지 옆을 지나는 벨트가 곡식을 다 빼가는 일을 막으려면
+// 보관 구조물만으로는 부족했다).
 // ============================================================
 
 /** outFilter에 넣으면 그 면의 벨트 연결을 끊는다 (자원 이름과 겹치지 않는 값) */
@@ -854,6 +858,42 @@ export function outputPorts(struct) {
   const map = {};
   outs.forEach((res, i) => { map[res] = i % DIR_VECT.length; });
   return map;
+}
+
+/**
+ * 한 면(0=동 1=남 2=서 3=북)의 설정을 풀어서 알려준다.
+ *   { mode: 'off' }              연결 끊김
+ *   { mode: 'res',  res }        이 자원만
+ *   { mode: 'auto', res|null }   자동 (자동 배정된 자원이 있으면 res, 없으면 전체)
+ * UI·시뮬레이션·렌더러가 같은 판정을 쓰도록 여기 한 곳에 둔다.
+ */
+export function faceSetting(struct, dir, ports = undefined) {
+  const set = (struct?.outFilter || {})[dir];
+  if (set === BELT_OFF) return { mode: 'off' };
+  if (set) return { mode: 'res', res: set };
+  const auto = ports === undefined ? outputPorts(struct) : ports;
+  // any=true면 "무엇이든 나가는 면"이다 (산출물이 한 가지뿐인 구조물·창고)
+  if (!auto) return { mode: 'auto', res: null, any: true };
+  const hit = Object.entries(auto).find(([, d]) => d === dir);
+  return { mode: 'auto', res: hit ? hit[0] : null, any: false };
+}
+
+/**
+ * 이 자원이 나갈 수 있는 면들. 설정을 건드리지 않으면 예전과 똑같이 동작한다
+ * (산출물이 하나뿐이면 아무 면, 여럿이면 자동 배정된 면 하나).
+ */
+export function facesForOutput(struct, res) {
+  const ports = outputPorts(struct);
+  // 자동 배정에 없는 자원(레시피를 바꾸기 전에 남은 것)은 비어 있는 면으로 내보낸다
+  const orphan = !!ports && ports[res] == null;
+  const faces = [];
+  for (let dir = 0; dir < DIR_VECT.length; dir++) {
+    const f = faceSetting(struct, dir, ports);
+    if (f.mode === 'off') continue;
+    if (f.mode === 'res') { if (f.res === res) faces.push(dir); continue; }
+    if (f.any || f.res === res || (orphan && f.res == null)) faces.push(dir);
+  }
+  return faces;
 }
 
 // ---- 연구소 기술 트리 ----
