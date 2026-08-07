@@ -197,10 +197,11 @@ function enterGame() {
 
   buildBuildMenu();
   renderTravelPanel();
-  game.onTick = () => { renderTravelPanel(); checkNewAchievements(); autoSave(); };
+  game.onTick = () => { renderTravelPanel(); checkNewAchievements(); renderResetPanel(); autoSave(); };
   game.startLoop();
   initMultiplayer(n.name, n.color, n.capital.x, n.capital.y);
   checkNewAchievements(true);   // 이어하기로 들어온 판도 즉시 목록을 맞춘다
+  renderResetPanel();
   autoSave(true);
 }
 
@@ -272,6 +273,9 @@ const SAVE_EVERY_MS = 10_000;
 /** 일정 시간마다 저장한다 (force=true면 즉시) */
 function autoSave(force = false) {
   if (!game.myNation) return;
+  // 리셋 중에는 절대 저장하지 않는다. location.reload()가 pagehide를 부르는데,
+  // 그때 한 번 더 저장되면 방금 지운 나라가 되살아난다 (실제로 그랬다).
+  if (resetting) return;
   const now = Date.now();
   if (!force && now - lastSaveAt < SAVE_EVERY_MS) return;
   lastSaveAt = now;
@@ -320,8 +324,8 @@ function renderResumeBox() {
       새로고침하면 진행이 사라집니다.</div>`;
     return;
   }
-  const saves = listSaves();
-  // 로그인한 계정의 클라우드 저장을 맨 위에 얹는다 (다른 기기에서 하던 판)
+  let saves = listSaves();
+  // 로그인한 계정의 클라우드 저장도 후보에 넣는다 (다른 기기에서 하던 판)
   if (cloudSaveData && cloudSaveData.nation) {
     const n = cloudSaveData.nation;
     const cap = (n.structures || []).find(s => s.key === 'capital');
@@ -335,6 +339,9 @@ function renderResumeBox() {
       savedAt: cloudSaveData.savedAt,
     });
   }
+  // 여러 판을 늘어놓으면 무엇을 눌러야 할지 헷갈린다. **가장 최근 것 하나만** 보여준다.
+  // (저장 자체는 국가별로 남아 있어서, 다른 탭에서 하던 판이 지워지지는 않는다)
+  saves = saves.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 1);
   if (!saves.length) { box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
   box.innerHTML = saves.map(s => `
@@ -352,7 +359,7 @@ function renderResumeBox() {
       </div>
     </div>`).join('')
     + `<div class="resume-hint">저장된 그 시점 그대로 이어집니다 — 자리를 비운 동안 생산은 진행되지 않습니다.
-        아래에서 새 국가를 세우면 별도로 저장됩니다.</div>`;
+        아래에서 새 국가를 세우면 이 저장을 대신합니다.</div>`;
 
   box.querySelectorAll('[data-resume]').forEach(b =>
     b.addEventListener('click', () => resumeSavedGame(b.dataset.resume)));
@@ -397,6 +404,60 @@ function startFromSave(data, fromCloud) {
     `${game.myNation.name} 이어하기 — ${fromCloud ? '계정에 저장된' : ''} ${timeAgo(data.savedAt)} 상태입니다`,
     false);
   enterGame();
+}
+
+// ---------- 게임 리셋 ----------
+// 지금 나라를 버리고 처음부터 다시 시작한다. 되돌릴 수 없으므로
+// **두 번 눌러야** 실행되고(철거 버튼과 같은 방식), 무엇이 사라지는지 미리 알린다.
+let resetArmed = false;
+let resetting = false;   // 리셋 진행 중 — 이 동안에는 저장하지 않는다
+
+function renderResetPanel() {
+  const el = document.getElementById('reset-panel');
+  if (!el || !game.myNation) return;
+  const n = game.myNation;
+  const score = achievementScore(n);
+  el.innerHTML = `
+    <div class="reset-info">${esc(n.name)} · 구조물 ${n.structures.length}동 · 업적 ${score.done}/${score.total}</div>
+    <div class="reset-warn">진행 상황과 업적이 모두 사라지고 처음부터 시작합니다.
+      다른 플레이어가 보던 내 기지도 함께 지워집니다.</div>
+    <button id="reset-btn" class="reset-btn${resetArmed ? ' armed' : ''}">
+      ${resetArmed ? '정말 리셋합니다 (한 번 더)' : '게임 리셋'}</button>`;
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    if (!resetArmed) {
+      resetArmed = true;
+      renderResetPanel();
+      // 실수로 두 번 누르는 일이 없도록, 잠깐 두면 저절로 풀린다
+      clearTimeout(renderResetPanel._t);
+      renderResetPanel._t = setTimeout(() => { resetArmed = false; renderResetPanel(); }, 5000);
+      return;
+    }
+    resetGame();
+  });
+}
+
+/** 저장·공개 기지·클라우드 저장을 지우고 처음 화면으로 돌아간다 */
+async function resetGame() {
+  const n = game.myNation;
+  if (!n) return;
+  resetting = true;              // 이 시점부터 자동 저장을 막는다
+  game.stopLoop();
+  flashMessage('리셋하는 중...', false);
+
+  // 1) 다른 플레이어에게 보이던 내 기지를 지운다 (안 지우면 유령 기지가 남는다)
+  try { if (net && net.remove) await net.remove(); } catch (e) { console.warn('[reset] 기지 삭제 실패', e); }
+  // 2) 계정에 올려둔 저장도 지운다
+  const user = currentUser();
+  if (user && !user.anonymous) {
+    try { await clearCloud(getFirestoreHandles(), user.uid); } catch (e) { console.warn('[reset] 클라우드 삭제 실패', e); }
+  }
+  // 3) 이 기기의 저장을 지운다
+  clearSave(n.id);
+
+  // 4) 페이지를 다시 연다. 게임 루프·렌더러·네트워크가 얽혀 있어서, 하나씩
+  //    되돌리는 것보다 새로 시작하는 편이 확실하다 (주소의 ?mp= 설정은 유지된다)
+  game.myNation = null;          // 혹시 남아 있을 저장 경로까지 확실히 막는다
+  location.reload();
 }
 
 // ---------- 계정 (로그인) ----------

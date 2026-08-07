@@ -510,6 +510,17 @@ h1, h2, .brand, .ph { font-family: var(--font-display); }
 .deck-plus:active, .deck-minus:active { background: var(--accent); color: #14100a; }
 .shield-on { color: var(--accent); }
 
+/* ---- 게임 리셋 ---- */
+.reset-panel { font-size: 11px; color: var(--text-dim); }
+.reset-info { font-size: 12px; color: var(--text); margin-bottom: 4px; }
+.reset-warn { line-height: 1.5; margin-bottom: 8px; }
+.reset-btn {
+  width: 100%; min-height: 40px; padding: 9px;
+  background: transparent; color: var(--danger);
+  border: 1px solid var(--danger); border-radius: 4px; font-size: 12px;
+}
+.reset-btn.armed { background: var(--danger); color: #fff; font-weight: 600; }
+
 /* ---- 업적 ---- */
 .ph-sub { font-family: var(--font-mono); font-size: 11px; color: var(--accent); margin-left: 6px; }
 .ach-panel { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; touch-action: pan-y; }

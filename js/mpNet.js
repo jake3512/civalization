@@ -156,6 +156,14 @@ class LocalNet {
   watchPeers(cb) { this.onPeers = cb; this._emitPeers(); }
   watchRaids(cb) { this.onRaid = cb; this._emitRaids(); }
 
+  /** 내 기지를 세상에서 지운다 (게임 리셋) — 안 지우면 유령 기지가 계속 공격당한다 */
+  async remove() {
+    const all = lsRead(LS_PEERS);
+    delete all[this.myId];
+    lsWrite(LS_PEERS, all);
+    this._broadcast('peers');
+  }
+
   close() {
     if (this.ch) this.ch.close();
     if (typeof window !== 'undefined') window.removeEventListener('storage', this._storageHandler);
@@ -208,6 +216,15 @@ class FirestoreNet {
     this.unsubs.push(this.fx.onSnapshot(q, (snap) => {
       snap.forEach(d => cb(d.data()));
     }));
+  }
+
+  /** 내 기지 문서를 지운다 (게임 리셋). 규칙상 본인 문서만 지울 수 있다 */
+  async remove() {
+    try {
+      await this.fx.deleteDoc(this.fx.doc(this.db, 'nations', this.myId));
+    } catch (e) {
+      console.warn('[mpNet] 기지 삭제 실패:', e);
+    }
   }
 
   close() { for (const u of this.unsubs) u(); this.unsubs = []; }
