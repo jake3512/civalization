@@ -303,9 +303,16 @@ async function cloudAutoSave(force, extra) {
   if (!force && now - lastCloudSaveAt < CLOUD_SAVE_EVERY_MS) return;
   lastCloudSaveAt = now;
   const res = await saveToCloud(handles, user.uid, game.myNation, extra);
-  if (!res.ok && !cloudAutoSave._warned) {
-    cloudAutoSave._warned = true;
-    flashMessage(`클라우드 저장 실패: ${res.error}`, true);
+  if (!res.ok) {
+    // 같은 사유로 계속 띄우지 않는다. 네트워크가 끊긴 동안 매 분 경고가 뜨면
+    // 게임을 할 수가 없다 (다음 저장에서 자동으로 다시 시도한다).
+    if (cloudAutoSave._lastError !== res.error) {
+      cloudAutoSave._lastError = res.error;
+      flashMessage(`클라우드 저장 실패: ${res.error}`, true);
+    }
+  } else if (cloudAutoSave._lastError) {
+    cloudAutoSave._lastError = null;
+    flashMessage('클라우드 저장이 다시 정상입니다', false);
   }
 }
 

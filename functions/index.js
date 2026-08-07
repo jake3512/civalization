@@ -29,6 +29,10 @@ setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
 
 initializeApp();
 const db = getFirestore();
+// Nation#toJSON에는 값이 비어 있는 필드가 섞인다 (창고가 아닌 구조물의 store,
+// 벨트가 아닌 구조물의 dir 등). Admin SDK도 undefined를 만나면 쓰기를 통째로
+// 거부하므로, 무시하도록 설정해 둔다 — 이걸 빠뜨리면 모든 저장이 실패한다.
+db.settings({ ignoreUndefinedProperties: true });
 
 // ---------------- 헬퍼 ----------------
 function requireAuth(request) {
