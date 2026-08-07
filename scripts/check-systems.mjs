@@ -310,7 +310,11 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   tickNation(n8);
   assert.ok(store.store.stone < s2, '지정을 풀면 다시 나간다');
   assert.strictEqual(L.setOutFilter(n8, store.id, 9, 'wood').ok, false, '없는 방향은 거부');
-  assert.strictEqual(L.setOutFilter(n8, ref.id, 0, 'wood').ok, false, '보관 구조물이 아니면 거부');
+  // 창고뿐 아니라 산출 인벤토리를 가진 구조물도 배출구를 설정할 수 있다
+  assert.strictEqual(L.setOutFilter(n8, ref.id, 2, 'petroleum').ok, true, '정제소도 설정 가능');
+  assert.strictEqual(L.setOutFilter(n8, ref.id, 2, null).ok, true);
+  const anyBelt = n8.structures.find(s2 => s2.key === 'belt');
+  assert.strictEqual(L.setOutFilter(n8, anyBelt.id, 0, 'wood').ok, false, '벨트 자신은 거부');
 
   // 연결 끊기 — 벨트가 붙어 있어도 그 면으로는 아무것도 내보내지 않는다
   const { BELT_OFF } = await import('../js/data.js');
@@ -323,6 +327,77 @@ console.log('✓ 직렬화 왕복 (작물/해금 유지)');
   tickNation(n8);
   assert.ok(store.store.stone < s4, '다시 연결하면 나간다');
   console.log(`✓ 배출구 (산출물별 전용 면 ${DIR_NAMES.join('·')} · 창고 → 벨트 · 면별 자원 지정 · 연결 끊기)`);
+}
+
+// --- 농지·축사의 배출구 (산출이 하나여도 면을 지정하고 끊을 수 있다) ---
+{
+  const { facesForOutput, faceSetting, structOutputs, outputPorts, BELT_OFF } = await import('../js/data.js');
+
+  // 축사는 가축에 따라 산출이 하나(돼지)일 수도, 둘(소·닭·오리)일 수도 있다
+  assert.deepStrictEqual(structOutputs({ key: 'barn', animal: 'cattle' }), ['cattle', 'milk']);
+  assert.deepStrictEqual(structOutputs({ key: 'barn', animal: 'pig' }), ['pig'], '돼지는 부산물이 없다');
+  const cow = { key: 'barn', animal: 'cattle' };
+  assert.deepStrictEqual(facesForOutput(cow, 'cattle'), [0], '가축은 동쪽 면으로만');
+  assert.deepStrictEqual(facesForOutput(cow, 'milk'), [1], '우유는 남쪽 면으로만');
+  // 산출이 하나면 예전처럼 아무 면으로나 나간다
+  assert.deepStrictEqual(facesForOutput({ key: 'barn', animal: 'pig' }, 'pig'), [0, 1, 2, 3]);
+  assert.deepStrictEqual(facesForOutput({ key: 'farm', crop: 'rice' }, 'rice'), [0, 1, 2, 3]);
+
+  // 플레이어 지정이 자동 배정을 덮어쓴다
+  const cow2 = { key: 'barn', animal: 'cattle', outFilter: { 2: 'milk' } };
+  assert.deepStrictEqual(facesForOutput(cow2, 'milk'), [1, 2], '지정한 면이 더해진다');
+  assert.deepStrictEqual(facesForOutput(cow2, 'cattle'), [0], '남의 면으로는 못 나간다');
+  const cow3 = { key: 'barn', animal: 'cattle', outFilter: { 0: BELT_OFF } };
+  assert.deepStrictEqual(facesForOutput(cow3, 'cattle'), [], '끊으면 나갈 면이 없다');
+  const farmOff = { key: 'farm', crop: 'rice', outFilter: { 0: BELT_OFF, 1: BELT_OFF } };
+  assert.deepStrictEqual(facesForOutput(farmOff, 'rice'), [2, 3], '끊지 않은 면만 남는다');
+  assert.strictEqual(faceSetting(farmOff, 0).mode, 'off');
+  assert.strictEqual(faceSetting(farmOff, 2).any, true, '농지의 남은 면은 아무거나');
+  assert.strictEqual(faceSetting(cow, 3).any, false, '자동 배정이 있으면 빈 면은 아무것도 안 나간다');
+  assert.deepStrictEqual(facesForOutput(cow, 'wheat'), [2, 3],
+    '자동 배정에 없는 자원(가축을 바꾸기 전에 남은 것)은 빈 면으로 나간다');
+
+  // 실제 틱: 농지 옆을 지나는 벨트가 곡식을 다 빼가지 않게 막을 수 있다
+  const { tickNation } = await import('../js/simulate.js');
+  const nf = createNation('t6', '농장국', '#0ff', site.x, site.y);
+  const capf = nf.structures.find(s2 => s2.key === 'capital');
+  capf.level = 8;
+  for (const [x, y] of L.territoryTilesOf(nf, capf)) nf.territory.add(L.tileKey(x, y));
+  for (const r of ['wood', 'stone', 'rice']) L.depositInto(capf, r, 300);
+  L.recomputeStock(nf);
+  for (const k of ['barn', 'belt', 'warehouse']) nf.unlocked.add(k);
+
+  let barn = null;
+  for (const t of Array.from(nf.territory)) {
+    const [x, y] = t.split(',').map(Number);
+    if (Math.hypot(x - capf.x, y - capf.y) < 6) continue;
+    if (!nf.territory.has(L.tileKey(x + 2, y)) || !nf.territory.has(L.tileKey(x + 3, y))) continue;
+    const r = L.build(nf, 'barn', x, y);
+    if (r.ok) { barn = r.structure; break; }
+  }
+  assert.ok(barn, '축사 건설');
+  L.setAnimal(nf, barn.id, 'cattle');
+  const [bw] = STRUCTURES.barn.footprint;
+  assert.strictEqual(L.build(nf, 'belt', barn.x + bw, barn.y, 0).ok, true, '동쪽 벨트');
+  const sink = L.build(nf, 'warehouse', barn.x + bw + 1, barn.y);
+  assert.strictEqual(sink.ok, true, '벨트 끝 창고');
+
+  // 축사는 매 틱 가축과 우유를 함께 만들어내므로, 버퍼가 "줄었는가"로 판정한다
+  barn.outputBuffer = { cattle: 20, milk: 20 };
+  tickNation(nf);
+  assert.ok(barn.outputBuffer.cattle < 20, '가축은 동쪽 배출구로 나간다');
+  assert.ok(barn.outputBuffer.milk >= 20, '우유는 제 면에 벨트가 없어 나가지 않는다');
+  assert.ok(!sink.structure.store.milk, '우유가 섞여 들어가면 안 된다');
+  assert.ok(sink.structure.store.cattle > 0, '가축만 창고에 도착');
+
+  // 연결을 끊으면 벨트가 그대로 붙어 있어도 더는 나가지 않는다
+  assert.strictEqual(L.setOutFilter(nf, barn.id, 0, BELT_OFF).ok, true, '축사도 배출구 설정 가능');
+  const held = barn.outputBuffer.cattle;
+  const arrived = sink.structure.store.cattle;
+  tickNation(nf);
+  assert.ok(barn.outputBuffer.cattle >= held, '끊으면 가축도 나가지 않는다 (생산분만 늘어난다)');
+  assert.strictEqual(sink.structure.store.cattle, arrived, '창고에 더 도착하지 않아야 한다');
+  console.log('✓ 농지·축사 배출구 (자동 배정 · 면 지정 · 연결 끊기)');
 }
 
 // --- 분할 컨베이어는 두 방향으로만 나눈다 ---

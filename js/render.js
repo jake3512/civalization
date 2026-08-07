@@ -10,7 +10,7 @@
 // ============================================================
 import { getTileRange } from './world.js';
 import { STRUCTURES, TERRAIN_NODES, RESOURCES, structureIcon, alertIcon, isBeltKey,
-         DIR_VECT, outputPorts, splitterExits } from './data.js';
+         DIR_VECT, outputPorts, splitterExits, faceSetting } from './data.js';
 
 // 아케이드풍으로 채도·명암 대비를 높인 지형 색
 const TERRAIN_COLORS = {
@@ -610,23 +610,24 @@ export class Renderer {
 
   /**
    * 선택한 구조물의 배출구를 바닥에 표시한다.
-   * 산출물이 두 가지인 구조물은 자원마다 나가는 면이 정해져 있어서, 어느 칸에
-   * 벨트를 붙여야 하는지 눈으로 봐야 알 수 있다. 창고는 면마다 지정한 자원
-   * (outFilter)을 같은 방식으로 보여준다.
+   * 어느 칸에 벨트를 붙여야 무엇이 나가는지는 눈으로 봐야 안다. 자원이 배정된
+   * 면에는 그 자원 아이콘을, 연결을 끊어둔 면에는 붉은 금지 표시를 얹는다.
    */
   _drawOutPorts(s) {
     const def = STRUCTURES[s.key];
     if (!def) return;
     const ports = outputPorts(s);
-    const byDir = {};
-    if (ports) for (const [res, dir] of Object.entries(ports)) byDir[dir] = res;
-    else if (def.storageCapacity) for (const [dir, res] of Object.entries(s.outFilter || {})) byDir[dir] = res;
-    if (!Object.keys(byDir).length) return;
+    const faces = [];
+    for (let dir = 0; dir < DIR_VECT.length; dir++) {
+      const f = faceSetting(s, dir, ports);
+      if (f.mode === 'off') faces.push({ dir, off: true });
+      else if (f.res) faces.push({ dir, res: f.res });
+    }
+    if (!faces.length) return;
 
     const { ctx, tile, tileY } = this;
     const [w, h] = def.footprint;
-    for (const [dirStr, res] of Object.entries(byDir)) {
-      const dir = Number(dirStr);
+    for (const { dir, res, off } of faces) {
       // 그 면 바깥에 붙는 칸 하나 (벨트를 놓을 자리)
       const [dx, dy] = DIR_VECT[dir];
       const bx = s.x + (dx > 0 ? w : dx < 0 ? -1 : (w - 1) / 2);
@@ -638,14 +639,21 @@ export class Renderer {
       ctx.save();
       ctx.beginPath();
       ctx.fillStyle = 'rgba(10,20,24,0.82)';
-      ctx.strokeStyle = 'rgba(78,205,196,0.95)';
+      ctx.strokeStyle = off ? 'rgba(226,88,74,0.95)' : 'rgba(78,205,196,0.95)';
       ctx.lineWidth = 2;
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
-      const icon = getIconImage(RESOURCES[res]?.icon);
-      if (icon.complete && icon.naturalWidth > 0) {
-        const size = r * 1.3;
-        ctx.drawImage(icon, cx - size / 2, cy - size / 2, size, size);
+      if (off) {
+        ctx.beginPath();                       // 금지 표시(빗금)
+        ctx.moveTo(cx - r * 0.55, cy - r * 0.55);
+        ctx.lineTo(cx + r * 0.55, cy + r * 0.55);
+        ctx.stroke();
+      } else {
+        const icon = getIconImage(RESOURCES[res]?.icon);
+        if (icon.complete && icon.naturalWidth > 0) {
+          const size = r * 1.3;
+          ctx.drawImage(icon, cx - size / 2, cy - size / 2, size, size);
+        }
       }
       ctx.restore();
     }

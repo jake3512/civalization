@@ -16,10 +16,10 @@ import { createBattleSession, createReplaySession, deployUnit, stepBattle, stepR
 import { getTile } from './world.js';
 import { findMatch, isShielded, getDefensePower, capitalSiteReport, validatePlacement, findCapitalSites, findNearestCapitalSite,
          storedTotal, totalStock, manualMoveToStorage, manualMoveToStructure, manualOperate, getTerritoryRadius, getCapitalLevel,
-         hasGood, sellFromStorage, buriedNodes, canDemolish, setOutFilter, setBranchSide,
+         hasGood, sellFromStorage, buriedNodes, canDemolish, setOutFilter, setBranchSide, hasBeltOutput,
          defenseSnapshot, buildRaidReport, applyRaidToAttacker, applyRaidToDefender, canAttack } from './logic.js';
 import { isBeltKey, isRotatable, BUILD_GROUPS, buildGroupOf, POWER_FUELS, pickPowerFuel,
-         DIR_NAMES, outputPorts, splitterExits, BELT_OFF } from './data.js';
+         DIR_NAMES, outputPorts, splitterExits, BELT_OFF, structOutputs, faceSetting } from './data.js';
 import { exitBeltOn } from './simulate.js';
 import { FUNCTIONS_DEPLOYED } from './firebase-config.js';
 import { createNet, pickMode, NET_MODE, MODE_LABEL, PUBLISH_INTERVAL_MS, isPeerOnline } from './mpNet.js';
@@ -1090,10 +1090,6 @@ function renderInventoryHtml(struct, def) {
     html += `<div class="inv-block"><div class="inv-title">보관 ${Math.floor(used)} / ${cap}${
       def.singleResource ? ` · <span class="dim">${kinds.length ? RESOURCES[kinds[0]]?.name + ' 전용' : '비어 있음 (첫 자원이 종류를 정함)'}</span>` : ''
     }</div>${bar(used, cap)}<div class="inv-items">${rows(struct.store)}</div></div>`;
-
-    // 벨트 배출구 — 창고에 붙은 "밖으로 나가는" 벨트로 재고가 빠져나간다.
-    // 어느 면으로 무엇을 내보낼지 여기서 정한다 (지정 안 하면 아무거나).
-    html += renderOutFilterHtml(struct, def);
   }
 
   const outCap = getOutputCapacity(struct.key, struct.level);
@@ -1102,18 +1098,6 @@ function renderInventoryHtml(struct, def) {
     html += `<div class="inv-block"><div class="inv-title">산출 인벤토리 ${Math.floor(outUsed)} / ${outCap}</div>
       ${bar(outUsed, outCap)}<div class="inv-items">${rows(struct.outputBuffer)}</div>`;
 
-    // 한 번에 두 가지가 나오는 구조물은 산출물마다 배출구(면)가 따로 있다.
-    // 그 면에 벨트를 붙여야 그 자원이 나가고, 다른 자원은 지나가지 않는다.
-    const ports = outputPorts(struct);
-    if (ports) {
-      html += `<div class="pd">배출구 — 산출물마다 나가는 면이 다릅니다:</div><div class="port-list">` +
-        Object.entries(ports).map(([res, dir]) => {
-          const on = !!exitBeltOn(game.myNation, struct, dir);
-          return `<div class="port-row"><span class="port-dir">${DIR_NAMES[dir]}쪽 ${DIR_ARROW[dir]}</span>
-            <span class="port-res">${resIcon(res)}${RESOURCES[res]?.name || res}</span>
-            <span class="${on ? 'port-on' : 'dim'}">${on ? '벨트 연결됨' : '벨트 없음'}</span></div>`;
-        }).join('') + `</div>`;
-    }
     const outKeys = Object.keys(struct.outputBuffer || {}).filter(k => struct.outputBuffer[k] > 0);
     if (outKeys.length) {
       html += `<div class="inv-actions">` + outKeys.map(r =>
@@ -1121,6 +1105,11 @@ function renderInventoryHtml(struct, def) {
     }
     html += `</div>`;
   }
+
+  // 벨트 배출구 — 밖으로 나가는 벨트로 무엇이 어느 면으로 빠져나갈지 정한다.
+  // 창고·수도뿐 아니라 농지·축사·광산·공장에도 붙는다 (농지 옆을 지나는 벨트가
+  // 곡식을 다 빼가는 걸 막으려면 보관 구조물만으로는 부족했다).
+  if (hasBeltOutput(struct.key)) html += renderOutFilterHtml(struct, def);
 
   // 투입 버퍼 — 레시피 재료나 발전소 연료를 손으로 채워 넣는 곳
   const wantsInput = (def.recipes && Object.keys(def.recipes).length) || struct.key === 'power_plant' || struct.key === 'outpost';
@@ -1162,35 +1151,49 @@ function renderInventoryHtml(struct, def) {
 }
 
 /**
- * 창고·수도의 벨트 배출구 UI (동·남·서·북 네 면).
- * 창고에 "밖으로 나가는" 벨트를 붙이면 재고가 그 벨트로 빠져나간다. 수도처럼
- * 여러 자원을 담는 창고는 면마다 자원을 지정해 원하는 것만 뽑아낼 수 있다.
+ * 벨트 배출구 UI (동·남·서·북 네 면).
+ * "밖으로 나가는" 벨트를 붙이면 그 면으로 자원이 빠져나간다. 면마다
+ *   · 자동      — 자동 배정된 자원(정제소·축사처럼 산출이 둘일 때) 또는 아무거나
+ *   · 특정 자원 — 그 자원만
+ *   · 연결 끊기 — 아무것도 안 나감
+ * 을 고를 수 있다. 창고·수도와 농지·축사·광산·공장이 같은 UI를 쓴다.
  */
 function renderOutFilterHtml(struct, def) {
-  const rate = LOGISTICS.warehouseBeltRate * struct.level;
-  const kinds = Object.keys(struct.store || {}).filter(k => struct.store[k] > 0);
+  const isStorage = def.storageCapacity > 0;
+  const ports = outputPorts(struct);
   const filters = struct.outFilter || {};
-  // 한 종류만 담는 창고도 "연결 끊기"는 필요하므로 선택 상자는 항상 보여준다.
+
+  // 고를 수 있는 자원: 창고면 지금 담긴 것, 생산 구조물이면 지금 나오는 산출물
+  const choices = isStorage
+    ? Object.keys(struct.store || {}).filter(k => struct.store[k] > 0)
+    : [...new Set([...structOutputs(struct),
+                   ...Object.keys(struct.outputBuffer || {}).filter(k => struct.outputBuffer[k] > 0)])];
+  for (const v of Object.values(filters)) {           // 지금 안 나와도 지정은 유지
+    if (v && v !== BELT_OFF && !choices.includes(v)) choices.push(v);
+  }
+
   // 일괄 버튼은 네 면이 **모두** 끊긴 상태에서만 "다시 연결"로 바뀐다 — 한 면만
   // 끊어둔 상태에서 "모두 끊기"를 누르려는데 버튼이 반대로 뒤집혀 있으면 곤란하다.
   const allOff = [0, 1, 2, 3].every(d => filters[d] === BELT_OFF);
+  const rateTxt = isStorage ? ` (매 틱 최대 ${LOGISTICS.warehouseBeltRate * struct.level})` : '';
 
-  let html = `<div class="inv-block"><div class="inv-title">벨트 배출구 (매 틱 최대 ${rate})</div>
-    <div class="pd dim">밖으로 나가는 방향의 벨트를 붙이면 재고가 그 벨트로 빠져나갑니다.
-      내보내고 싶지 않은 면은 <b>연결 끊기</b>로 막아둘 수 있습니다.</div>
+  let html = `<div class="inv-block"><div class="inv-title">벨트 배출구${rateTxt}</div>
+    <div class="pd dim">밖으로 나가는 방향의 벨트를 붙이면 그 면으로 빠져나갑니다.${
+      ports ? ' 산출물이 두 가지라 면마다 나가는 자원이 <b>자동으로</b> 나뉩니다.' : ''
+    } 내보내고 싶지 않은 면은 <b>연결 끊기</b>로 막아둘 수 있습니다.</div>
     <div class="port-list">`;
   for (let dir = 0; dir < DIR_NAMES.length; dir++) {
+    const f = faceSetting(struct, dir, ports);
     const on = !!exitBeltOn(game.myNation, struct, dir);
-    const only = filters[dir];
-    const off = only === BELT_OFF;
-    const choices = [...kinds];
-    if (only && only !== BELT_OFF && !choices.includes(only)) choices.push(only);  // 비어 있어도 지정은 유지
-    const sel = `<select class="port-sel${off ? ' off' : ''}" data-out-dir="${dir}">
-      <option value=""${!only ? ' selected' : ''}>전체</option>
-      <option value="${BELT_OFF}"${off ? ' selected' : ''}>⛔ 연결 끊기</option>` + choices.map(r =>
-      `<option value="${r}"${only === r ? ' selected' : ''}>${RESOURCES[r]?.name || r}</option>`).join('') + `</select>`;
+    const autoLabel = f.mode === 'auto' && f.res ? `자동 (${RESOURCES[f.res]?.name || f.res})`
+      : (ports ? '자동 (내보내지 않음)' : '자동 (전체)');
+    const sel = `<select class="port-sel${f.mode === 'off' ? ' off' : ''}" data-out-dir="${dir}">
+      <option value=""${f.mode === 'auto' ? ' selected' : ''}>${autoLabel}</option>
+      <option value="${BELT_OFF}"${f.mode === 'off' ? ' selected' : ''}>⛔ 연결 끊기</option>` +
+      choices.map(r => `<option value="${r}"${f.mode === 'res' && f.res === r ? ' selected' : ''}>${
+        RESOURCES[r]?.name || r}만</option>`).join('') + `</select>`;
 
-    const state = off ? '<span class="port-off">끊김</span>'
+    const state = f.mode === 'off' ? '<span class="port-off">끊김</span>'
       : `<span class="${on ? 'port-on' : 'dim'}">${on ? '벨트 연결됨' : '벨트 없음'}</span>`;
     html += `<div class="port-row"><span class="port-dir">${DIR_NAMES[dir]}쪽 ${DIR_ARROW[dir]}</span>
       ${sel}${state}</div>`;
@@ -1229,7 +1232,7 @@ function wireInventoryActions(panel, struct, x, y) {
   });
 
   // 벨트 배출구: 이 면으로 내보낼 자원을 고른다 (빈 값이면 아무거나, BELT_OFF면 끊기)
-  const filterLabel = (res) => res === BELT_OFF ? '연결 끊김' : (res ? (RESOURCES[res]?.name || res) : '전체');
+  const filterLabel = (res) => res === BELT_OFF ? '연결 끊김' : (res ? (RESOURCES[res]?.name || res) : '자동');
   panel.querySelectorAll('[data-out-dir]').forEach(sel => {
     sel.addEventListener('change', () => {
       const dir = Number(sel.dataset.outDir);

@@ -9,7 +9,7 @@
 // 까지 옮겨야 국고에 잡히고 건설·연구·모집 비용으로 쓸 수 있다.
 // ============================================================
 import { STRUCTURES, POWER_REQUIRED_CATEGORIES, DIR_VECT, beltThroughput, LOGISTICS, getOutputCapacity, isBeltKey,
-         CROPS, ANIMALS, pickPowerFuel, outputPorts, splitterExits, BELT_OFF } from './data.js';
+         CROPS, ANIMALS, pickPowerFuel, splitterExits, BELT_OFF, facesForOutput } from './data.js';
 import { getTile } from './world.js';
 import { footprintTiles, tileKey, structureAt, getTerritoryRadius,
          depositInto, withdrawFrom, recomputeStock, finishExpedition } from './logic.js';
@@ -195,23 +195,18 @@ function drainOutputToBelt(nation, s, def) {
   const entries = Object.entries(s.outputBuffer).filter(([, v]) => v > 0);
   if (!entries.length) return;
 
-  // 두 가지가 한꺼번에 나오는 구조물은 산출물마다 배출구(면)가 정해져 있다.
+  // 자원마다 나갈 수 있는 면이 정해져 있다 (자동 배정 + 플레이어 설정).
   // 그 면에 벨트가 없으면 그 자원은 나가지 못한다 — 라인이 섞이지 않게.
-  const ports = outputPorts(s);
-  let anyBelt;   // 배출구가 없는 자원(레시피를 바꾸기 전에 남은 것)용
   for (const [res, have] of entries) {
-    let belt;
-    if (ports && ports[res] != null) {
-      belt = findAdjacentBelt(nation, s, def, true, ports[res]);
-    } else {
-      if (anyBelt === undefined) anyBelt = findAdjacentBelt(nation, s, def, true);
-      belt = anyBelt;
-    }
-    if (!belt) continue;
-    const moved = pushIntoBeltChain(nation, belt, res, have);
-    if (moved > 0) {
-      s.outputBuffer[res] -= moved;
-      if (s.outputBuffer[res] <= 0) delete s.outputBuffer[res];
+    for (const dir of facesForOutput(s, res)) {
+      const belt = findAdjacentBelt(nation, s, def, true, dir);
+      if (!belt) continue;
+      const moved = pushIntoBeltChain(nation, belt, res, have);
+      if (moved > 0) {
+        s.outputBuffer[res] -= moved;
+        if (s.outputBuffer[res] <= 0) delete s.outputBuffer[res];
+        break;   // 한 자원은 한 면으로만 내보낸다 (예전과 같은 처리량)
+      }
     }
   }
 }
